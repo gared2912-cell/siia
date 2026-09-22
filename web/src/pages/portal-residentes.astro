@@ -1,0 +1,108 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { photo } from '../data/images';
+import { appFeatures, site, waLink } from '../data/site';
+
+const portal = site.residentsPortalUrl;
+const quick = [
+  { icon: 'contables', title: 'Recibos y estado de cuenta', text: 'Consulta y descarga tus recibos de mantenimiento.' },
+  { icon: 'alert', title: 'Reporte de fallas e incidentes', text: 'Reporta y da seguimiento a incidentes en áreas comunes.' },
+  { icon: 'proyectos', title: 'Reserva de amenidades', text: 'Agenda áreas comunes de tu condominio.' },
+  { icon: 'user', title: 'Registro de visitas', text: 'Registra visitas y servicios con alerta a caseta.' },
+];
+---
+
+<Base
+  title="Acceso a residentes"
+  description="Portal para residentes de condominios administrados por SIIA: recibos, estados de cuenta, reporte de fallas, reservas de amenidades y comunicados."
+>
+  <PageHero
+    crumb="Acceso a residentes"
+    title="Portal de residentes"
+    lead="Tu administración a un click: recibos, estados de cuenta, reportes, visitas y comunicados de tu condominio."
+    image={photo('app-tics')}
+  >
+    <div class="btn-row portal-cta">
+      {
+        portal ? (
+          <a href={portal} class="btn btn--light" target="_blank" rel="noopener">
+            <Icon name="lock" />
+            Ingresar a la plataforma
+          </a>
+        ) : (
+          <a
+            href={waLink('Hola SIIA, soy residente y quiero solicitar mi acceso a la app de mi condominio. Condominio: ___ · Casa/Depto: ___')}
+            class="btn btn--light"
+            target="_blank"
+            rel="noopener"
+          >
+            <Icon name="lock" />
+            Solicitar mi acceso
+          </a>
+        )
+      }
+      <a href="/contacto/" class="btn btn--outline-light">Necesito ayuda</a>
+    </div>
+  </PageHero>
+
+  <section class="section">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Para residentes</span>
+        <h2>Todo lo de tu condominio en un solo lugar</h2>
+        <p class="lead">
+          La app de SIIA conecta a residentes, vigilancia y administración. Si tu condominio es administrado por SIIA,
+          solicita tus datos de acceso a la administración.
+        </p>
+      </div>
+      <div class="grid grid-4">
+        {
+          quick.map((q) => (
+            <article class="card reveal">
+              <div class="icon-badge">
+                <Icon name={q.icon} />
+              </div>
+              <h3>{q.title}</h3>
+              <p class="muted">{q.text}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--mint">
+    <div class="container features">
+      <div class="reveal">
+        <span class="eyebrow">TIC's</span>
+        <h2>App para residentes, vigilantes y administración</h2>
+        <p class="lead">Funciones disponibles para los condominios administrados por SIIA.</p>
+      </div>
+      <ul class="check-list check-list--cols reveal">
+        {appFeatures.map((f) => <li>{f}</li>)}
+      </ul>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .portal-cta {
+    margin-top: 28px;
+  }
+  .muted {
+    color: var(--muted);
+    margin: 0;
+  }
+  .features {
+    display: grid;
+    gap: 32px;
+  }
+  @media (min-width: 960px) {
+    .features {
+      grid-template-columns: 0.9fr 1.1fr;
+      align-items: center;
+    }
+  }
+</style>

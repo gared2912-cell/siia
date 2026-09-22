@@ -1,0 +1,15 @@
+# Documentos internos del cliente (presentación, propuesta, matriz): no se publican en el repositorio
+Docs/
+
+# Dependencias y compilados
+node_modules/
+dist/
+.astro/
+
+# Variables de entorno
+.env
+.env.*
+
+# Sistema
+.DS_Store
+Thumbs.db

@@ -1,0 +1,48 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site';
+---
+
+<Base title="Términos y condiciones" description="Términos y condiciones de uso del sitio web de SIIA.">
+  <section class="section">
+    <div class="container prose">
+      <p class="draft-banner">
+        <strong>Borrador.</strong> Este texto es una plantilla y debe ser revisado por el área legal de SIIA antes de publicarse
+        en producción.
+      </p>
+      <h1>Términos y condiciones de uso</h1>
+      <p>
+        Al acceder y utilizar este sitio web, usted acepta los presentes términos y condiciones. Si no está de acuerdo con
+        ellos, le pedimos no utilizar el sitio.
+      </p>
+
+      <h2>Uso del sitio</h2>
+      <p>
+        El contenido de este sitio tiene fines informativos sobre los servicios de administración de condominios de SIIA.
+        Usted se compromete a usar el sitio de forma lícita y a proporcionar información veraz en los formularios.
+      </p>
+
+      <h2>Cotizaciones</h2>
+      <p>
+        Las cotizaciones solicitadas a través del sitio son estimaciones sin compromiso. Los alcances, precios y condiciones
+        definitivos se establecen en la propuesta formal y en el contrato de prestación de servicios correspondiente.
+      </p>
+
+      <h2>Propiedad intelectual</h2>
+      <p>
+        El logotipo, la marca SIIA, los textos y el diseño de este sitio son propiedad de SIIA o se usan con autorización.
+        Queda prohibida su reproducción sin consentimiento por escrito.
+      </p>
+
+      <h2>Enlaces a terceros</h2>
+      <p>
+        Este sitio puede contener enlaces a plataformas de terceros (por ejemplo, WhatsApp o la plataforma de residentes).
+        SIIA no se hace responsable del contenido ni de las políticas de dichos sitios.
+      </p>
+
+      <h2>Contacto</h2>
+      <p>Para cualquier duda sobre estos términos, escríbanos a <a href={`mailto:${site.email}`}>{site.email}</a>.</p>
+      <p class="note">Última actualización: [FECHA PENDIENTE].</p>
+    </div>
+  </section>
+</Base>

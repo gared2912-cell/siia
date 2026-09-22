@@ -1,0 +1,64 @@
+---
+import Base from '../layouts/Base.astro';
+import { site } from '../data/site';
+---
+
+<Base title="Aviso de privacidad" description="Aviso de privacidad de SIIA · Sistemas Integrales Inmobiliarios y de Administración.">
+  <section class="section">
+    <div class="container prose">
+      <p class="draft-banner">
+        <strong>Borrador.</strong> Este texto es una plantilla y debe ser revisado por el área legal de SIIA antes de publicarse
+        en producción. Faltan la razón social y el domicilio del responsable.
+      </p>
+      <h1>Aviso de privacidad</h1>
+      <p>
+        <strong>{site.legalName}</strong> (en adelante, "SIIA"), con domicilio en [DOMICILIO PENDIENTE], es responsable del
+        tratamiento de los datos personales que nos proporcione, conforme a la Ley Federal de Protección de Datos
+        Personales en Posesión de los Particulares y demás normativa aplicable.
+      </p>
+
+      <h2>Datos personales que recabamos</h2>
+      <ul>
+        <li>Datos de identificación y contacto: nombre, teléfono y correo electrónico.</li>
+        <li>Datos del inmueble: nombre del condominio o fraccionamiento, ubicación y número de unidades.</li>
+        <li>Información que usted comparta voluntariamente en los formularios o mensajes.</li>
+      </ul>
+      <p>SIIA no solicita datos personales sensibles a través de este sitio web.</p>
+
+      <h2>Finalidades del tratamiento</h2>
+      <p>Finalidades primarias:</p>
+      <ul>
+        <li>Atender solicitudes de información, cotizaciones y diagnósticos.</li>
+        <li>Dar seguimiento a reportes de residentes y urgencias operativas.</li>
+        <li>Gestionar la relación con proveedores.</li>
+      </ul>
+      <p>
+        Finalidades secundarias: enviar información sobre servicios de SIIA. Si no desea que sus datos se usen para estas
+        finalidades, puede indicarlo escribiendo a <a href={`mailto:${site.email}`}>{site.email}</a>.
+      </p>
+
+      <h2>Transferencias</h2>
+      <p>
+        SIIA no transfiere sus datos personales a terceros sin su consentimiento, salvo en los casos previstos por la ley.
+      </p>
+
+      <h2>Derechos ARCO</h2>
+      <p>
+        Usted puede acceder, rectificar o cancelar sus datos personales, así como oponerse a su tratamiento o revocar su
+        consentimiento, enviando su solicitud a <a href={`mailto:${site.email}`}>{site.email}</a>. La solicitud debe incluir su
+        nombre, un medio para comunicarle la respuesta, documentos que acrediten su identidad y la descripción clara de los
+        datos y del derecho que desea ejercer.
+      </p>
+
+      <h2>Uso de cookies</h2>
+      <p>
+        Este sitio puede utilizar cookies y tecnologías similares para su funcionamiento y para obtener estadísticas de
+        uso. Puede deshabilitarlas desde la configuración de su navegador.
+      </p>
+
+      <h2>Cambios al aviso de privacidad</h2>
+      <p>Cualquier modificación a este aviso se publicará en esta misma página.</p>
+      <p class="note">Última actualización: [FECHA PENDIENTE].</p>
+    </div>
+  </section>
+</Base>

@@ -1,0 +1,24 @@
+---
+import { Image } from 'astro:assets';
+import type { ImageMetadata } from 'astro';
+
+interface Props {
+  title: string;
+  lead?: string;
+  crumb: string;
+  image: ImageMetadata;
+}
+const { title, lead, crumb, image } = Astro.props;
+---
+
+<section class="page-hero">
+  <Image src={image} alt="" class="page-hero__img" widths={[640, 1024, 1600]} sizes="100vw" loading="eager" />
+  <div class="container">
+    <nav class="breadcrumb" aria-label="Ruta de navegación">
+      <a href="/">Inicio</a><span aria-hidden="true">/</span><span aria-current="page">{crumb}</span>
+    </nav>
+    <h1>{title}</h1>
+    {lead && <p>{lead}</p>}
+    <slot />
+  </div>
+</section>

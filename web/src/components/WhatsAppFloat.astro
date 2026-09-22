@@ -1,0 +1,154 @@
+---
+import Icon from './Icon.astro';
+import { waLink } from '../data/site';
+
+// Selección de canal (Propuesta, sección 4). Ambos canales usan el mismo número hasta que se confirme uno por área.
+const channels = [
+  {
+    title: 'Cotizar administración',
+    text: 'Quiero información para mi condominio',
+    href: waLink('Hola SIIA, me interesa cotizar la administración de mi condominio.'),
+  },
+  {
+    title: 'Soy residente',
+    text: 'Dudas, pagos o reportes',
+    href: waLink('Hola SIIA, soy residente y necesito apoyo con: '),
+  },
+  {
+    title: 'Proveedores',
+    text: 'Ofrecer mis servicios',
+    href: waLink('Hola SIIA, soy proveedor y me gustaría ofrecer mis servicios.'),
+  },
+];
+---
+
+<div class="wa" data-wa>
+  <div class="wa__panel" id="wa-panel" role="dialog" aria-labelledby="wa-title" hidden data-wa-panel>
+    <div class="wa__head">
+      <p id="wa-title" class="wa__title">¿Cómo te ayudamos?</p>
+      <p class="wa__sub">Elige un canal y te atendemos por WhatsApp.</p>
+    </div>
+    <ul class="wa__list">
+      {
+        channels.map((c) => (
+          <li>
+            <a href={c.href} target="_blank" rel="noopener" class="wa__option">
+              <span>
+                <strong>{c.title}</strong>
+                <small>{c.text}</small>
+              </span>
+              <Icon name="arrow" />
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+  <button class="wa__btn" type="button" aria-expanded="false" aria-controls="wa-panel" data-wa-toggle>
+    <Icon name="whatsapp" />
+    <span class="sr-only">Abrir chat de WhatsApp</span>
+  </button>
+</div>
+
+<script>
+  const btn = document.querySelector<HTMLButtonElement>('[data-wa-toggle]');
+  const panel = document.querySelector<HTMLElement>('[data-wa-panel]');
+  const set = (open: boolean) => {
+    if (!btn || !panel) return;
+    btn.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+  };
+  btn?.addEventListener('click', () => set(panel?.hidden ?? false));
+  document.addEventListener('keydown', (e) => e.key === 'Escape' && set(false));
+  document.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('[data-wa]')) set(false);
+  });
+</script>
+
+<style>
+  .wa {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+  }
+  .wa__btn {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: 0;
+    background: #25d366;
+    color: #fff;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    box-shadow: 0 10px 24px -8px rgb(0 0 0 / 0.4);
+    transition: transform 0.15s;
+  }
+  .wa__btn:hover {
+    transform: scale(1.06);
+  }
+  .wa__btn :global(svg) {
+    width: 32px;
+    height: 32px;
+  }
+  .wa__panel {
+    width: min(320px, calc(100vw - 32px));
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 50px -16px rgb(47 52 80 / 0.45);
+    overflow: hidden;
+  }
+  .wa__head {
+    background: #128c7e;
+    color: #fff;
+    padding: 16px 18px;
+  }
+  .wa__title {
+    font-family: var(--font-title);
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin: 0;
+  }
+  .wa__sub {
+    margin: 2px 0 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+  }
+  .wa__list {
+    list-style: none;
+    margin: 0;
+    padding: 8px;
+  }
+  .wa__option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 12px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--ink);
+  }
+  .wa__option:hover {
+    background: var(--mint-wash);
+  }
+  .wa__option strong {
+    display: block;
+    color: var(--slate);
+  }
+  .wa__option small {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .wa__option :global(svg) {
+    width: 18px;
+    height: 18px;
+    color: var(--teal-dark);
+    flex: none;
+  }
+</style>

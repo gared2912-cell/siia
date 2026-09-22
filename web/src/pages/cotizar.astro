@@ -1,0 +1,220 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { photo } from '../data/images';
+import { propertyTypes, quoteNote, services, site } from '../data/site';
+
+const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarrollador / constructora', 'Otro'];
+---
+
+<Base
+  title="Cotizar administración de condominio"
+  description="Cotiza sin costo la administración de tu condominio o fraccionamiento. Te preparamos una propuesta a la medida de tu presupuesto."
+>
+  <PageHero
+    crumb="Cotizar"
+    title="Cotiza la administración de tu condominio"
+    lead={`${quoteNote} El diagnóstico es sin costo y sin compromiso.`}
+    image={photo('cuota-mantenimiento')}
+  />
+
+  <section class="section section--soft">
+    <div class="container quote">
+      <form
+        class="card form quote__form"
+        data-lead-form
+        data-subject="Quiero cotizar la administración de mi condominio"
+        data-whatsapp={site.whatsapp}
+      >
+        <h2 class="quote__title">1. Tu desarrollo</h2>
+        <div class="form-row">
+          <div class="field">
+            <label for="tipo">Tipo de desarrollo *</label>
+            <select id="tipo" name="tipo" required>
+              <option value="" disabled selected>Selecciona una opción</option>
+              {propertyTypes.map((t) => <option>{t}</option>)}
+            </select>
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="unidades">Número de casas o departamentos *</label>
+            <input id="unidades" name="unidades" type="number" inputmode="numeric" min="1" max="10000" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="desarrollo">Nombre del condominio o fraccionamiento</label>
+            <input id="desarrollo" name="desarrollo" type="text" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="ubicacion">Municipio / ciudad *</label>
+            <input id="ubicacion" name="ubicacion" type="text" autocomplete="address-level2" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <fieldset class="field">
+          <legend>¿Actualmente cuentan con administración?</legend>
+          <div class="chips">
+            <label class="chip"><input type="radio" name="administracion_actual" value="Sí, externa" /><span>Sí, externa</span></label>
+            <label class="chip"><input type="radio" name="administracion_actual" value="Sí, autoadministrado" /><span>Autoadministrado</span></label>
+            <label class="chip"><input type="radio" name="administracion_actual" value="No" /><span>No</span></label>
+          </div>
+        </fieldset>
+        <fieldset class="field">
+          <legend>Servicios de interés</legend>
+          <span class="hint">Elige todos los que apliquen.</span>
+          <div class="chips">
+            {
+              services.map((s) => (
+                <label class="chip">
+                  <input type="checkbox" name="servicios" value={s.title} />
+                  <span>{s.title}</span>
+                </label>
+              ))
+            }
+          </div>
+        </fieldset>
+
+        <h2 class="quote__title">2. Tus datos</h2>
+        <div class="form-row">
+          <div class="field">
+            <label for="nombre">Nombre completo *</label>
+            <input id="nombre" name="nombre" type="text" autocomplete="name" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="rol">Soy… *</label>
+            <select id="rol" name="rol" required>
+              <option value="" disabled selected>Selecciona una opción</option>
+              {roles.map((r) => <option>{r}</option>)}
+            </select>
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="telefono">Teléfono / WhatsApp *</label>
+            <input id="telefono" name="telefono" type="tel" autocomplete="tel" inputmode="tel" pattern="[0-9 +()-]{10,}" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="correo">Correo electrónico</label>
+            <input id="correo" name="correo" type="email" autocomplete="email" />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="comentarios">Cuéntanos más (opcional)</label>
+          <textarea id="comentarios" name="comentarios" placeholder="Amenidades, problemática actual, fecha en la que requieren el servicio…"></textarea>
+        </div>
+        <label class="consent">
+          <input type="checkbox" name="consentimiento" required />
+          <span>
+            Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a> y autorizo que SIIA me contacte
+            para darle seguimiento a mi solicitud.
+          </span>
+        </label>
+        <button class="btn" type="submit">Solicitar cotización <Icon name="arrow" /></button>
+        <p class="form-status" role="status" hidden data-status></p>
+      </form>
+
+      <aside class="quote__aside">
+        <div class="card">
+          <h2 class="quote__title">¿Qué sigue?</h2>
+          <ol class="next">
+            <li><strong>Te contactamos</strong> para conocer tu desarrollo y sus necesidades.</li>
+            <li><strong>Diagnóstico sin costo:</strong> analizamos los gastos y la operación del condominio.</li>
+            <li><strong>Propuesta a la medida</strong> que presentamos a la mesa directiva.</li>
+          </ol>
+        </div>
+        <div class="card aside-contact">
+          <h2 class="quote__title">¿Prefieres llamarnos?</h2>
+          {
+            site.phones.map((p) => (
+              <a href={`tel:${p.tel}`}>
+                <Icon name="phone" />
+                {p.label}
+              </a>
+            ))
+          }
+          <a href={`mailto:${site.email}`}><Icon name="mail" />{site.email}</a>
+        </div>
+      </aside>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { initLeadForms } from '../scripts/lead-form';
+  initLeadForms();
+
+  // Precarga desde el cotizador express de la página de inicio (?tipo=…&unidades=…)
+  const params = new URLSearchParams(location.search);
+  const tipo = params.get('tipo');
+  const unidades = params.get('unidades');
+  const tipoSel = document.querySelector<HTMLSelectElement>('#tipo');
+  if (tipo && tipoSel && [...tipoSel.options].some((o) => o.value === tipo)) tipoSel.value = tipo;
+  if (unidades && /^\d+$/.test(unidades)) (document.querySelector('#unidades') as HTMLInputElement).value = unidades;
+</script>
+
+<style>
+  .quote {
+    display: grid;
+    gap: 28px;
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .quote {
+      grid-template-columns: 1.6fr 0.9fr;
+    }
+    .quote__aside {
+      position: sticky;
+      top: calc(var(--header-h) + 24px);
+    }
+  }
+  .quote__form {
+    gap: 22px;
+  }
+  .quote__title {
+    font-size: 1.35rem;
+    margin: 0;
+  }
+  .quote__form .quote__title:not(:first-child) {
+    margin-top: 12px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+  }
+  .quote__form .btn {
+    justify-self: start;
+  }
+  .quote__aside {
+    display: grid;
+    gap: 20px;
+  }
+  .next {
+    margin: 16px 0 0;
+    padding-left: 1.2em;
+    display: grid;
+    gap: 12px;
+  }
+  .next strong {
+    color: var(--slate);
+  }
+  .aside-contact {
+    display: grid;
+    gap: 10px;
+  }
+  .aside-contact a {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .aside-contact :global(svg) {
+    width: 18px;
+    height: 18px;
+  }
+</style>

@@ -1,0 +1,34 @@
+---
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+---
+
+<Base title="Página no encontrada">
+  <section class="section">
+    <div class="container notfound">
+      <p class="notfound__code">404</p>
+      <h1>No encontramos esta página</h1>
+      <p class="lead">Es posible que el enlace haya cambiado. Te ayudamos a encontrar lo que buscas.</p>
+      <div class="btn-row">
+        <a href="/" class="btn">Ir al inicio <Icon name="arrow" /></a>
+        <a href="/servicios/" class="btn btn--ghost">Ver servicios</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .notfound {
+    text-align: center;
+    display: grid;
+    justify-items: center;
+  }
+  .notfound__code {
+    font-family: var(--font-title);
+    font-size: clamp(5rem, 16vw, 9rem);
+    font-weight: 700;
+    line-height: 1;
+    color: var(--mint-soft);
+    margin: 0;
+  }
+</style>

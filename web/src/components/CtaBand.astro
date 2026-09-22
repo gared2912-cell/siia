@@ -1,0 +1,33 @@
+---
+import Icon from './Icon.astro';
+import { waLink } from '../data/site';
+
+interface Props {
+  title?: string;
+  text?: string;
+}
+const {
+  title = 'Agenda un diagnóstico sin costo para tu condominio',
+  text = 'Analizamos las necesidades y gastos de tu condominio y te presentamos una propuesta a la medida de tu presupuesto.',
+} = Astro.props;
+---
+
+<section class="section">
+  <div class="container">
+    <div class="cta-band reveal">
+      <div>
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </div>
+      <div class="btn-row">
+        <a href="/cotizar/" class="btn btn--light">Cotizar administración <Icon name="arrow" /></a>
+        <a
+          href={waLink('Hola SIIA, me gustaría agendar un diagnóstico sin costo para mi condominio.')}
+          class="btn btn--outline-light"
+          target="_blank"
+          rel="noopener"><Icon name="whatsapp" />WhatsApp</a
+        >
+      </div>
+    </div>
+  </div>
+</section>

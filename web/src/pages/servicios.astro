@@ -1,0 +1,234 @@
+---
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import CtaBand from '../components/CtaBand.astro';
+import { photo } from '../data/images';
+import { maintenanceFee, quoteNote, services } from '../data/site';
+---
+
+<Base
+  title="Servicios de administración de condominios"
+  description="Servicios administrativos, operativos, contables, legales, sociales, capacitaciones y proyectos para condominios y fraccionamientos. Cotizamos a la medida de tu presupuesto."
+>
+  <PageHero
+    crumb="Servicios"
+    title="Servicios de administración de condominios"
+    lead="Gestión integral en siete áreas para que tu condominio funcione con orden, transparencia y armonía."
+    image={photo('administrativo-2')}
+  />
+
+  <nav class="subnav" aria-label="Áreas de servicio">
+    <div class="container">
+      <ul>
+        {
+          services.map((s) => (
+            <li>
+              <a href={`#${s.id}`}>
+                <span>{s.num}</span>
+                {s.title}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </nav>
+
+  {
+    services.map((s, i) => (
+      <section id={s.id} class:list={['section', 'svc', { 'section--soft': i % 2 === 1 }]}>
+        <div class:list={['container', 'svc__grid', { 'svc__grid--flip': i % 2 === 1 }]}>
+          <div class="svc__media reveal">
+            <Image src={photo(s.image)} alt="" widths={[480, 800]} sizes="(min-width: 960px) 40vw, 100vw" />
+            <span class="svc__num" aria-hidden="true">
+              {s.num}
+            </span>
+          </div>
+          <div class="reveal">
+            <div class="svc__title">
+              <div class="icon-badge">
+                <Icon name={s.id} />
+              </div>
+              <h2>Servicios {s.title.toLowerCase()}</h2>
+            </div>
+            <p class="lead">{s.short}</p>
+            {s.groups.map((g) => (
+              <div class="svc__group">
+                {g.title && <h3>{g.title}</h3>}
+                <ul class="check-list check-list--cols">
+                  {g.items.map((item) => (
+                    <li>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            <p class="note">*{quoteNote}</p>
+          </div>
+        </div>
+      </section>
+    ))
+  }
+
+  <section class="section section--dark">
+    <div class="container fee">
+      <div class="reveal">
+        <span class="eyebrow">Cuota de mantenimiento</span>
+        <h2>Optimizamos los recursos de tu condominio</h2>
+      </div>
+      <ol class="fee__steps">
+        {
+          maintenanceFee.map((t, i) => (
+            <li class="reveal">
+              <span>{String(i + 1).padStart(2, '0')}</span>
+              <p>{t}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <CtaBand />
+</Base>
+
+<style>
+  .subnav {
+    position: sticky;
+    top: var(--header-h);
+    z-index: 40;
+    background: #fff;
+    border-bottom: 1px solid var(--line);
+  }
+  .subnav ul {
+    display: flex;
+    gap: 6px;
+    list-style: none;
+    margin: 0;
+    padding: 10px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .subnav a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-family: var(--font-title);
+    font-weight: 600;
+    color: var(--slate);
+    text-decoration: none;
+  }
+  .subnav a:hover {
+    background: var(--mint-wash);
+    color: var(--teal-dark);
+  }
+  .subnav a span {
+    color: var(--teal-dark);
+    font-weight: 700;
+  }
+  .svc {
+    scroll-margin-top: calc(var(--header-h) + 60px);
+  }
+  .svc__grid {
+    display: grid;
+    gap: clamp(32px, 5vw, 64px);
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .svc__grid {
+      grid-template-columns: 0.85fr 1.15fr;
+    }
+    .svc__grid--flip {
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+    .svc__grid--flip .svc__media {
+      order: 2;
+    }
+    .svc__media {
+      position: sticky;
+      top: calc(var(--header-h) + 90px);
+    }
+  }
+  .svc__media {
+    position: relative;
+  }
+  .svc__media :global(img) {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .svc__num {
+    position: absolute;
+    left: 20px;
+    bottom: -22px;
+    font-family: var(--font-title);
+    font-weight: 700;
+    font-size: 3.2rem;
+    line-height: 1;
+    padding: 12px 20px 6px;
+    border-radius: 14px;
+    background: var(--teal-dark);
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+  }
+  .svc__title {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+  .svc__title .icon-badge {
+    margin: 0;
+    flex: none;
+  }
+  .svc__title h2 {
+    margin: 0;
+  }
+  .svc__group {
+    margin-top: 26px;
+  }
+  .svc__group h3 {
+    font-size: 1.05rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--teal-dark);
+    margin-bottom: 14px;
+  }
+  .svc .note {
+    margin-top: 28px;
+  }
+
+  .fee {
+    display: grid;
+    gap: 40px;
+  }
+  .fee__steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  }
+  .fee__steps li {
+    padding: 26px;
+    border-radius: var(--radius);
+    background: rgb(255 255 255 / 0.06);
+    border: 1px solid rgb(255 255 255 / 0.12);
+  }
+  .fee__steps span {
+    font-family: var(--font-title);
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--mint);
+  }
+  .fee__steps p {
+    margin: 8px 0 0;
+  }
+</style>

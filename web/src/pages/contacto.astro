@@ -1,0 +1,219 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { photo } from '../data/images';
+import { site, waLink } from '../data/site';
+
+// Formulario clasificado (Propuesta, sección F). Se omiten "Informes de compra" y "Vendedor" (venta de propiedades en pausa).
+const reasons = ['Cotización de administración', 'Soy residente de un condominio SIIA', 'Soy proveedor', 'Otro'];
+---
+
+<Base
+  title="Contacto"
+  description="Contacta a SIIA por teléfono, WhatsApp o correo. Cotizaciones, atención a residentes, proveedores y reportes urgentes de mantenimiento."
+>
+  <PageHero
+    crumb="Contacto"
+    title="Hablemos de tu condominio"
+    lead="Escríbenos o llámanos. Te atendemos de forma personalizada por WhatsApp, llamada o correo."
+    image={photo('confort')}
+  />
+
+  <section class="section">
+    <div class="container contact">
+      <div class="contact__info">
+        <div class="grid info-cards">
+          {
+            site.phones.map((p) => (
+              <a class="card info" href={`tel:${p.tel}`}>
+                <div class="icon-badge">
+                  <Icon name="phone" />
+                </div>
+                <span>Teléfono móvil</span>
+                <strong>{p.label}</strong>
+              </a>
+            ))
+          }
+          <a class="card info" href={`mailto:${site.email}`}>
+            <div class="icon-badge"><Icon name="mail" /></div>
+            <span>Correo electrónico</span>
+            <strong>{site.email}</strong>
+          </a>
+          <a class="card info" href={waLink('Hola SIIA, me gustaría recibir información.')} target="_blank" rel="noopener">
+            <div class="icon-badge"><Icon name="whatsapp" /></div>
+            <span>WhatsApp</span>
+            <strong>Escríbenos</strong>
+          </a>
+        </div>
+
+        <div class="urgent">
+          <div class="urgent__icon"><Icon name="alert" /></div>
+          <div>
+            <h2>¿Urgencia operativa en tu condominio?</h2>
+            <p>Fugas, fallas eléctricas, accesos o bombas de agua: repórtalo de inmediato para canalizarlo.</p>
+            <div class="btn-row">
+              <a
+                class="btn btn--sm urgent__btn"
+                href={waLink('URGENCIA OPERATIVA · Condominio: ___ · Ubicación / área: ___ · Descripción: ___')}
+                target="_blank"
+                rel="noopener"><Icon name="whatsapp" />Reportar por WhatsApp</a
+              >
+              <a class="btn btn--sm btn--ghost urgent__call" href={`tel:${site.phones[0].tel}`}><Icon name="phone" />Llamar ahora</a>
+            </div>
+          </div>
+        </div>
+
+        {
+          site.coverage && (
+            <div class="card">
+              <h2 class="h-small">Cobertura</h2>
+              <p>{site.coverage.join(' · ')}</p>
+            </div>
+          )
+        }
+      </div>
+
+      <form class="card form" data-lead-form data-subject="Tengo una consulta desde el sitio web" data-whatsapp={site.whatsapp}>
+        <h2 class="h-small">Envíanos un mensaje</h2>
+        <div class="field">
+          <label for="motivo">Motivo de contacto *</label>
+          <select id="motivo" name="motivo" required>
+            <option value="" disabled selected>Selecciona una opción</option>
+            {reasons.map((r) => <option>{r}</option>)}
+          </select>
+          <span class="error" aria-live="polite"></span>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="c-nombre">Nombre completo *</label>
+            <input id="c-nombre" name="nombre" type="text" autocomplete="name" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="c-condominio">Condominio / empresa</label>
+            <input id="c-condominio" name="condominio" type="text" autocomplete="organization" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="c-telefono">Teléfono / WhatsApp *</label>
+            <input id="c-telefono" name="telefono" type="tel" autocomplete="tel" inputmode="tel" pattern="[0-9 +()-]{10,}" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="c-correo">Correo electrónico</label>
+            <input id="c-correo" name="correo" type="email" autocomplete="email" />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="c-mensaje">Mensaje *</label>
+          <textarea id="c-mensaje" name="mensaje" required></textarea>
+          <span class="error" aria-live="polite"></span>
+        </div>
+        <label class="consent">
+          <input type="checkbox" name="consentimiento" required />
+          <span>Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a>.</span>
+        </label>
+        <button class="btn" type="submit">Enviar mensaje <Icon name="arrow" /></button>
+        <p class="form-status" role="status" hidden data-status></p>
+      </form>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { initLeadForms } from '../scripts/lead-form';
+  initLeadForms();
+</script>
+
+<style>
+  .contact {
+    display: grid;
+    gap: 32px;
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .contact {
+      grid-template-columns: 1fr 1.1fr;
+    }
+  }
+  .contact__info {
+    display: grid;
+    gap: 24px;
+  }
+  .info-cards {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 16px;
+  }
+  .info {
+    display: grid;
+    gap: 2px;
+    text-decoration: none;
+    color: var(--ink);
+    transition:
+      border-color 0.2s,
+      transform 0.2s;
+  }
+  .info:hover {
+    border-color: var(--mint);
+    transform: translateY(-2px);
+  }
+  .info .icon-badge {
+    margin-bottom: 10px;
+    width: 48px;
+    height: 48px;
+  }
+  .info span {
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  .info strong {
+    font-family: var(--font-title);
+    font-size: 1.15rem;
+    color: var(--slate);
+    overflow-wrap: anywhere;
+  }
+  .urgent {
+    display: flex;
+    gap: 18px;
+    padding: 24px;
+    border-radius: var(--radius);
+    background: #fdf1f0;
+    border: 1px solid #f3c9c6;
+  }
+  .urgent__icon {
+    flex: none;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    background: var(--danger);
+    color: #fff;
+  }
+  .urgent__icon :global(svg) {
+    width: 26px;
+    height: 26px;
+  }
+  .urgent h2 {
+    font-size: 1.3rem;
+    margin-bottom: 6px;
+  }
+  .urgent__btn {
+    --btn-bg: var(--danger);
+  }
+  .urgent__btn:hover {
+    --btn-bg: #9f2f2a;
+  }
+  .urgent__call {
+    --btn-fg: var(--danger);
+  }
+  .h-small {
+    font-size: 1.4rem;
+  }
+  .form .btn {
+    justify-self: start;
+  }
+</style>

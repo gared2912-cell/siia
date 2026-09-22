@@ -1,0 +1,697 @@
+---
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+import CtaBand from '../components/CtaBand.astro';
+import Logo from '../components/Logo.astro';
+import logoWhite from '../assets/marca/logo-siia-blanco.png';
+import { photo } from '../data/images';
+import { appFeatures, benefits, maintenanceFee, pillars, propertyTypes, quoteNote, services, site } from '../data/site';
+---
+
+<Base title="SIIA">
+  <!-- HERO -->
+  <section class="hero">
+    <Image
+      src={photo('acceso-fraccionamiento')}
+      alt="Acceso iluminado de un fraccionamiento residencial al anochecer"
+      class="hero__img"
+      widths={[640, 960, 1200]}
+      sizes="100vw"
+      loading="eager"
+      fetchpriority="high"
+    />
+    <div class="hero__plane" aria-hidden="true"></div>
+    <div class="container hero__inner">
+      <div class="hero__copy">
+        <p class="hero__kicker">Administración de condominios y fraccionamientos</p>
+        <h1>Administración transparente, profesional y tecnológica para tu condominio</h1>
+        <p class="hero__lead">{site.slogan}</p>
+        <div class="btn-row">
+          <a href="/cotizar/" class="btn btn--light">Cotizar servicio <Icon name="arrow" /></a>
+          <a href="/portal-residentes/" class="btn btn--outline-light"><Icon name="user" />Acceso a residentes</a>
+        </div>
+        <ul class="hero__facts">
+          <li><Icon name="check" />Registro REPSE</li>
+          <li><Icon name="check" />Reportes mensuales</li>
+          <li><Icon name="check" />App para residentes</li>
+        </ul>
+      </div>
+      <div class="hero__badge" aria-hidden="true">
+        <Logo variant="stacked" tone="white" title="" />
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 PILARES -->
+  <section class="section pillars">
+    <div class="container">
+      <div class="section-head section-head--center reveal">
+        <span class="eyebrow">Nuestra propuesta de valor</span>
+        <h2>Tu condominio en manos de expertos</h2>
+        <p class="lead">
+          Somos un equipo multidisciplinario de expertos en administración de condominios. Trabajamos sobre cuatro
+          pilares para que vivas con confort, certidumbre y plusvalía.
+        </p>
+      </div>
+      <div class="grid grid-4">
+        {
+          pillars.map((p) => (
+            <article class="card pillar reveal">
+              <div class="icon-badge">
+                <Icon name={p.icon} />
+              </div>
+              <h3>{p.title}</h3>
+              <p>{p.text}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- QUIÉNES SOMOS -->
+  <section class="section section--mint about">
+    <div class="container about__grid">
+      <div class="about__media reveal">
+        <Image
+          src={photo('equipo-siia')}
+          alt="Integrante del equipo SIIA trabajando en su laptop"
+          widths={[400, 640]}
+          sizes="(min-width: 900px) 40vw, 100vw"
+        />
+      </div>
+      <div class="reveal">
+        <span class="eyebrow">Quiénes somos</span>
+        <h2>Un aliado para crear confort y plusvalía</h2>
+        <p class="lead">
+          Nos comprometemos a desarrollar soluciones a las necesidades actuales de tu condominio, ajustándonos a su
+          presupuesto y respetando siempre el marco legal.
+        </p>
+        <div class="about__mv">
+          <div>
+            <h3>Misión</h3>
+            <p>
+              Ser un aliado de nuestros clientes para crear confort y plusvalía, desarrollando soluciones a sus
+              necesidades actuales, ajustándonos a sus presupuestos y respetando siempre el marco legal.
+            </p>
+          </div>
+          <div>
+            <h3>Visión</h3>
+            <p>
+              Ser líderes en la administración de condominios, brindando servicios profesionales de alto nivel en
+              asesoría, consultoría, administración y gestión social, con procesos innovadores.
+            </p>
+          </div>
+        </div>
+        <a href="/nosotros/" class="btn btn--ghost">Conoce a SIIA <Icon name="arrow" /></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- BENEFICIOS -->
+  <section class="section">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Beneficios</span>
+        <h2>Lo que gana tu comunidad con SIIA</h2>
+      </div>
+      <div class="grid grid-3">
+        {
+          benefits.map((b) => (
+            <article class="benefit reveal">
+              <Image
+                src={photo(b.image)}
+                alt=""
+                widths={[400, 640]}
+                sizes="(min-width: 1000px) 33vw, 100vw"
+                class="benefit__img"
+              />
+              <div class="benefit__body">
+                <h3>{b.title}</h3>
+                <p>{b.intro}</p>
+                {b.items.length > 0 && (
+                  <ul class="check-list">
+                    {b.items.map((i) => (
+                      <li>{i}</li>
+                    ))}
+                  </ul>
+                )}
+                {b.outro && <p class="benefit__outro">{b.outro}</p>}
+              </div>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICIOS -->
+  <section class="section section--soft">
+    <div class="container">
+      <div class="services-head reveal">
+        <div class="section-head">
+          <span class="eyebrow">Nuestros servicios</span>
+          <h2>Gestión integral en 7 áreas</h2>
+          <p class="lead">{quoteNote}</p>
+        </div>
+        <a href="/servicios/" class="btn btn--ghost">Ver todos los servicios <Icon name="arrow" /></a>
+      </div>
+      <div class="grid grid-3 services">
+        {
+          services.map((s) => (
+            <a href={`/servicios/#${s.id}`} class="card service reveal">
+              <span class="service__num">{s.num}</span>
+              <div class="icon-badge">
+                <Icon name={s.id} />
+              </div>
+              <h3>{s.title}</h3>
+              <p>{s.short}</p>
+              <span class="service__more">
+                Ver detalle <Icon name="arrow" />
+              </span>
+            </a>
+          ))
+        }
+        <a href="/cotizar/" class="card service service--cta reveal">
+          <h3>¿Necesitas algo a la medida?</h3>
+          <p>Armamos un paquete de servicios según las necesidades y el presupuesto de tu condominio.</p>
+          <span class="service__more">
+            Solicitar cotización <Icon name="arrow" />
+          </span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- APP TIC'S -->
+  <section class="section section--dark app">
+    <div class="container app__grid">
+      <div class="reveal">
+        <span class="eyebrow">TIC's · Tu administración a un click</span>
+        <h2>App para residentes, vigilantes y administración</h2>
+        <p class="lead">
+          Toda la información de tu condominio en tu celular: finanzas, visitas, recibos, incidentes y comunicación
+          directa con la caseta y la administración.
+        </p>
+        <ul class="check-list check-list--cols app__list">
+          {appFeatures.map((f) => <li>{f}</li>)}
+        </ul>
+        <a href="/portal-residentes/" class="btn btn--light">Acceso a residentes <Icon name="arrow" /></a>
+      </div>
+      <div class="phone reveal" aria-hidden="true">
+        <div class="phone__screen">
+          <div class="phone__top">
+            <Image src={logoWhite} alt="" width={40} />
+            <span>Mi condominio</span>
+          </div>
+          <div class="phone__card phone__card--hi">
+            <small>Estado de cuenta</small>
+            <strong>Al corriente</strong>
+            <span class="phone__bar"><span></span></span>
+          </div>
+          <div class="phone__tiles">
+            <span><Icon name="user" />Visitas</span>
+            <span><Icon name="contables" />Recibos</span>
+            <span><Icon name="alert" />Incidentes</span>
+            <span><Icon name="mail" />Avisos</span>
+          </div>
+          <div class="phone__card">
+            <small>Comunicado</small>
+            <strong>Mantenimiento de alberca</strong>
+            <em>Programado por la administración</em>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COTIZADOR EXPRESS -->
+  <section class="section quick">
+    <div class="container quick__grid">
+      <div class="reveal">
+        <span class="eyebrow">Cotizador express</span>
+        <h2>Cotiza la administración de tu condominio</h2>
+        <p class="lead">
+          Cuéntanos el tipo de desarrollo y el número de viviendas. Te preparamos una propuesta personalizada, cuidando tu
+          presupuesto.
+        </p>
+        <h3 class="quick__subtitle">Así cuidamos tu cuota de mantenimiento</h3>
+        <ol class="steps">
+          {maintenanceFee.map((t) => <li>{t}</li>)}
+        </ol>
+      </div>
+      <form class="card form quick__form reveal" action="/cotizar/" method="get">
+        <div class="field">
+          <label for="q-tipo">Tipo de desarrollo</label>
+          <select id="q-tipo" name="tipo" required>
+            <option value="" disabled selected>Selecciona una opción</option>
+            {propertyTypes.map((t) => <option>{t}</option>)}
+          </select>
+        </div>
+        <div class="field">
+          <label for="q-unidades">Número de casas o departamentos</label>
+          <input id="q-unidades" name="unidades" type="number" inputmode="numeric" min="1" max="10000" placeholder="Ej. 120" required />
+        </div>
+        <button class="btn" type="submit">Continuar cotización <Icon name="arrow" /></button>
+        <p class="note">Sin costo ni compromiso.</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- Testimonios: se agregarán cuando SIIA comparta comentarios reales de mesas directivas y condóminos. -->
+
+  <CtaBand />
+</Base>
+
+<style>
+  /* HERO */
+  .hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    color: #fff;
+    background: var(--slate-dark);
+  }
+  .hero__img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: -3;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background: linear-gradient(100deg, rgb(24 30 56 / 0.88) 0%, rgb(24 30 56 / 0.62) 45%, rgb(24 30 56 / 0.1) 75%);
+  }
+  /* Plano diagonal teal, como la portada de la presentación */
+  .hero__plane {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: linear-gradient(135deg, rgb(56 203 185 / 0.55), rgb(0 167 167 / 0.35));
+    clip-path: polygon(58% 0, 100% 0, 100% 100%, 88% 100%);
+    mix-blend-mode: screen;
+  }
+  @media (max-width: 959px) {
+    .hero__plane {
+      clip-path: polygon(82% 0, 100% 0, 100% 100%, 96% 100%);
+    }
+  }
+  .hero__inner {
+    display: grid;
+    align-items: center;
+    gap: 40px;
+    min-height: min(82vh, 720px);
+    padding-block: 72px;
+  }
+  @media (min-width: 960px) {
+    .hero__inner {
+      grid-template-columns: 1.5fr 1fr;
+    }
+  }
+  .hero__kicker {
+    font-family: var(--font-title);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--mint);
+  }
+  .hero h1 {
+    color: #fff;
+    max-width: 720px;
+  }
+  .hero__lead {
+    font-size: clamp(1.1rem, 1.8vw, 1.3rem);
+    max-width: 580px;
+    color: #e8ecf5;
+    margin-bottom: 28px;
+  }
+  .hero__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    list-style: none;
+    padding: 0;
+    margin: 32px 0 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .hero__facts li {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hero__facts :global(svg) {
+    width: 20px;
+    height: 20px;
+    color: var(--mint);
+    stroke-width: 3;
+  }
+  .hero__badge {
+    display: none;
+  }
+  @media (min-width: 960px) {
+    .hero__badge {
+      display: grid;
+      place-items: center;
+      justify-self: center;
+      width: 380px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      border: 3px solid rgb(255 255 255 / 0.85);
+      background: rgb(56 203 185 / 0.18);
+      backdrop-filter: blur(2px);
+    }
+    .hero__badge :global(svg) {
+      width: 236px;
+      filter: drop-shadow(0 2px 10px rgb(11 30 50 / 0.35));
+    }
+  }
+
+  /* PILARES */
+  .pillar h3 {
+    margin-bottom: 10px;
+  }
+  .pillar p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  /* QUIÉNES SOMOS */
+  .about__grid {
+    display: grid;
+    gap: clamp(32px, 5vw, 64px);
+    align-items: center;
+  }
+  @media (min-width: 900px) {
+    .about__grid {
+      grid-template-columns: 0.8fr 1.2fr;
+    }
+  }
+  .about__media {
+    position: relative;
+  }
+  .about__media :global(img) {
+    border-radius: var(--radius);
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    width: 100%;
+    box-shadow: var(--shadow);
+  }
+  .about__media::before {
+    content: '';
+    position: absolute;
+    inset: 24px -18px -18px 24px;
+    border-radius: var(--radius);
+    background: var(--mint);
+    z-index: -1;
+    opacity: 0.55;
+  }
+  .about__media {
+    isolation: isolate;
+  }
+  .about {
+    overflow-x: clip;
+  }
+  .about__mv {
+    display: grid;
+    gap: 20px;
+    margin: 28px 0;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  }
+  .about__mv > div {
+    background: #fff;
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    border-top: 4px solid var(--teal);
+  }
+  .about__mv h3 {
+    font-size: 1.1rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .about__mv p {
+    margin: 0;
+    font-size: 0.98rem;
+  }
+
+  /* BENEFICIOS */
+  .benefit {
+    background: #fff;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+  }
+  .benefit__img {
+    width: 100%;
+    aspect-ratio: 3 / 2;
+    object-fit: cover;
+  }
+  .benefit__body {
+    padding: 24px 26px 28px;
+  }
+  .benefit__body h3 {
+    font-size: 1.6rem;
+  }
+  .benefit__outro {
+    margin: 16px 0 0;
+    font-weight: 600;
+    color: var(--teal-dark);
+  }
+
+  /* SERVICIOS */
+  .services-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px 32px;
+    margin-bottom: clamp(32px, 5vw, 56px);
+  }
+  .services-head .section-head {
+    margin: 0;
+  }
+  .service {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+    transition:
+      transform 0.2s,
+      box-shadow 0.2s,
+      border-color 0.2s;
+  }
+  .service:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow);
+    border-color: var(--mint);
+  }
+  .service p {
+    color: var(--muted);
+    flex: 1;
+  }
+  .service__num {
+    position: absolute;
+    top: 20px;
+    right: 24px;
+    font-family: var(--font-title);
+    font-size: 2.4rem;
+    font-weight: 700;
+    color: var(--mint-soft);
+    line-height: 1;
+  }
+  .service__more {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-title);
+    font-weight: 700;
+    color: var(--teal-dark);
+  }
+  .service__more :global(svg) {
+    width: 18px;
+    height: 18px;
+    transition: transform 0.2s;
+  }
+  .service:hover .service__more :global(svg) {
+    transform: translateX(4px);
+  }
+  .service--cta {
+    background: linear-gradient(140deg, var(--teal-deep), var(--teal-dark));
+    border-color: transparent;
+    color: #fff;
+    justify-content: center;
+  }
+  .service--cta h3,
+  .service--cta .service__more {
+    color: #fff;
+  }
+  .service--cta p {
+    color: #d8f4f1;
+    flex: none;
+  }
+
+  /* APP */
+  .app__grid {
+    display: grid;
+    gap: 56px;
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .app__grid {
+      grid-template-columns: 1.3fr 0.7fr;
+    }
+  }
+  .app__list {
+    margin: 28px 0 32px;
+    color: #e3e6ef;
+  }
+  .phone {
+    justify-self: center;
+    width: 270px;
+    padding: 12px;
+    border-radius: 40px;
+    background: #151a30;
+    box-shadow:
+      0 0 0 2px #3b4264,
+      0 30px 60px -20px rgb(0 0 0 / 0.6);
+  }
+  .phone__screen {
+    border-radius: 30px;
+    background: linear-gradient(180deg, var(--teal-dark) 0 150px, #f2f7f8 150px);
+    padding: 20px 16px 24px;
+    display: grid;
+    gap: 14px;
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+  .phone__top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #fff;
+    font-family: var(--font-title);
+    font-weight: 700;
+    font-size: 1rem;
+  }
+  .phone__card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 14px;
+    display: grid;
+    gap: 2px;
+    box-shadow: 0 6px 16px -10px rgb(0 0 0 / 0.3);
+  }
+  .phone__card small {
+    color: var(--muted);
+  }
+  .phone__card strong {
+    color: var(--slate);
+    font-size: 1rem;
+  }
+  .phone__card em {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .phone__bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--mint-soft);
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .phone__bar span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--mint);
+  }
+  .phone__tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .phone__tiles span {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 12px 6px;
+    border-radius: 14px;
+    background: #fff;
+    font-weight: 700;
+    color: var(--slate);
+    box-shadow: 0 6px 16px -10px rgb(0 0 0 / 0.3);
+  }
+  .phone__tiles :global(svg) {
+    width: 22px;
+    height: 22px;
+    color: var(--teal-dark);
+  }
+
+  /* COTIZADOR EXPRESS */
+  .quick__grid {
+    display: grid;
+    gap: 48px;
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .quick__grid {
+      grid-template-columns: 1.2fr 0.8fr;
+    }
+  }
+  .quick__subtitle {
+    margin-top: 32px;
+  }
+  .steps {
+    list-style: none;
+    counter-reset: step;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 16px;
+  }
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 52px;
+    min-height: 36px;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: -2px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--mint-soft);
+    color: var(--teal-deep);
+    font-family: var(--font-title);
+    font-weight: 700;
+  }
+  .quick__form {
+    border-top: 5px solid var(--teal);
+  }
+  @media (min-width: 960px) {
+    .quick__form {
+      position: sticky;
+      top: calc(var(--header-h) + 24px);
+    }
+  }
+  .quick__form .note {
+    margin: 0;
+    text-align: center;
+  }
+</style>

@@ -1,0 +1,114 @@
+---
+// Logotipo SIIA en SVG (nítido a cualquier tamaño).
+// variant="horizontal": marca a la izquierda; a la derecha SIIA y debajo el nombre completo (encabezado)
+// variant="stacked":    marca, SIIA y nombre completo centrados (portada, pie de página)
+import { logoColors, mark, wordmark } from '../data/logo';
+import { site } from '../data/site';
+
+interface Props {
+  variant?: 'horizontal' | 'stacked';
+  tone?: 'color' | 'white';
+  class?: string;
+  title?: string;
+}
+const { variant = 'horizontal', tone = 'color', class: className, title = `SIIA · ${site.fullName}` } = Astro.props;
+
+const main = tone === 'white' ? '#ffffff' : logoColors.teal;
+// La leyenda usa el mismo color que SIIA
+const sub = main;
+
+// "Sistemas Integrales Inmobiliarios y de Administración" en tres líneas equilibradas
+const nameLines = ['Sistemas integrales', 'inmobiliarios y de', 'administración'];
+// Ancho común de las tres líneas (la más larga mide 1705 en Michroma a 100 px)
+const TAG_W = 1800; // 1705 + ~5 % de espaciado para que la primera línea respire
+---
+
+{
+  variant === 'stacked' ? (
+    <svg
+      class:list={['logo-stacked', className]}
+      viewBox="10 50 935 935"
+      role="img"
+      aria-label={title || undefined}
+      aria-hidden={title ? undefined : 'true'}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path transform={`translate(${mark.x} ${mark.y})`} fill={main} d={mark.d} />
+      <g transform={`translate(${wordmark.x} ${wordmark.y})`}>
+        <path d={wordmark.s} fill="none" stroke={main} stroke-width={wordmark.stroke} />
+        <path d={wordmark.fill} fill={main} fill-rule="evenodd" />
+      </g>
+      <text
+        fill={sub}
+        font-family="Michroma, 'Josefin Sans', sans-serif"
+        font-size="46"
+        stroke={sub}
+        stroke-width="1.4"
+      >
+        {
+          nameLines.map((line, i) => (
+            <tspan x={477.5 - (TAG_W * 0.46) / 2} y={846 + i * 59} textLength={TAG_W * 0.46} lengthAdjust="spacing">
+              {line.toUpperCase()}
+            </tspan>
+          ))
+        }
+      </text>
+    </svg>
+  ) : (
+    <span class:list={['logo-h', className]} role="img" aria-label={title}>
+      <svg class="logo-h__mark" viewBox={`0 0 ${mark.w} ${mark.h}`} aria-hidden="true">
+        <path fill={main} d={mark.d} />
+      </svg>
+      <span class="logo-h__text" aria-hidden="true">
+        <svg class="logo-h__word" viewBox={`-2 -2 ${wordmark.w + 4} ${wordmark.h + 4}`}>
+          <path d={wordmark.s} fill="none" stroke={main} stroke-width={wordmark.stroke} />
+          <path d={wordmark.fill} fill={main} fill-rule="evenodd" />
+        </svg>
+        <svg class="logo-h__tag" viewBox={`0 0 ${TAG_W} 340`}>
+          <g fill={sub} stroke={sub} stroke-width="3" font-family="Michroma, 'Josefin Sans', sans-serif" font-size="100">
+            {
+              nameLines.map((line, i) => (
+                <text x="0" y={80 + i * 128} textLength={TAG_W} lengthAdjust="spacing">
+                  {line.toUpperCase()}
+                </text>
+              ))
+            }
+          </g>
+        </svg>
+      </span>
+    </span>
+  )
+}
+
+<style>
+  .logo-stacked {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .logo-h {
+    --logo-h: 60px;
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--logo-h) * 0.2);
+    line-height: 1;
+  }
+  .logo-h__mark {
+    height: var(--logo-h);
+    width: auto;
+    flex: none;
+  }
+  .logo-h__text {
+    display: grid;
+    gap: calc(var(--logo-h) * 0.07);
+  }
+  .logo-h__word {
+    height: calc(var(--logo-h) * 0.44);
+    width: auto;
+  }
+  .logo-h__tag {
+    /* alto 0.5 × proporción del viewBox (TAG_W / 340) */
+    height: calc(var(--logo-h) * 0.5);
+    width: calc(var(--logo-h) * 0.5 * 1800 / 340);
+  }
+</style>

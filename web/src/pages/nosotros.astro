@@ -1,0 +1,210 @@
+---
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import CtaBand from '../components/CtaBand.astro';
+import { photo } from '../data/images';
+import { benefits, site } from '../data/site';
+
+// "Trabajamos para tu confort y bienestar" (Presentación, pág. 17)
+const strengths = [
+  'Reportes y balances',
+  'Proyección de gastos',
+  'Revisión de contratos',
+  'Trámites ante autoridades',
+  'Fortalecimiento de cultura condominal',
+  'Solución de problemas',
+  'Atención a cliente',
+  'Finanzas en orden',
+  'Tu administración a un click',
+  'Proyectos según las necesidades de tu condominio',
+  'Capacitaciones',
+  'Conserjería y limpieza',
+  'Jardinería y paisajismo',
+  'Mantenimiento de albercas',
+  'Sistemas de riego',
+  'Reparaciones generales',
+];
+---
+
+<Base
+  title="Nosotros"
+  description="Somos un equipo multidisciplinario de expertos en administración de condominios. Conoce la misión, visión y compromisos de SIIA."
+>
+  <PageHero
+    crumb="Nosotros"
+    title="Somos un equipo multidisciplinario de expertos en administración de condominios"
+    lead={site.slogan}
+    image={photo('familia-hogar')}
+  />
+
+  <section class="section">
+    <div class="container who">
+      <div class="reveal">
+        <span class="eyebrow">Quiénes somos</span>
+        <h2>Tu aliado para crear confort y plusvalía</h2>
+        <p class="lead">
+          En SIIA administramos condominios y fraccionamientos con un enfoque integral: administrativo, operativo,
+          contable, legal y social. Buscamos siempre lo mejor para ti, tu familia y tu hogar.
+        </p>
+        <ul class="facts">
+          <li>
+            <div class="icon-badge"><Icon name="legal" /></div>
+            <div>
+              <strong>Empresa legalmente constituida</strong>
+              <span>Con registro REPSE en administración de condominios.</span>
+            </div>
+          </li>
+          <li>
+            <div class="icon-badge"><Icon name="capacitaciones" /></div>
+            <div>
+              <strong>Personal altamente capacitado</strong>
+              <span>Expertos en asesoría, consultoría, administración y gestión social.</span>
+            </div>
+          </li>
+          <li>
+            <div class="icon-badge"><Icon name="transparencia" /></div>
+            <div>
+              <strong>Transparencia en la información</strong>
+              <span>Herramientas y reportes que dan certidumbre a cada condómino.</span>
+            </div>
+          </li>
+        </ul>
+      </div>
+      <div class="who__media reveal">
+        <Image src={photo('equipo-siia')} alt="Integrante del equipo SIIA" widths={[400, 700]} sizes="(min-width: 960px) 40vw, 100vw" />
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--mint">
+    <div class="container grid grid-2">
+      <article class="card mv reveal">
+        <span class="eyebrow">Misión</span>
+        <p>
+          Ser un aliado de nuestros clientes para crear confort y plusvalía. Nos comprometemos a desarrollar soluciones a
+          las necesidades actuales, ajustándonos a sus presupuestos y respetando siempre el marco legal.
+        </p>
+      </article>
+      <article class="card mv reveal">
+        <span class="eyebrow">Visión</span>
+        <p>
+          Ser líderes en la administración de condominios, brindando servicios profesionales de alto nivel en materia de
+          asesoría, consultoría, administración y gestión social; fomentando procesos innovadores para el beneficio de
+          nuestros clientes.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="section-head section-head--center reveal">
+        <span class="eyebrow">Nuestro compromiso</span>
+        <h2>Plusvalía, certidumbre y armonía</h2>
+      </div>
+      <div class="grid grid-3">
+        {
+          benefits.map((b) => (
+            <article class="card commit reveal">
+              <h3>{b.title}</h3>
+              <p>{b.intro}</p>
+              {b.outro && <p class="commit__outro">{b.outro}</p>}
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--dark">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">Trabajamos para tu confort y bienestar</span>
+        <h2>…somos tu mejor decisión</h2>
+      </div>
+      <ul class="tags reveal">
+        {strengths.map((s) => <li>{s}</li>)}
+      </ul>
+    </div>
+  </section>
+
+  <CtaBand />
+</Base>
+
+<style>
+  .who {
+    display: grid;
+    gap: clamp(32px, 5vw, 64px);
+    align-items: center;
+  }
+  @media (min-width: 960px) {
+    .who {
+      grid-template-columns: 1.2fr 0.8fr;
+    }
+  }
+  .who__media :global(img) {
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    object-fit: cover;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  .facts {
+    list-style: none;
+    padding: 0;
+    margin: 28px 0 0;
+    display: grid;
+    gap: 18px;
+  }
+  .facts li {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .facts .icon-badge {
+    margin: 0;
+    flex: none;
+  }
+  .facts strong {
+    display: block;
+    font-family: var(--font-title);
+    font-size: 1.15rem;
+    color: var(--slate);
+  }
+  .facts span {
+    color: var(--muted);
+  }
+  .mv {
+    border-top: 5px solid var(--teal);
+  }
+  .mv p {
+    font-size: 1.12rem;
+    margin: 0;
+  }
+  .commit h3 {
+    font-size: 1.6rem;
+  }
+  .commit__outro {
+    color: var(--teal-dark);
+    font-weight: 600;
+    margin: 0;
+  }
+  .tags {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .tags li {
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 1px solid rgb(56 203 185 / 0.45);
+    background: rgb(56 203 185 / 0.1);
+    color: #e6f7f5;
+    font-weight: 600;
+  }
+</style>
