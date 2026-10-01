@@ -107,7 +107,7 @@ export function Shell({
           </button>
         </div>
       </aside>
-      <div>
+      <div className="shell-body">
         <header className="topbar">
           <img className="topbar-logo" src="/favicon.svg" alt="SIIA" />
           <div className="topbar-title">
@@ -123,16 +123,62 @@ export function Shell({
         </header>
         <main className="main">{children}</main>
       </div>
-      <nav className="tabbar" aria-label="Secciones">
-        {nav.map((n) => (
-          <button key={n.key} aria-current={current === n.key ? 'page' : undefined} onClick={() => go(n.key)}>
-            <Icon name={n.icon} />
-            {n.label.split(' ')[0]}
-            {!!n.count && <span className="nav-count">{n.count}</span>}
-          </button>
-        ))}
-      </nav>
+      <Tabbar nav={nav} current={current} go={go} user={user} signOut={signOut} />
     </div>
+  );
+}
+
+/** Barra inferior para móvil: hasta 5 botones; si hay más secciones, las 4 primeras + «Más» (hoja con todas). */
+function Tabbar({ nav, current, go, user, signOut }: { nav: NavItem[]; current: string; go: (k: string) => void; user?: string; signOut: () => void }) {
+  const [mas, setMas] = useState(false);
+  const cabe = nav.length <= 5;
+  const visibles = cabe ? nav : nav.slice(0, 4);
+  const enMas = !cabe && !visibles.some((n) => n.key === current);
+  const pendientesMas = cabe ? 0 : nav.slice(4).reduce((s, n) => s + (n.count ?? 0), 0);
+
+  useEffect(() => {
+    if (!mas) return;
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setMas(false);
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [mas]);
+
+  const boton = (n: NavItem) => (
+    <button key={n.key} aria-current={current === n.key ? 'page' : undefined} onClick={() => (setMas(false), go(n.key))}>
+      <Icon name={n.icon} />
+      <span className="tab-label">{n.label}</span>
+      {!!n.count && <span className="nav-count">{n.count}</span>}
+    </button>
+  );
+
+  return (
+    <>
+      <nav className="tabbar" aria-label="Secciones">
+        {visibles.map(boton)}
+        {!cabe && (
+          <button aria-current={enMas ? 'page' : undefined} aria-expanded={mas} onClick={() => setMas(!mas)}>
+            <Icon name="menu" />
+            <span className="tab-label">Más</span>
+            {!!pendientesMas && <span className="nav-count">{pendientesMas}</span>}
+          </button>
+        )}
+      </nav>
+      {mas && (
+        <div className="sheet-bg" onMouseDown={(e) => e.target === e.currentTarget && setMas(false)}>
+          <div className="sheet" role="dialog" aria-label="Todas las secciones">
+            <div className="sheet-handle" />
+            <div className="sheet-grid">{nav.map(boton)}</div>
+            <div className="sheet-foot">
+              {user && <span className="small muted">{user}</span>}
+              <button className="btn-app sm secondary" onClick={signOut}>
+                <Icon name="logout" />
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

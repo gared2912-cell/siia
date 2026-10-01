@@ -131,17 +131,23 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
 <style>
   .contact {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 32px;
     align-items: start;
   }
   @media (min-width: 1000px) {
     .contact {
-      grid-template-columns: 1fr 1.1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
     }
   }
   .contact__info {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 24px;
+    min-width: 0;
+  }
+  .info strong {
+    overflow-wrap: anywhere;
   }
   .info-cards {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
