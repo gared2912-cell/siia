@@ -3,3 +3,7 @@ dist/
 .astro/
 .env
 .env.*
+
+# Amplify
+.amplify/
+amplify_outputs*

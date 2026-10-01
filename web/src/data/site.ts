@@ -20,8 +20,8 @@ export const site = {
   whatsapp: '524461231669',
   // PENDIENTE: horario de atención (no viene en la presentación). null = no se muestra.
   schedule: null as string | null,
-  // PENDIENTE: URL de la plataforma de residentes. null = el portal muestra "solicita tu acceso".
-  residentsPortalUrl: null as string | null,
+  // Portal de residentes propio (Amplify: Cognito + AppSync). El panel de administración vive en /admin/.
+  residentsPortalUrl: '/portal/' as string | null,
   // PENDIENTE: zonas de cobertura y dirección de oficina (no vienen en la presentación).
   coverage: null as string[] | null,
   address: null as string | null,
