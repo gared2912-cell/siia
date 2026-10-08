@@ -1,5 +1,7 @@
 ---
+import { Image } from 'astro:assets';
 import Logo from './Logo.astro';
+import logoGedx from '../assets/marca/logo-gedx.webp';
 import Icon from './Icon.astro';
 import { nav, services, site } from '../data/site';
 
@@ -58,6 +60,12 @@ const year = new Date().getFullYear();
         <a href="/terminos-y-condiciones/">Términos y condiciones</a>
       </p>
     </div>
+    <p class="footer__powered">
+      <a href="https://gedx.com.mx/" target="_blank" rel="noopener">
+        <span>Powered by</span>
+        <Image src={logoGedx} alt="GEDX" height={32} densities={[1, 2]} class="footer__gedx" />
+      </a>
+    </p>
   </div>
 </footer>
 
@@ -130,6 +138,35 @@ const year = new Date().getFullYear();
   .footer__bottom {
     border-top: 1px solid rgb(255 255 255 / 0.1);
     font-size: 0.88rem;
+  }
+  .footer__powered {
+    margin: 0;
+    padding: 0 var(--gutter) 20px;
+    display: flex;
+    justify-content: center;
+  }
+  /* Tipografía de gedx.com.mx (sans del sistema) */
+  .footer__powered a {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #c9cedd;
+  }
+  .footer__powered a:hover {
+    text-decoration: none;
+    color: #fff;
+  }
+  .footer__powered :global(.footer__gedx) {
+    height: 32px;
+    width: auto;
+    transition: transform 0.2s ease;
+  }
+  .footer__powered a:hover :global(.footer__gedx) {
+    transform: scale(1.05);
   }
   .footer__bottom-inner {
     display: flex;
