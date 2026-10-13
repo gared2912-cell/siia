@@ -3,17 +3,27 @@ import { adminApi } from '../functions/admin-api/resource';
 import { portalApi } from '../functions/portal-api/resource';
 
 // Modelo de datos del portal de residentes.
-// - Los administradores (grupo ADMIN) administran todo directamente vía AppSync.
+// - Solo el grupo SUPERADMIN lee tablas directo. Los administradores (ADMIN) pasan por la mutación
+//   `admin`, cuya Lambda aplica su rol de administración (RolAdmin) y sus condominios asignados.
 // - Residentes y vigilantes NUNCA leen tablas directo: todo pasa por la mutación `portal`,
 //   cuya Lambda valida que el usuario esté aprobado, su rol, su condominio/unidad
 //   y que el servicio (módulo) esté habilitado por un administrador.
 
-const admin = (allow: any) => [allow.group('ADMIN')];
+const admin = (allow: any) => [allow.group('SUPERADMIN')];
 
 const schema = a
   .schema({
-    Rol: a.enum(['ADMIN', 'RESIDENTE', 'VIGILANTE']),
+    Rol: a.enum(['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE']),
     EstadoPerfil: a.enum(['PENDIENTE', 'APROBADO', 'RECHAZADO', 'SUSPENDIDO']),
+
+    // Rol de administración: qué secciones y acciones puede usar un ADMIN (ver shared/permisos.ts).
+    RolAdmin: a
+      .model({
+        nombre: a.string().required(),
+        descripcion: a.string(),
+        permisos: a.json(), // { secciones: { finanzas: 'editar' | 'ver' | 'ninguno', … }, extras: ['finanzas.validarPagos', …] }
+      })
+      .authorization(admin),
 
     Condominio: a
       .model({
@@ -53,6 +63,11 @@ const schema = a
         unidadId: a.id(),
         unidadSolicitada: a.string(), // texto que escribió el residente al solicitar acceso
         nota: a.string(),
+        // Solo ADMIN: rol de administración y condominios que atiende (['*'] = todos)
+        rolAdminId: a.id(),
+        condominiosAdmin: a.string().array(),
+        // Categorías de notificación push que el usuario apagó (ver shared/notificaciones.ts)
+        notifApagadas: a.string().array(),
       })
       .identifier(['userId'])
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('perfilesPorCondominio')])
@@ -278,6 +293,18 @@ const schema = a
       ])
       .authorization(admin),
 
+    // Teléfono o navegador con notificaciones push activas (id = hash del endpoint). Solo lo escriben las Lambdas.
+    Dispositivo: a
+      .model({
+        userId: a.id().required(),
+        endpoint: a.string().required(),
+        p256dh: a.string().required(),
+        auth: a.string().required(),
+        plataforma: a.string(),
+      })
+      .secondaryIndexes((i) => [i('userId').name('byUser').queryField('dispositivosPorUsuario')])
+      .authorization(admin),
+
     // API para residentes y vigilantes (validada en la Lambda portal-api)
     portal: a
       .mutation()
@@ -291,9 +318,11 @@ const schema = a
       .mutation()
       .arguments({ action: a.string().required(), payload: a.json() })
       .returns(a.json())
-      .authorization((allow) => [allow.group('ADMIN')])
+      .authorization((allow) => [allow.groups(['SUPERADMIN', 'ADMIN'])])
       .handler(a.handler.function(adminApi)),
-  });
+  })
+  // admin-api usa el cliente de datos (IAM) para el CRUD de administradores, con la validación del esquema.
+  .authorization((allow) => [allow.resource(adminApi)]);
 
 export type Schema = ClientSchema<typeof schema>;
 

@@ -1,11 +1,13 @@
-// /admin — panel exclusivo del grupo ADMIN de Cognito. AppSync rechaza cualquier operación
-// de otro usuario; aquí además se bloquea la interfaz si la sesión no pertenece al grupo.
+// /admin — panel de los grupos SUPERADMIN y ADMIN de Cognito. admin-api aplica los permisos del rol
+// de administración y los condominios asignados; aquí solo se muestra lo que el usuario puede usar.
 import { useAuthenticator } from '@aws-amplify/ui-react';
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { all, client, grupos, type Schema } from '../api';
+import { adminCall, all, db, grupos, type Schema } from '../api';
+import { alcanza, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 import { Acceso, Shell, useHashNav, type NavItem } from '../Shell';
 import { ErrorBox, Field, Icon, Loading, ToastProvider, useLoad } from '../ui';
 import { Panel } from './Panel';
+import { Administradores } from './Administradores';
 import { Condominios } from './Condominios';
 import { Usuarios } from './Usuarios';
 import { FinanzasAdmin } from './FinanzasAdmin';
@@ -25,7 +27,12 @@ type Ctx = {
   reloadUnidades: () => void;
   etiqueta: (unidadId?: string | null) => string;
   yo: string;
+  /** Permisos del administrador (el superadministrador puede todo). */
+  superadmin: boolean;
+  puede: (seccion: string, nivel?: Nivel) => boolean;
+  tiene: (extra: string) => boolean;
 };
+export type MisPermisos = { email: string; superadmin: boolean; rol: string; permisos: Permisos; condominios: '*' | string[] };
 const AdminCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useAdmin = () => useContext(AdminCtx);
 
@@ -42,8 +49,22 @@ export default function AdminApp() {
 function SoloAdmin() {
   const { signOut, user } = useAuthenticator((c) => [c.user]);
   const g = useLoad(grupos);
-  if (g.loading) return <Loading />;
-  if (!g.data?.includes('ADMIN'))
+  const esAdmin = !!g.data?.some((x) => x === 'ADMIN' || x === 'SUPERADMIN');
+  const mios = useLoad(() => (esAdmin ? adminCall<MisPermisos>('yo') : Promise.resolve(null)), [esAdmin]);
+  if (g.loading || (esAdmin && mios.loading && !mios.data)) return <Loading />;
+  if (esAdmin && mios.error)
+    return (
+      <div className="auth-screen">
+        <div className="panel auth-card" style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '1.4rem' }}>Acceso restringido</h1>
+          <p className="muted">{mios.error}</p>
+          <button className="btn-app secondary" onClick={signOut}>
+            Cerrar sesión
+          </button>
+        </div>
+      </div>
+    );
+  if (!esAdmin || !mios.data)
     return (
       <div className="auth-screen">
         <div className="panel auth-card" style={{ textAlign: 'center' }}>
@@ -60,11 +81,12 @@ function SoloAdmin() {
         </div>
       </div>
     );
-  return <Admin yo={user?.signInDetails?.loginId ?? ''} />;
+  return <Admin yo={user?.signInDetails?.loginId ?? ''} mios={mios.data} />;
 }
 
-const SECCIONES: (NavItem & { global?: boolean })[] = [
+const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'panel', label: 'Panel', icon: 'home' },
+  { key: 'administradores', label: 'Administradores', icon: 'shield', global: true, soloSuper: true },
   { key: 'condominios', label: 'Condominios', icon: 'building', global: true },
   { key: 'usuarios', label: 'Usuarios', icon: 'users', global: true },
   { key: 'finanzas', label: 'Finanzas', icon: 'money' },
@@ -80,9 +102,12 @@ const SECCIONES: (NavItem & { global?: boolean })[] = [
 
 const LS = 'siia-admin-condo';
 
-function Admin({ yo }: { yo: string }) {
+function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   const [cur, go] = useHashNav('panel');
-  const condos = useLoad(() => all<Condominio>((o) => client.models.Condominio.list(o)));
+  const puede = (seccion: string, nivel: Nivel = 'ver') => mios.superadmin || alcanza(mios.permisos.secciones[seccion], nivel);
+  const tiene = (extra: string) => mios.superadmin || mios.permisos.extras.includes(extra);
+  const secciones = SECCIONES.filter((s) => (s.soloSuper ? mios.superadmin : s.key === 'panel' || puede(s.key)));
+  const condos = useLoad(() => all<Condominio>((o) => db.models.Condominio.list(o)));
   const [condoId, setCondoIdState] = useState<string>(() => {
     try {
       return localStorage.getItem(LS) ?? '';
@@ -107,7 +132,7 @@ function Admin({ yo }: { yo: string }) {
   }, [condos.data]);
 
   const unidades = useLoad(
-    () => (condo ? all<Unidad>((o) => client.models.Unidad.unidadesPorCondominio({ condominioId: condo.id }, o)) : Promise.resolve([])),
+    () => (condo ? all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: condo.id }, o)) : Promise.resolve([])),
     [condo?.id],
   );
   const unidadesOrden = useMemo(
@@ -125,15 +150,26 @@ function Admin({ yo }: { yo: string }) {
     reloadUnidades: () => unidades.reload(true),
     etiqueta: (id) => unidadesOrden.find((u) => u.id === id)?.etiqueta ?? '—',
     yo,
+    superadmin: mios.superadmin,
+    puede,
+    tiene,
   };
 
-  const actual = SECCIONES.some((s) => s.key === cur) ? cur : 'panel';
-  const sec = SECCIONES.find((s) => s.key === actual)!;
+  const actual = secciones.some((s) => s.key === cur) ? cur : 'panel';
+  const sec = secciones.find((s) => s.key === actual)!;
   const necesitaCondo = !sec.global && !condo;
 
   return (
     <AdminCtx.Provider value={ctx}>
-      <Shell nav={SECCIONES} current={actual} onNav={go} title="Administración SIIA" subtitle={condo?.nombre ?? 'Sin condominio seleccionado'} user={yo}>
+      <Shell
+        api="admin"
+        nav={secciones}
+        current={actual}
+        onNav={go}
+        title="Administración SIIA"
+        subtitle={condo?.nombre ?? 'Sin condominio seleccionado'}
+        user={`${yo} · ${mios.rol}`}
+      >
         {condos.error && <ErrorBox error={condos.error} retry={condos.reload} />}
         {!sec.global && lista.length > 0 && (
           <div className="panel" style={{ padding: '10px 14px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -152,15 +188,22 @@ function Admin({ yo }: { yo: string }) {
           <Loading />
         ) : necesitaCondo ? (
           <div className="panel">
-            <p style={{ margin: '0 0 12px' }}>Primero da de alta un condominio para administrar sus servicios.</p>
-            <button className="btn-app" onClick={() => go('condominios')}>
-              <Icon name="plus" />
-              Dar de alta condominio
-            </button>
+            {tiene('condominios.alta') ? (
+              <>
+                <p style={{ margin: '0 0 12px' }}>Primero da de alta un condominio para administrar sus servicios.</p>
+                <button className="btn-app" onClick={() => go('condominios')}>
+                  <Icon name="plus" />
+                  Dar de alta condominio
+                </button>
+              </>
+            ) : (
+              <p style={{ margin: 0 }}>Aún no tienes condominios asignados. Pide al superadministrador que te asigne uno.</p>
+            )}
           </div>
         ) : (
           <>
             {actual === 'panel' && <Panel go={go} />}
+            {actual === 'administradores' && <Administradores />}
             {actual === 'condominios' && <Condominios />}
             {actual === 'usuarios' && <Usuarios />}
             {actual === 'finanzas' && <FinanzasAdmin />}

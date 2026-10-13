@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { adminCall, all, client, ok, type Schema } from '../api';
+import { adminCall, all, db, ok, type Schema } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
@@ -11,9 +11,10 @@ type Mensaje = Schema['Mensaje']['type'];
 
 // ---------- Comunicados ----------
 export function ComunicadosAdmin() {
-  const { condo } = useAdmin();
+  const { condo, puede } = useAdmin();
+  const gestiona = puede('comunicados', 'editar');
   const { data, error, loading, reload } = useLoad(
-    () => all<Comunicado>((o) => client.models.Comunicado.comunicadosPorCondominio({ condominioId: condo!.id }, o)),
+    () => all<Comunicado>((o) => db.models.Comunicado.comunicadosPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const [editar, setEditar] = useState<Partial<Comunicado> | null>(null);
@@ -21,7 +22,7 @@ export function ComunicadosAdmin() {
   const borrar = (c: Comunicado) =>
     confirm(`¿Eliminar "${c.titulo}"?`) &&
     run(async () => {
-      ok(await client.models.Comunicado.delete({ id: c.id }));
+      ok(await db.models.Comunicado.delete({ id: c.id }));
       reload(true);
     }, 'Comunicado eliminado');
 
@@ -29,10 +30,12 @@ export function ComunicadosAdmin() {
     <div className="stack">
       <ModuloInactivo modulo="comunicados" />
       <PageHead icon="megaphone" title="Comunicados" sub={`Publicados para ${condo!.nombre}.`}>
-        <button className="btn-app" onClick={() => setEditar({})}>
-          <Icon name="plus" />
-          Nuevo comunicado
-        </button>
+        {gestiona && (
+          <button className="btn-app" onClick={() => setEditar({})}>
+            <Icon name="plus" />
+            Nuevo comunicado
+          </button>
+        )}
       </PageHead>
       {loading && !data ? (
         <Loading />
@@ -47,14 +50,16 @@ export function ComunicadosAdmin() {
                 <h2>
                   {c.titulo} {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
                 </h2>
-                <div className="row-actions">
-                  <button className="linklike" onClick={() => setEditar(c)}>
-                    Editar
-                  </button>
-                  <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(c)}>
-                    Eliminar
-                  </button>
-                </div>
+                {gestiona && (
+                  <div className="row-actions">
+                    <button className="linklike" onClick={() => setEditar(c)}>
+                      Editar
+                    </button>
+                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(c)}>
+                      Eliminar
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="small muted" style={{ marginTop: -6, marginBottom: 8 }}>
                 {fechaHora(c.createdAt)} {c.autor && `· ${c.autor}`}
@@ -82,8 +87,8 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const okk = await run(async () => {
-      if (c.id) ok(await client.models.Comunicado.update({ id: c.id, ...f }));
-      else ok(await client.models.Comunicado.create({ condominioId: condoId, autor: yo, ...f }));
+      if (c.id) ok(await db.models.Comunicado.update({ id: c.id, ...f }));
+      else ok(await db.models.Comunicado.create({ condominioId: condoId, autor: yo, ...f }));
       if (notificar) await adminCall('avisar', { condominioId: condoId, tipo: 'COMUNICADO', titulo: `Nuevo comunicado: ${f.titulo}`, texto: f.cuerpo.slice(0, 200) });
     }, 'Comunicado publicado');
     if (okk) onDone();
@@ -115,10 +120,11 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
 
 // ---------- Encuestas ----------
 export function EncuestasAdmin() {
-  const { condo, unidades } = useAdmin();
+  const { condo, unidades, puede } = useAdmin();
+  const gestiona = puede('encuestas', 'editar');
   const { data, error, loading, reload } = useLoad(async () => {
-    const encuestas = await all<Encuesta>((o) => client.models.Encuesta.encuestasPorCondominio({ condominioId: condo!.id }, o));
-    const votos = await Promise.all(encuestas.map((e) => all<Voto>((o) => client.models.Voto.votosPorEncuesta({ encuestaId: e.id }, o))));
+    const encuestas = await all<Encuesta>((o) => db.models.Encuesta.encuestasPorCondominio({ condominioId: condo!.id }, o));
+    const votos = await Promise.all(encuestas.map((e) => all<Voto>((o) => db.models.Voto.votosPorEncuesta({ encuestaId: e.id }, o))));
     return encuestas
       .map((e, i) => ({ e, votos: votos[i] }))
       .sort((a, b) => String(b.e.createdAt).localeCompare(String(a.e.createdAt)));
@@ -128,13 +134,13 @@ export function EncuestasAdmin() {
 
   const cerrar = (e: Encuesta) =>
     run(async () => {
-      ok(await client.models.Encuesta.update({ id: e.id, estado: e.estado === 'CERRADA' ? 'ABIERTA' : 'CERRADA' }));
+      ok(await db.models.Encuesta.update({ id: e.id, estado: e.estado === 'CERRADA' ? 'ABIERTA' : 'CERRADA' }));
       reload(true);
     }, e.estado === 'CERRADA' ? 'Encuesta reabierta' : 'Encuesta cerrada');
   const borrar = (e: Encuesta) =>
     confirm('¿Eliminar la encuesta y sus votos?') &&
     run(async () => {
-      ok(await client.models.Encuesta.delete({ id: e.id }));
+      ok(await db.models.Encuesta.delete({ id: e.id }));
       reload(true);
     }, 'Encuesta eliminada');
 
@@ -142,10 +148,12 @@ export function EncuestasAdmin() {
     <div className="stack">
       <ModuloInactivo modulo="encuestas" />
       <PageHead icon="vote" title="Encuestas" sub="Votaciones electrónicas: un voto por unidad.">
-        <button className="btn-app" onClick={() => setNueva(true)}>
-          <Icon name="plus" />
-          Nueva encuesta
-        </button>
+        {gestiona && (
+          <button className="btn-app" onClick={() => setNueva(true)}>
+            <Icon name="plus" />
+            Nueva encuesta
+          </button>
+        )}
       </PageHead>
       {loading && !data ? (
         <Loading />
@@ -158,12 +166,16 @@ export function EncuestasAdmin() {
               <h2>{e.pregunta}</h2>
               <div className="row-actions">
                 <Badge estado={e.estado} />
-                <button className="linklike" onClick={() => cerrar(e)}>
-                  {e.estado === 'CERRADA' ? 'Reabrir' : 'Cerrar'}
-                </button>
-                <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(e)}>
-                  Eliminar
-                </button>
+                {gestiona && (
+                  <>
+                    <button className="linklike" onClick={() => cerrar(e)}>
+                      {e.estado === 'CERRADA' ? 'Reabrir' : 'Cerrar'}
+                    </button>
+                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(e)}>
+                      Eliminar
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             {e.descripcion && <p className="small pre">{e.descripcion}</p>}
@@ -210,7 +222,7 @@ function NuevaEncuesta({ onClose, onDone }: { onClose: () => void; onDone: () =>
     const okk = await run(async () => {
       if (opciones.length < 2) throw new Error('Agrega al menos dos opciones.');
       ok(
-        await client.models.Encuesta.create({
+        await db.models.Encuesta.create({
           condominioId: condoId,
           pregunta: f.pregunta,
           descripcion: f.descripcion || null,
@@ -252,9 +264,10 @@ function NuevaEncuesta({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 // ---------- Chat con residentes ----------
 export function ChatAdmin() {
-  const { condo, unidades, etiqueta, yo } = useAdmin();
+  const { condo, unidades, etiqueta, yo, puede } = useAdmin();
   const cid = condo!.id;
-  const hilos = useLoad(() => all<Mensaje>((o) => client.models.Mensaje.mensajesPorCondominio({ condominioId: cid }, o)), [cid]);
+  const responde = puede('chat', 'editar');
+  const hilos = useLoad(() => all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: cid }, o)), [cid]);
   usePoll(() => hilos.reload(true), 15000);
   const [unidadId, setUnidadId] = useState('');
 
@@ -308,13 +321,13 @@ export function ChatAdmin() {
               deps={[unidadId]}
               miRol="ADMIN"
               cargar={async () =>
-                (await all<Mensaje>((o) => client.models.Mensaje.mensajesPorHilo({ hilo: `${cid}#${unidadId}#ADMIN` }, o)))
+                (await all<Mensaje>((o) => db.models.Mensaje.mensajesPorHilo({ hilo: `${cid}#${unidadId}#ADMIN` }, o)))
                   .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
                   .map((m) => ({ id: m.id, texto: m.texto, autorNombre: m.autorNombre ?? '', autorRol: m.autorRol ?? '', createdAt: m.createdAt }) as Msg)
               }
-              enviar={async (texto) => {
+              enviar={!responde ? undefined : async (texto) => {
                 ok(
-                  await client.models.Mensaje.create({
+                  await db.models.Mensaje.create({
                     condominioId: cid,
                     unidadId,
                     canal: 'ADMIN',

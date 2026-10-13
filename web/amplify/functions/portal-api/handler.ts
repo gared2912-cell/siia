@@ -2,7 +2,7 @@
 // Punto único de control: nadie accede a datos si un administrador no lo aprobó,
 // y cada módulo solo responde si la administración lo habilitó para su condominio.
 import type { AppSyncResolverEvent } from 'aws-lambda';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   ApiError,
@@ -20,6 +20,8 @@ import {
   type Item,
 } from '../shared/db';
 import { emailDe } from '../shared/cognito';
+import { accionNotificaciones } from '../shared/push';
+import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
 
 type Ctx = {
   sub: string;
@@ -47,6 +49,30 @@ async function fotoUrl(path?: string) {
   if (!path || !process.env.BUCKET) return undefined;
   return getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET, Key: path }), { expiresIn: 3600 });
 }
+// Archivos que adjunta un residente: deben estar en su carpeta del tipo correcto, haberlos subido él
+// (metadato `sub` que pone el portal al subir), ser del tipo permitido y pesar máximo 8 MB.
+const MAX_ARCHIVO = 8 * 1024 * 1024;
+const TIPOS_ARCHIVO: Record<string, RegExp> = {
+  comprobantes: /^(image\/[\w.+-]+|application\/pdf)$/,
+  incidentes: /^image\/[\w.+-]+$/,
+  mascotas: /^image\/[\w.+-]+$/,
+};
+async function archivoPropio(path: string, sub: string, carpeta: keyof typeof TIPOS_ARCHIVO): Promise<string> {
+  const p = str(path, 300);
+  const [raiz, identidad, subcarpeta, nombre, ...resto] = p.split('/');
+  if (raiz !== 'residentes' || !identidad || subcarpeta !== carpeta || !nombre || resto.length) fail('El archivo adjunto no es válido. Súbelo de nuevo.');
+  let h;
+  try {
+    h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: p }));
+  } catch {
+    fail('No encontramos el archivo adjunto. Súbelo de nuevo.');
+  }
+  if (h!.Metadata?.sub !== sub) fail('El archivo adjunto no es tuyo. Súbelo de nuevo desde tu cuenta.');
+  if ((h!.ContentLength ?? 0) > MAX_ARCHIVO) fail('El archivo supera 8 MB.');
+  if (!TIPOS_ARCHIVO[carpeta].test(h!.ContentType ?? '')) fail(carpeta === 'comprobantes' ? 'Adjunta una imagen o un PDF.' : 'Adjunta una imagen.');
+  return p;
+}
+
 const conFoto = async (m: Item, unidad: string) => ({ ...sinPrivados(m), fotoPath: undefined, fotoUrl: await fotoUrl(m.fotoPath), unidad });
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -130,8 +156,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   async 'finanzas.registrarPago'({ unidad, condominio, sub, p }) {
     const monto = Number(p.monto);
     if (!(monto > 0) || monto > 1_000_000) fail('Indica un monto válido.');
-    const comprobantePath = str(p.comprobantePath, 300);
-    if (!comprobantePath.startsWith('residentes/')) fail('Adjunta tu comprobante de pago.');
+    if (!p.comprobantePath) fail('Adjunta tu comprobante de pago.');
+    const comprobantePath = await archivoPropio(p.comprobantePath, sub, 'comprobantes');
     const fecha = FECHA.test(p.fecha) ? p.fecha : hoyMX();
     const cargoIds: string[] = Array.isArray(p.cargoIds) ? p.cargoIds.slice(0, 50).map(String) : [];
     if (cargoIds.length) {
@@ -249,7 +275,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   async 'incidentes.crear'({ condominio, unidad, sub, p }) {
     const titulo = str(p.titulo, 140);
     if (!titulo) fail('Describe brevemente el incidente.');
-    const fotoPath = str(p.fotoPath, 300);
+    const fotoPath = p.fotoPath ? await archivoPropio(p.fotoPath, sub, 'incidentes') : undefined;
     const inc = await put('Incidente', {
       condominioId: condominio.id,
       unidadId: unidad!.id,
@@ -258,7 +284,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       titulo,
       descripcion: str(p.descripcion, 3000),
       ubicacion: str(p.ubicacion, 200),
-      fotoPath: fotoPath.startsWith('residentes/') ? fotoPath : undefined,
+      fotoPath,
       estado: 'ABIERTO',
     });
     return sinPrivados(inc);
@@ -401,7 +427,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   async 'mascotas.registrar'({ condominio, unidad, sub, p }) {
     const nombre = str(p.nombre, 60);
     if (!nombre) fail('Escribe el nombre de tu mascota.');
-    const fotoPath = str(p.fotoPath, 300);
+    const fotoPath = p.fotoPath ? await archivoPropio(p.fotoPath, sub, 'mascotas') : undefined;
     const m = await put('Mascota', {
       condominioId: condominio.id,
       unidadId: unidad!.id,
@@ -410,7 +436,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       especie: str(p.especie, 40) || 'Perro',
       raza: str(p.raza, 60),
       color: str(p.color, 60),
-      fotoPath: fotoPath.startsWith('residentes/') ? fotoPath : undefined,
+      fotoPath,
       vacunaAntirrabica: FECHA.test(p.vacunaAntirrabica) ? p.vacunaAntirrabica : undefined,
       estado: 'PENDIENTE',
       extraviada: false,
@@ -628,6 +654,15 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     if (!condominio || condominio.activo === false) fail('Tu condominio no tiene el portal activo.');
     const modulos: string[] = condominio!.modulos ?? [];
     const ctx: Ctx = { sub, email: perfil!.email, perfil: perfil!, condominio: condominio!, p };
+
+    // App y notificaciones push (cualquier usuario aprobado del portal).
+    if (action.startsWith('notificaciones.')) {
+      const esVigilante = perfil!.rol === 'VIGILANTE';
+      const categorias = esVigilante
+        ? modulos.includes('chat') ? CATEGORIAS_VIGILANTE : []
+        : CATEGORIAS_RESIDENTE.filter((c) => c.key !== 'chat' || modulos.includes('chat'));
+      return await accionNotificaciones(action, p, sub, categorias, esVigilante ? '/portal/#hoy' : '/portal/#inicio');
+    }
 
     if (perfil!.rol === 'VIGILANTE') {
       const a = caseta[action];

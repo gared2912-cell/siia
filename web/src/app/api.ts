@@ -54,6 +54,29 @@ async function call<T = any>(kind: Kind, action: string, payload?: object): Prom
 export const portal = <T = any>(action: string, payload?: object) => call<T>('portal', action, payload);
 export const adminCall = <T = any>(action: string, payload?: object) => call<T>('admin', action, payload);
 
+/**
+ * Datos del panel /admin con la misma forma que `client.models` (list, create, update, delete y consultas
+ * por índice), pero a través de admin-api, que aplica el rol y los condominios del administrador.
+ */
+export const db = {
+  models: new Proxy({} as Record<string, unknown>, {
+    get: (_, model: string) =>
+      new Proxy({} as Record<string, unknown>, {
+        get:
+          (_x, op: string) =>
+          async (arg?: Record<string, unknown>) => {
+            try {
+              const escritura = op === 'create' || op === 'update' || op === 'delete';
+              const data = await adminCall('db', escritura ? { model, op, input: arg } : { model, op, args: arg });
+              return escritura ? { data } : { data: data ?? [], nextToken: null };
+            } catch (e) {
+              return { data: null, errors: [{ message: e instanceof Error ? e.message : String(e) }] };
+            }
+          },
+      }),
+  }),
+} as unknown as Pick<typeof client, 'models'>;
+
 /** Lanza el primer error de una operación de AppSync. */
 export function ok<T>(r: { data: T; errors?: { message: string }[] }): T {
   if (r.errors?.length) throw new Error(r.errors[0].message);
@@ -75,6 +98,11 @@ export async function all<T>(
   return out;
 }
 
+/** URL firmada de un comprobante o foto para el panel /admin (admin-api valida el condominio). */
+export async function urlArchivoAdmin(model: 'Pago' | 'Incidente' | 'Mascota', id: string): Promise<string> {
+  return (await adminCall<{ url: string }>('archivo', { model, id })).url;
+}
+
 export async function grupos(): Promise<string[]> {
   const s = await fetchAuthSession();
   return (s.tokens?.accessToken.payload['cognito:groups'] as string[] | undefined) ?? [];
@@ -84,10 +112,12 @@ export async function grupos(): Promise<string[]> {
 export async function subirArchivo(file: File, carpeta: string): Promise<string> {
   if (file.size > 8 * 1024 * 1024) throw new Error('El archivo supera 8 MB.');
   const limpio = file.name.normalize('NFD').replace(/[^\w.-]+/g, '_').slice(-80);
+  // El portal-api solo acepta archivos con el metadato `sub` de quien los adjunta.
+  const sub = (await fetchAuthSession()).tokens?.accessToken.payload.sub as string | undefined;
   const r = await uploadData({
     path: ({ identityId }) => `residentes/${identityId}/${carpeta}/${Date.now()}-${limpio}`,
     data: file,
-    options: { contentType: file.type || undefined },
+    options: { contentType: file.type || undefined, metadata: sub ? { sub } : undefined },
   }).result;
   return r.path;
 }

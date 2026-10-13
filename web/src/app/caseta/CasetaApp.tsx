@@ -41,7 +41,7 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   const actual = nav.some((n) => n.key === cur) ? cur : 'escanear';
 
   return (
-    <Shell nav={nav} current={actual} onNav={go} title={`Caseta · ${perfil.condominio!.nombre}`} subtitle={perfil.perfil?.nombre ?? perfil.email} user={perfil.email}>
+    <Shell api="portal" nav={nav} current={actual} onNav={go} title={`Caseta · ${perfil.condominio!.nombre}`} subtitle={perfil.perfil?.nombre ?? perfil.email} user={perfil.email}>
       {panel.error && <ErrorBox error={panel.error} retry={panel.reload} />}
       {!!panel.data?.extraviadas.length && (
         <div className="alert error" style={{ marginBottom: 16 }}>

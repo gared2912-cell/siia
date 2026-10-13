@@ -1,6 +1,24 @@
 import { useState } from 'react';
-import { adminCall, all, client, ok, type Schema } from '../api';
-import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, etiquetaEstado, fecha, fechaHora, hoy, money, useAction, useLoad } from '../ui';
+import { adminCall, all, db, ok, type Schema } from '../api';
+import {
+  Archivo,
+  Badge,
+  Empty,
+  ErrorBox,
+  Field,
+  Icon,
+  Loading,
+  Modal,
+  PageHead,
+  Seg,
+  etiquetaEstado,
+  fecha,
+  fechaHora,
+  hoy,
+  money,
+  useAction,
+  useLoad,
+} from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 
 type Incidente = Schema['Incidente']['type'];
@@ -17,9 +35,9 @@ const porFecha = <T extends { createdAt: string }>(a: T, b: T) => String(b.creat
 
 // ---------- Incidentes ----------
 export function IncidentesAdmin() {
-  const { condo, etiqueta } = useAdmin();
+  const { condo, etiqueta, puede } = useAdmin();
   const { data, error, loading, reload } = useLoad(
-    () => all<Incidente>((o) => client.models.Incidente.incidentesPorCondominio({ condominioId: condo!.id }, o)),
+    () => all<Incidente>((o) => db.models.Incidente.incidentesPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const [filtro, setFiltro] = useState<'abiertos' | 'todos'>('abiertos');
@@ -30,7 +48,14 @@ export function IncidentesAdmin() {
     <div className="stack">
       <ModuloInactivo modulo="incidentes" />
       <PageHead icon="alert" title="Incidentes" sub="Reportes de los residentes." />
-      <Seg value={filtro} onChange={setFiltro} options={[['abiertos', 'Abiertos'], ['todos', 'Todos']]} />
+      <Seg
+        value={filtro}
+        onChange={setFiltro}
+        options={[
+          ['abiertos', 'Abiertos'],
+          ['todos', 'Todos'],
+        ]}
+      />
       {loading && !data ? (
         <Loading />
       ) : error ? (
@@ -41,7 +66,7 @@ export function IncidentesAdmin() {
             <ul className="list">
               {lista.map((i) => (
                 <li key={i.id}>
-                  <Archivo path={i.fotoPath} thumb />
+                  <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} thumb />
                   <div className="list-main">
                     <strong>{i.titulo}</strong> <Badge estado={i.estado} />
                     <div className="list-sub">
@@ -49,11 +74,13 @@ export function IncidentesAdmin() {
                     </div>
                     {i.descripcion && <div className="small pre">{i.descripcion}</div>}
                     {i.respuesta && <div className="small muted">Respuesta: {i.respuesta}</div>}
-                    <Archivo path={i.fotoPath} label="Ver foto" />
+                    <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} label="Ver foto" />
                   </div>
-                  <button className="btn-app sm secondary" onClick={() => setAtender(i)}>
-                    Atender
-                  </button>
+                  {puede('incidentes', 'editar') && (
+                    <button className="btn-app sm secondary" onClick={() => setAtender(i)}>
+                      Atender
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -74,7 +101,7 @@ function Atender({ i, onClose, onDone }: { i: Incidente; onClose: () => void; on
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const okk = await run(async () => {
-      ok(await client.models.Incidente.update({ id: i.id, estado, respuesta: respuesta || null }));
+      ok(await db.models.Incidente.update({ id: i.id, estado, respuesta: respuesta || null }));
       await avisar(i.condominioId, i.unidadId, `Tu reporte "${i.titulo}" está ${etiquetaEstado(estado).toLowerCase()}`, respuesta, 'INCIDENTE');
     }, 'Incidente actualizado; se avisó al residente.');
     if (okk) onDone();
@@ -104,9 +131,10 @@ function Atender({ i, onClose, onDone }: { i: Incidente; onClose: () => void; on
 
 // ---------- Mantenimientos ----------
 export function MantenimientosAdmin() {
-  const { condo } = useAdmin();
+  const { condo, puede } = useAdmin();
+  const gestiona = puede('mantenimientos', 'editar');
   const { data, error, loading, reload } = useLoad(
-    () => all<Mantenimiento>((o) => client.models.Mantenimiento.mantenimientosPorCondominio({ condominioId: condo!.id }, o)),
+    () => all<Mantenimiento>((o) => db.models.Mantenimiento.mantenimientosPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const [editar, setEditar] = useState<Partial<Mantenimiento> | null>(null);
@@ -114,7 +142,7 @@ export function MantenimientosAdmin() {
   const borrar = (m: Mantenimiento) =>
     confirm(`¿Eliminar "${m.titulo}"?`) &&
     run(async () => {
-      ok(await client.models.Mantenimiento.delete({ id: m.id }));
+      ok(await db.models.Mantenimiento.delete({ id: m.id }));
       reload(true);
     }, 'Eliminado');
   const lista = [...(data ?? [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
@@ -123,10 +151,12 @@ export function MantenimientosAdmin() {
     <div className="stack">
       <ModuloInactivo modulo="mantenimientos" />
       <PageHead icon="tools" title="Mantenimientos" sub="Programa de mantenimientos preventivos y correctivos (visible para residentes).">
-        <button className="btn-app" onClick={() => setEditar({ tipo: 'PREVENTIVO', estado: 'PROGRAMADO', fecha: hoy() })}>
-          <Icon name="plus" />
-          Programar
-        </button>
+        {gestiona && (
+          <button className="btn-app" onClick={() => setEditar({ tipo: 'PREVENTIVO', estado: 'PROGRAMADO', fecha: hoy() })}>
+            <Icon name="plus" />
+            Programar
+          </button>
+        )}
       </PageHead>
       {loading && !data ? (
         <Loading />
@@ -161,14 +191,16 @@ export function MantenimientosAdmin() {
                         <Badge estado={m.estado} />
                       </td>
                       <td>
-                        <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                          <button className="linklike" onClick={() => setEditar(m)}>
-                            Editar
-                          </button>
-                          <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(m)}>
-                            Eliminar
-                          </button>
-                        </div>
+                        {gestiona && (
+                          <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
+                            <button className="linklike" onClick={() => setEditar(m)}>
+                              Editar
+                            </button>
+                            <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(m)}>
+                              Eliminar
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -197,13 +229,14 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
     notas: m.notas ?? '',
   });
   const { run, busy } = useAction();
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setF({ ...f, [k]: e.target.value });
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const datos = { ...f, tipo: f.tipo as 'PREVENTIVO' | 'CORRECTIVO', estado: f.estado as 'PROGRAMADO' | 'EN_PROCESO' | 'TERMINADO' };
     const okk = await run(async () => {
-      if (m.id) ok(await client.models.Mantenimiento.update({ id: m.id, ...datos }));
-      else ok(await client.models.Mantenimiento.create({ condominioId: condoId, ...datos }));
+      if (m.id) ok(await db.models.Mantenimiento.update({ id: m.id, ...datos }));
+      else ok(await db.models.Mantenimiento.create({ condominioId: condoId, ...datos }));
     }, 'Mantenimiento guardado');
     if (okk) onDone();
   }
@@ -250,12 +283,13 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
 
 // ---------- Amenidades y reservas ----------
 export function AmenidadesAdmin() {
-  const { condo, etiqueta } = useAdmin();
+  const { condo, etiqueta, puede } = useAdmin();
+  const gestiona = puede('amenidades', 'editar');
   const cid = condo!.id;
   const { data, error, loading, reload } = useLoad(async () => {
     const [amenidades, reservas] = await Promise.all([
-      all<Amenidad>((o) => client.models.Amenidad.amenidadesPorCondominio({ condominioId: cid }, o)),
-      all<Reserva>((o) => client.models.Reserva.reservasPorCondominio({ condominioId: cid }, o)),
+      all<Amenidad>((o) => db.models.Amenidad.amenidadesPorCondominio({ condominioId: cid }, o)),
+      all<Reserva>((o) => db.models.Reserva.reservasPorCondominio({ condominioId: cid }, o)),
     ]);
     return { amenidades, reservas };
   }, [cid]);
@@ -275,21 +309,32 @@ export function AmenidadesAdmin() {
   const resolver = (r: Reserva, estado: 'APROBADA' | 'RECHAZADA') => {
     const nota = estado === 'RECHAZADA' ? prompt('Motivo (lo verá el residente):') : '';
     if (nota === null) return;
-    run(async () => {
-      ok(await client.models.Reserva.update({ id: r.id, estado, nota: nota || r.nota }));
-      await avisar(cid, r.unidadId, `Tu reserva de ${nombre(r.amenidadId)} (${fecha(r.fecha)}) fue ${estado === 'APROBADA' ? 'aprobada' : 'rechazada'}`, nota, 'RESERVA');
-      reload(true);
-    }, estado === 'APROBADA' ? 'Reserva aprobada' : 'Reserva rechazada');
+    run(
+      async () => {
+        ok(await db.models.Reserva.update({ id: r.id, estado, nota: nota || r.nota }));
+        await avisar(
+          cid,
+          r.unidadId,
+          `Tu reserva de ${nombre(r.amenidadId)} (${fecha(r.fecha)}) fue ${estado === 'APROBADA' ? 'aprobada' : 'rechazada'}`,
+          nota,
+          'RESERVA',
+        );
+        reload(true);
+      },
+      estado === 'APROBADA' ? 'Reserva aprobada' : 'Reserva rechazada',
+    );
   };
 
   return (
     <div className="stack">
       <ModuloInactivo modulo="amenidades" />
       <PageHead icon="calendar" title="Amenidades" sub="Solo las amenidades dadas de alta y activas pueden reservarse.">
-        <button className="btn-app" onClick={() => setEditar({ activa: true, requiereAprobacion: true })}>
-          <Icon name="plus" />
-          Nueva amenidad
-        </button>
+        {gestiona && (
+          <button className="btn-app" onClick={() => setEditar({ activa: true, requiereAprobacion: true })}>
+            <Icon name="plus" />
+            Nueva amenidad
+          </button>
+        )}
       </PageHead>
       <Seg
         value={tab}
@@ -313,7 +358,7 @@ export function AmenidadesAdmin() {
                     </div>
                     {r.nota && <div className="small">{r.nota}</div>}
                   </div>
-                  {r.estado === 'SOLICITADA' && (
+                  {gestiona && r.estado === 'SOLICITADA' && (
                     <div className="row-actions">
                       <button className="btn-app sm" disabled={busy} onClick={() => resolver(r, 'APROBADA')}>
                         Aprobar
@@ -323,7 +368,7 @@ export function AmenidadesAdmin() {
                       </button>
                     </div>
                   )}
-                  {r.estado === 'APROBADA' && (
+                  {gestiona && r.estado === 'APROBADA' && (
                     <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
                       Cancelar
                     </button>
@@ -344,12 +389,15 @@ export function AmenidadesAdmin() {
                 <Badge estado={a.activa === false ? 'CANCELADA' : 'APROBADA'}>{a.activa === false ? 'Inactiva' : 'Activa'}</Badge>
               </div>
               <p className="small muted">
-                {a.horaApertura ?? '—'}–{a.horaCierre ?? '—'} {a.maxHoras ? `· máx. ${a.maxHoras} h` : ''} {a.capacidad ? `· ${a.capacidad} pers.` : ''}{' '}
-                {a.costo ? `· ${money(a.costo)}` : ''} {a.requiereAprobacion ? '· requiere aprobación' : '· confirmación automática'}
+                {a.horaApertura ?? '—'}–{a.horaCierre ?? '—'} {a.maxHoras ? `· máx. ${a.maxHoras} h` : ''}{' '}
+                {a.capacidad ? `· ${a.capacidad} pers.` : ''} {a.costo ? `· ${money(a.costo)}` : ''}{' '}
+                {a.requiereAprobacion ? '· requiere aprobación' : '· confirmación automática'}
               </p>
-              <button className="btn-app sm secondary" onClick={() => setEditar(a)}>
-                Editar
-              </button>
+              {gestiona && (
+                <button className="btn-app sm secondary" onClick={() => setEditar(a)}>
+                  Editar
+                </button>
+              )}
             </article>
           ))}
           {!amenidades.length && (
@@ -385,8 +433,8 @@ function EditarAmenidad({ a, onClose, onDone }: { a: Partial<Amenidad>; onClose:
     e.preventDefault();
     const datos = { ...f, maxHoras: num(f.maxHoras), capacidad: num(f.capacidad), costo: num(f.costo) };
     const okk = await run(async () => {
-      if (a.id) ok(await client.models.Amenidad.update({ id: a.id, ...datos }));
-      else ok(await client.models.Amenidad.create({ condominioId: condoId, ...datos }));
+      if (a.id) ok(await db.models.Amenidad.update({ id: a.id, ...datos }));
+      else ok(await db.models.Amenidad.create({ condominioId: condoId, ...datos }));
     }, 'Amenidad guardada');
     if (okk) onDone();
   }
@@ -439,7 +487,7 @@ function EditarAmenidad({ a, onClose, onDone }: { a: Partial<Amenidad>; onClose:
 export function VisitasAdmin() {
   const { condo, etiqueta } = useAdmin();
   const { data, error, loading, reload } = useLoad(
-    () => all<Visita>((o) => client.models.Visita.visitasPorCondominio({ condominioId: condo!.id }, o)),
+    () => all<Visita>((o) => db.models.Visita.visitasPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const [dia, setDia] = useState(hoy());
@@ -503,20 +551,29 @@ export function VisitasAdmin() {
 
 // ---------- Mascotas ----------
 export function MascotasAdmin() {
-  const { condo, etiqueta } = useAdmin();
+  const { condo, etiqueta, puede } = useAdmin();
   const { data, error, loading, reload } = useLoad(
-    () => all<Mascota>((o) => client.models.Mascota.mascotasPorCondominio({ condominioId: condo!.id }, o)),
+    () => all<Mascota>((o) => db.models.Mascota.mascotasPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const { run, busy } = useAction();
   const resolver = (m: Mascota, estado: 'APROBADA' | 'RECHAZADA') => {
     const nota = estado === 'RECHAZADA' ? prompt('Motivo (lo verá el residente):') : '';
     if (nota === null) return;
-    run(async () => {
-      ok(await client.models.Mascota.update({ id: m.id, estado, notas: nota || m.notas }));
-      await avisar(m.condominioId, m.unidadId, `El registro de ${m.nombre} fue ${estado === 'APROBADA' ? 'aprobado' : 'rechazado'}`, nota, 'MASCOTA');
-      reload(true);
-    }, estado === 'APROBADA' ? 'Mascota aprobada' : 'Registro rechazado');
+    run(
+      async () => {
+        ok(await db.models.Mascota.update({ id: m.id, estado, notas: nota || m.notas }));
+        await avisar(
+          m.condominioId,
+          m.unidadId,
+          `El registro de ${m.nombre} fue ${estado === 'APROBADA' ? 'aprobado' : 'rechazado'}`,
+          nota,
+          'MASCOTA',
+        );
+        reload(true);
+      },
+      estado === 'APROBADA' ? 'Mascota aprobada' : 'Registro rechazado',
+    );
   };
   const lista = [...(data ?? [])].sort((a, b) => (a.estado === 'PENDIENTE' ? -1 : 0) - (b.estado === 'PENDIENTE' ? -1 : 0) || porFecha(a, b));
   return (
@@ -533,7 +590,7 @@ export function MascotasAdmin() {
             <ul className="list">
               {lista.map((m) => (
                 <li key={m.id}>
-                  <Archivo path={m.fotoPath} thumb />
+                  <Archivo path={m.fotoPath} origen={{ model: 'Mascota', id: m.id }} thumb />
                   <div className="list-main">
                     <strong>{m.nombre}</strong> <Badge estado={m.estado} /> {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
                     <div className="list-sub">
@@ -542,7 +599,7 @@ export function MascotasAdmin() {
                     <div className="list-sub">Vacuna antirrábica: {fecha(m.vacunaAntirrabica)}</div>
                     {m.notas && <div className="small">{m.notas}</div>}
                   </div>
-                  {m.estado === 'PENDIENTE' && (
+                  {puede('mascotas', 'editar') && m.estado === 'PENDIENTE' && (
                     <div className="row-actions">
                       <button className="btn-app sm" disabled={busy} onClick={() => resolver(m, 'APROBADA')}>
                         Aprobar

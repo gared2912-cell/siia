@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { adminCall, all, client, ok, type Schema } from '../api';
+import { adminCall, all, db, ok, type Schema } from '../api';
 import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
@@ -8,12 +8,14 @@ type Pago = Schema['Pago']['type'];
 type Cargo = Schema['Cargo']['type'];
 
 export function FinanzasAdmin() {
-  const { condo, etiqueta, unidades } = useAdmin();
+  const { condo, etiqueta, unidades, puede, tiene } = useAdmin();
   const id = condo!.id;
+  const gestiona = puede('finanzas', 'editar');
+  const valida = tiene('finanzas.validarPagos');
   const { data, error, loading, reload } = useLoad(async () => {
     const [pagos, cargos] = await Promise.all([
-      all<Pago>((o) => client.models.Pago.pagosPorCondominio({ condominioId: id }, o)),
-      all<Cargo>((o) => client.models.Cargo.cargosPorCondominio({ condominioId: id }, o)),
+      all<Pago>((o) => db.models.Pago.pagosPorCondominio({ condominioId: id }, o)),
+      all<Cargo>((o) => db.models.Cargo.cargosPorCondominio({ condominioId: id }, o)),
     ]);
     return { pagos, cargos };
   }, [id]);
@@ -42,7 +44,7 @@ export function FinanzasAdmin() {
   const cancelarCargo = (c: Cargo) =>
     confirm(`¿Cancelar el cargo "${c.concepto}" de ${etiqueta(c.unidadId)}?`) &&
     run(async () => {
-      ok(await client.models.Cargo.update({ id: c.id, estado: 'CANCELADO' }));
+      ok(await db.models.Cargo.update({ id: c.id, estado: 'CANCELADO' }));
       reload(true);
     }, 'Cargo cancelado');
   const verRecibo = (p: Pago) => {
@@ -66,14 +68,18 @@ export function FinanzasAdmin() {
     <div className="stack">
       <ModuloInactivo modulo="finanzas" />
       <PageHead icon="money" title="Finanzas" sub="Validación de comprobantes, cuotas, cargos y morosidad.">
-        <button className="btn-app secondary" onClick={() => setCargo(true)}>
-          <Icon name="plus" />
-          Cargo extraordinario
-        </button>
-        <button className="btn-app" onClick={() => setGenerar(true)}>
-          <Icon name="money" />
-          Generar cuotas del mes
-        </button>
+        {gestiona && (
+          <button className="btn-app secondary" onClick={() => setCargo(true)}>
+            <Icon name="plus" />
+            Cargo extraordinario
+          </button>
+        )}
+        {tiene('finanzas.generarCuotas') && (
+          <button className="btn-app" onClick={() => setGenerar(true)}>
+            <Icon name="money" />
+            Generar cuotas del mes
+          </button>
+        )}
       </PageHead>
       <Seg
         value={tab}
@@ -105,17 +111,19 @@ export function FinanzasAdmin() {
                         ? cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => `${c.concepto} (${money(c.monto)})`).join(', ')
                         : 'pago a cuenta'}
                     </div>
-                    <Archivo path={p.comprobantePath} label="Ver comprobante" />
+                    <Archivo path={p.comprobantePath} origen={{ model: 'Pago', id: p.id }} label="Ver comprobante" />
                   </div>
-                  <div className="row-actions">
-                    <button className="btn-app sm" disabled={busy} onClick={() => validar(p, true)}>
-                      <Icon name="check" />
-                      Aprobar
-                    </button>
-                    <button className="btn-app sm danger" disabled={busy} onClick={() => validar(p, false)}>
-                      Rechazar
-                    </button>
-                  </div>
+                  {valida && (
+                    <div className="row-actions">
+                      <button className="btn-app sm" disabled={busy} onClick={() => validar(p, true)}>
+                        <Icon name="check" />
+                        Aprobar
+                      </button>
+                      <button className="btn-app sm danger" disabled={busy} onClick={() => validar(p, false)}>
+                        Rechazar
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -152,7 +160,7 @@ export function FinanzasAdmin() {
                       </td>
                       <td>
                         <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                          <Archivo path={p.comprobantePath} label="Comprobante" />
+                          <Archivo path={p.comprobantePath} origen={{ model: 'Pago', id: p.id }} label="Comprobante" />
                           {p.estado === 'VALIDADO' && (
                             <button className="linklike" onClick={() => verRecibo(p)}>
                               Recibo
@@ -210,7 +218,7 @@ export function FinanzasAdmin() {
                           <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
                         </td>
                         <td>
-                          {c.estado === 'PENDIENTE' && (
+                          {gestiona && c.estado === 'PENDIENTE' && (
                             <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => cancelarCargo(c)}>
                               Cancelar
                             </button>
@@ -322,7 +330,7 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
       if (!destino.length) throw new Error('Selecciona la unidad.');
       for (const u of destino) {
         ok(
-          await client.models.Cargo.create({
+          await db.models.Cargo.create({
             condominioId: condoId,
             unidadId: u.id,
             concepto: f.concepto,

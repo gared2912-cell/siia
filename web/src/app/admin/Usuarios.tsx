@@ -1,20 +1,24 @@
 import { useMemo, useState } from 'react';
-import { adminCall, all, client, type Schema } from '../api';
+import { adminCall, all, db, type Schema } from '../api';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, errMsg, fecha, useAction, useLoad } from '../ui';
 import { useAdmin, type Unidad } from './AdminApp';
+import { AsignarAdmin, type RolAdmin } from './Administradores';
 
 type Perfil = Schema['Perfil']['type'];
 type Cuenta = { status?: string; enabled?: boolean; creado?: string };
 const ROLES: [string, string][] = [
   ['RESIDENTE', 'Residente'],
   ['VIGILANTE', 'Vigilante (caseta)'],
-  ['ADMIN', 'Administrador'],
 ];
+const NOMBRE_ROL: Record<string, string> = { RESIDENTE: 'Residente', VIGILANTE: 'Vigilante (caseta)', ADMIN: 'Administrador', SUPERADMIN: 'Superadministrador' };
+const esAdmin = (p: Perfil) => p.rol === 'ADMIN' || p.rol === 'SUPERADMIN';
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 
 export function Usuarios() {
-  const { condos } = useAdmin();
-  const { data, error, loading, reload } = useLoad(() => all<Perfil>((o) => client.models.Perfil.list(o)));
+  const { condos, superadmin, puede, tiene } = useAdmin();
+  const gestiona = puede('usuarios', 'editar');
+  const { data, error, loading, reload } = useLoad(() => all<Perfil>((o) => db.models.Perfil.list(o)));
+  const roles = useLoad(() => (superadmin ? adminCall<RolAdmin[]>('roles.lista') : Promise.resolve([] as RolAdmin[])));
   const cuentas = useLoad(() => adminCall<Record<string, Cuenta>>('estadoCuentas'));
   const [tab, setTab] = useState<'ACTIVOS' | 'INVITADOS' | 'PENDIENTE' | 'OTROS'>('ACTIVOS');
   const [buscar, setBuscar] = useState('');
@@ -26,7 +30,7 @@ export function Usuarios() {
   const unidadesCache = useLoad(async () => {
     const r: Record<string, string> = {};
     for (const c of condos) {
-      const us = await all<Unidad>((o) => client.models.Unidad.unidadesPorCondominio({ condominioId: c.id }, o));
+      const us = await all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: c.id }, o));
       us.forEach((u) => (r[u.id] = u.etiqueta));
     }
     return r;
@@ -77,14 +81,18 @@ export function Usuarios() {
   return (
     <div className="stack">
       <PageHead icon="users" title="Usuarios" sub="La administración da de alta a cada usuario; sus accesos se envían por correo.">
-        <button className="btn-app secondary" onClick={() => setMasiva(true)}>
-          <Icon name="users" />
-          Alta masiva
-        </button>
-        <button className="btn-app" onClick={() => setNuevo(true)}>
-          <Icon name="plus" />
-          Dar de alta
-        </button>
+        {gestiona && (
+          <>
+            <button className="btn-app secondary" onClick={() => setMasiva(true)}>
+              <Icon name="users" />
+              Alta masiva
+            </button>
+            <button className="btn-app" onClick={() => setNuevo(true)}>
+              <Icon name="plus" />
+              Dar de alta
+            </button>
+          </>
+        )}
       </PageHead>
       <div className="row-actions" style={{ justifyContent: 'space-between' }}>
         <Seg value={tab} onChange={setTab} options={tabs} />
@@ -107,20 +115,26 @@ export function Usuarios() {
               {lista.map((p) => (
                 <li key={p.userId}>
                   <div className="list-main">
-                    <strong>{p.nombre || p.email}</strong> <Badge estado={p.estado} /> {p.rol && <Badge>{ROLES.find((r) => r[0] === p.rol)?.[1]}</Badge>}{' '}
+                    <strong>{p.nombre || p.email}</strong> <Badge estado={p.estado} /> {p.rol && <Badge>{NOMBRE_ROL[p.rol]}</Badge>}{' '}
                     {p.estado === 'APROBADO' && sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
                     <div className="list-sub">
                       {p.email} {p.telefono && `· ${p.telefono}`}
                     </div>
                     <div className="list-sub">
-                      {p.rol === 'ADMIN' ? 'Todos los condominios' : nombreCondo(p.condominioId)}
+                      {p.rol === 'SUPERADMIN'
+                        ? 'Acceso total'
+                        : p.rol === 'ADMIN'
+                          ? (p.condominiosAdmin ?? []).includes('*')
+                            ? 'Todos los condominios'
+                            : (p.condominiosAdmin ?? []).map((id) => nombreCondo(id)).join(', ') || 'Sin condominios'
+                          : nombreCondo(p.condominioId)}
                       {p.unidadId ? ` · ${unidadesCache.data?.[p.unidadId] ?? '…'}` : p.unidadSolicitada ? ` · solicitó: ${p.unidadSolicitada}` : ''} · alta{' '}
                       {fecha(p.createdAt)}
                     </div>
                     {p.nota && <div className="small">{p.nota}</div>}
                   </div>
                   <div className="row-actions">
-                    {p.estado === 'PENDIENTE' && (
+                    {gestiona && p.estado === 'PENDIENTE' && (
                       <>
                         <button className="btn-app sm" onClick={() => setAsignar(p)}>
                           Autorizar
@@ -137,7 +151,7 @@ export function Usuarios() {
                         </button>
                       </>
                     )}
-                    {p.estado === 'APROBADO' && (
+                    {gestiona && p.estado === 'APROBADO' && (
                       <>
                         <button className="btn-app sm secondary" disabled={busy} onClick={() => reenviar(p)}>
                           <Icon name="mail" />
@@ -151,17 +165,17 @@ export function Usuarios() {
                         </button>
                       </>
                     )}
-                    {p.estado === 'SUSPENDIDO' && (
+                    {gestiona && p.estado === 'SUSPENDIDO' && (
                       <button className="btn-app sm secondary" disabled={busy} onClick={() => accion('reactivar', p, 'Acceso reactivado')}>
                         Reactivar
                       </button>
                     )}
-                    {p.estado === 'RECHAZADO' && (
+                    {gestiona && p.estado === 'RECHAZADO' && (
                       <button className="btn-app sm secondary" onClick={() => setAsignar(p)}>
                         Autorizar
                       </button>
                     )}
-                    {p.estado !== 'APROBADO' && (
+                    {tiene('usuarios.eliminar') && p.estado !== 'APROBADO' && (
                       <button
                         className="btn-app sm danger"
                         disabled={busy}
@@ -179,7 +193,12 @@ export function Usuarios() {
           )}
         </section>
       )}
-      {asignar && <Asignar perfil={asignar} onClose={() => setAsignar(null)} onDone={() => (setAsignar(null), recargar())} />}
+      {asignar &&
+        (esAdmin(asignar) ? (
+          <AsignarAdmin perfil={asignar} roles={roles.data ?? []} onClose={() => setAsignar(null)} onDone={() => (setAsignar(null), recargar())} />
+        ) : (
+          <Asignar perfil={asignar} onClose={() => setAsignar(null)} onDone={() => (setAsignar(null), recargar())} />
+        ))}
       {nuevo && <Asignar onClose={() => setNuevo(false)} onDone={() => (setNuevo(false), setTab('INVITADOS'), recargar())} />}
       {masiva && <AltaMasiva onClose={() => setMasiva(false)} onDone={() => (setMasiva(false), setTab('INVITADOS'), recargar())} />}
     </div>
@@ -198,7 +217,7 @@ function Asignar({ perfil, onClose, onDone }: { perfil?: Perfil; onClose: () => 
     unidadId: perfil?.unidadId ?? '',
   });
   const unidades = useLoad(
-    () => (f.condominioId ? all<Unidad>((o) => client.models.Unidad.unidadesPorCondominio({ condominioId: f.condominioId! }, o)) : Promise.resolve([])),
+    () => (f.condominioId ? all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: f.condominioId! }, o)) : Promise.resolve([])),
     [f.condominioId],
   );
   const orden = [...(unidades.data ?? [])].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es', { numeric: true }));
@@ -247,18 +266,16 @@ function Asignar({ perfil, onClose, onDone }: { perfil?: Perfil; onClose: () => 
             ))}
           </select>
         </Field>
-        {f.rol !== 'ADMIN' && (
-          <Field label="Condominio">
-            <select required value={f.condominioId ?? ''} onChange={set('condominioId')}>
-              <option value="">Selecciona…</option>
-              {condos.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
+        <Field label="Condominio">
+          <select required value={f.condominioId ?? ''} onChange={set('condominioId')}>
+            <option value="">Selecciona…</option>
+            {condos.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+        </Field>
         {f.rol === 'RESIDENTE' && (
           <Field label="Unidad" hint={sugerida && !f.unidadId ? `Sugerida por coincidencia con “${perfil?.unidadSolicitada}”.` : undefined}>
             <select required value={unidadId} onChange={set('unidadId')}>
@@ -271,7 +288,7 @@ function Asignar({ perfil, onClose, onDone }: { perfil?: Perfil; onClose: () => 
             </select>
           </Field>
         )}
-        {f.rol === 'ADMIN' && <div className="alert small">Los administradores tienen acceso total a /admin y a todos los condominios.</div>}
+        <p className="small muted" style={{ margin: 0 }}>Las cuentas de administración se dan de alta en la sección Administradores.</p>
         <button className="btn-app" disabled={busy}>
           {busy ? 'Guardando…' : perfil ? 'Autorizar acceso' : 'Dar de alta y enviar accesos'}
         </button>
@@ -287,7 +304,7 @@ function AltaMasiva({ onClose, onDone }: { onClose: () => void; onDone: () => vo
   const { condos, condoId, unidades: unidadesCondo } = useAdmin();
   const [cid, setCid] = useState(condoId);
   const unidades = useLoad(
-    () => (cid === condoId ? Promise.resolve(unidadesCondo) : all<Unidad>((o) => client.models.Unidad.unidadesPorCondominio({ condominioId: cid }, o))),
+    () => (cid === condoId ? Promise.resolve(unidadesCondo) : all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: cid }, o))),
     [cid],
   );
   const [texto, setTexto] = useState('');

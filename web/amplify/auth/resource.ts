@@ -1,7 +1,8 @@
 import { defineAuth } from '@aws-amplify/backend';
 
 // Cognito: inicio de sesión con correo. Los grupos definen el rol; un usuario sin grupo no ve nada.
-// ADMIN      → panel /admin
+// SUPERADMIN → panel /admin completo, roles de administración y alta de administradores
+// ADMIN      → panel /admin según su rol de administración y sus condominios
 // RESIDENTE  → portal /portal
 // VIGILANTE  → modo caseta dentro de /portal
 // Las cuentas solo las crea la administración (registro libre desactivado en backend.ts);
@@ -45,5 +46,5 @@ export const auth = defineAuth({
   userAttributes: {
     fullname: { required: false, mutable: true },
   },
-  groups: ['ADMIN', 'RESIDENTE', 'VIGILANTE'],
+  groups: ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE'],
 });

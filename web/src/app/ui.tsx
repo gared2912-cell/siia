@@ -1,6 +1,6 @@
 // Componentes y utilidades compartidos por el portal, la caseta y el panel de administración.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { urlArchivo } from './api';
+import { urlArchivo, urlArchivoAdmin } from './api';
 
 // ---------- Formato ----------
 const mxn = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
@@ -55,6 +55,7 @@ const P: Record<string, string> = {
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
   package: '<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
+  phone: '<rect x="6.5" y="2" width="11" height="20" rx="2.5"/><path d="M11 18h2"/>',
 };
 export function Icon({ name, className }: { name: string; className?: string }) {
   return (
@@ -267,15 +268,27 @@ export function Seg<T extends string>({ value, onChange, options }: { value: T; 
 }
 
 /** Miniatura/enlace de un archivo privado de S3. */
-export function Archivo({ path, label = 'Ver archivo', thumb }: { path?: string | null; label?: string; thumb?: boolean }) {
+/** `origen`: en /admin el archivo se pide por registro (admin-api firma la URL si es de un condominio asignado). */
+export function Archivo({
+  path,
+  label = 'Ver archivo',
+  thumb,
+  origen,
+}: {
+  path?: string | null;
+  label?: string;
+  thumb?: boolean;
+  origen?: { model: 'Pago' | 'Incidente' | 'Mascota'; id: string };
+}) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let vivo = true;
-    if (path) urlArchivo(path).then((u) => vivo && setUrl(u)).catch(() => undefined);
+    if (path) (origen ? urlArchivoAdmin(origen.model, origen.id) : urlArchivo(path)).then((u) => vivo && setUrl(u)).catch(() => undefined);
     return () => {
       vivo = false;
     };
-  }, [path]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, origen?.id]);
   if (!path) return null;
   const esImagen = /\.(png|jpe?g|webp|gif|heic)$/i.test(path);
   if (thumb && esImagen) return url ? <img className="photo-thumb" src={url} alt="" /> : <span className="photo-thumb" />;

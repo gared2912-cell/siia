@@ -35,7 +35,9 @@ export async function put(model: string, item: Item, opts: { ifNotExists?: strin
   const ts = now();
   // Perfil usa userId como llave; el resto de los modelos usa id.
   const base = model === 'Perfil' ? {} : { id: randomUUID() };
-  const full = { ...base, createdAt: ts, ...item, updatedAt: ts, __typename: model };
+  // Sin atributos nulos: un índice secundario no acepta claves nulas (p. ej. condominioId de un ADMIN).
+  const limpio = Object.fromEntries(Object.entries(item).filter(([, v]) => v !== null));
+  const full = { ...base, createdAt: ts, ...limpio, updatedAt: ts, __typename: model };
   await ddb.send(
     new PutCommand({
       TableName: table(model),
@@ -46,13 +48,27 @@ export async function put(model: string, item: Item, opts: { ifNotExists?: strin
   return full;
 }
 
-export async function update(model: string, key: Item, fields: Item): Promise<Item> {
+/** `si`: condición extra de igualdad (p. ej. { estado: 'EN_REVISION' }) para cambios de estado sin carreras. */
+export async function update(model: string, key: Item, fields: Item, si: Item = {}): Promise<Item> {
   const set = { ...fields, updatedAt: now() };
   const names: Record<string, string> = {};
   const values: Record<string, any> = {};
+  const condiciones = ['attribute_exists(#pk)'];
+  Object.entries(si).forEach(([k, v], i) => {
+    names[`#c${i}`] = k;
+    values[`:c${i}`] = v;
+    condiciones.push(`#c${i} = :c${i}`);
+  });
+  // null = quitar el atributo (un índice secundario no acepta claves nulas, p. ej. condominioId de un ADMIN).
   const parts: string[] = [];
+  const quitar: string[] = [];
   Object.entries(set).forEach(([k, v], i) => {
+    if (v === undefined) return;
     names[`#f${i}`] = k;
+    if (v === null) {
+      quitar.push(`#f${i}`);
+      return;
+    }
     values[`:v${i}`] = v;
     parts.push(`#f${i} = :v${i}`);
   });
@@ -61,10 +77,10 @@ export async function update(model: string, key: Item, fields: Item): Promise<It
     new UpdateCommand({
       TableName: table(model),
       Key: key,
-      UpdateExpression: `SET ${parts.join(', ')}`,
+      UpdateExpression: `SET ${parts.join(', ')}${quitar.length ? ` REMOVE ${quitar.join(', ')}` : ''}`,
       ExpressionAttributeNames: { ...names, '#pk': keyName },
       ExpressionAttributeValues: values,
-      ConditionExpression: 'attribute_exists(#pk)',
+      ConditionExpression: condiciones.join(' AND '),
       ReturnValues: 'ALL_NEW',
     }),
   );

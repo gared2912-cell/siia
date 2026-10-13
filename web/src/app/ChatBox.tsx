@@ -12,7 +12,8 @@ export function ChatBox({
   placeholder = 'Escribe un mensaje…',
 }: {
   cargar: () => Promise<Msg[]>;
-  enviar: (texto: string) => Promise<unknown>;
+  /** Sin `enviar`, la conversación es de solo lectura. */
+  enviar?: (texto: string) => Promise<unknown>;
   miRol: string;
   deps: unknown[];
   placeholder?: string;
@@ -30,7 +31,7 @@ export function ChatBox({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const t = texto.trim();
-    if (!t) return;
+    if (!t || !enviar) return;
     const okk = await run(() => enviar(t));
     if (okk) {
       setTexto('');
@@ -58,13 +59,26 @@ export function ChatBox({
           <Empty icon="chat">Aún no hay mensajes. Escribe el primero.</Empty>
         )}
       </div>
-      <form className="chat-form" onSubmit={submit}>
-        <input className="input" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={placeholder} maxLength={2000} aria-label="Mensaje" />
-        <button className="btn-app" disabled={busy || !texto.trim()} aria-label="Enviar">
-          <Icon name="arrow" />
-          Enviar
-        </button>
-      </form>
+      {enviar ? (
+        <form className="chat-form" onSubmit={submit}>
+          <input
+            className="input"
+            value={texto}
+            onChange={(e) => setTexto(e.target.value)}
+            placeholder={placeholder}
+            maxLength={2000}
+            aria-label="Mensaje"
+          />
+          <button className="btn-app" disabled={busy || !texto.trim()} aria-label="Enviar">
+            <Icon name="arrow" />
+            Enviar
+          </button>
+        </form>
+      ) : (
+        <p className="small muted" style={{ margin: '8px 0 0' }}>
+          Solo lectura: tu rol no permite responder mensajes.
+        </p>
+      )}
     </div>
   );
 }

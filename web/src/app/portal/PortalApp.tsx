@@ -21,7 +21,7 @@ export type PerfilResp = {
     userId: string;
     nombre?: string;
     email: string;
-    rol: 'ADMIN' | 'RESIDENTE' | 'VIGILANTE';
+    rol: 'SUPERADMIN' | 'ADMIN' | 'RESIDENTE' | 'VIGILANTE';
     estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'SUSPENDIDO';
     unidadSolicitada?: string;
     nota?: string;
@@ -81,12 +81,15 @@ function Portal() {
         Comunícate con la administración de tu condominio.
       </Estado>
     );
-  if (perfil.rol === 'ADMIN')
+  if (perfil.rol === 'ADMIN' || perfil.rol === 'SUPERADMIN') {
+    // La app instalada abre /portal/: los administradores pasan directo a su panel.
+    location.replace('/admin/');
     return (
       <Estado icon="settings" titulo="Cuenta de administración">
         Tu cuenta es de administrador. <a href="/admin/">Ir al panel de administración</a>
       </Estado>
     );
+  }
   if (!r.condominio)
     return (
       <Estado icon="alert" titulo="Sin condominio asignado">
@@ -168,6 +171,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
 
   return (
     <Shell
+      api="portal"
       nav={nav}
       current={actual}
       onNav={go}

@@ -4,6 +4,7 @@ import '@aws-amplify/ui-react/styles.css';
 import { useEffect, useState, type ReactNode } from 'react';
 import logoBlanco from '../assets/marca/logo-siia-blanco.png';
 import { Icon } from './ui';
+import { AppYNotificaciones, SugerenciaApp, bajaDeEsteDispositivo, useSincronizarPush, type ApiApp } from './AppMovil';
 
 export function Acceso({
   kicker,
@@ -69,6 +70,7 @@ export function Shell({
   subtitle,
   user,
   actions,
+  api,
   children,
 }: {
   nav: NavItem[];
@@ -78,9 +80,18 @@ export function Shell({
   subtitle?: string;
   user?: string;
   actions?: ReactNode;
+  /** API de la app (portal o panel) para la instalación y las notificaciones push. */
+  api: ApiApp;
   children: ReactNode;
 }) {
-  const { signOut } = useAuthenticator((c) => [c.user]);
+  const { signOut: salir } = useAuthenticator((c) => [c.user]);
+  const [appAbierta, setAppAbierta] = useState(false);
+  useSincronizarPush(api);
+  // Cerrar sesión también da de baja las notificaciones de este dispositivo.
+  const signOut = () => {
+    bajaDeEsteDispositivo(api).finally(salir);
+  };
+  const abrirApp = () => setAppAbierta(true);
   const go = (k: string) => {
     onNav(k);
     window.scrollTo({ top: 0 });
@@ -101,6 +112,10 @@ export function Shell({
           ))}
         </ul>
         <div className="sidebar-foot">
+          <button className="linklike" style={{ color: 'var(--mint)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }} onClick={abrirApp}>
+            <Icon name="phone" />
+            App y notificaciones
+          </button>
           {user && <strong>{user}</strong>}
           <button className="linklike" style={{ color: 'var(--mint)', marginTop: 8 }} onClick={signOut}>
             Cerrar sesión
@@ -116,14 +131,21 @@ export function Shell({
           </div>
           <div className="topbar-actions">
             {actions}
+            <button className="icon-btn" onClick={abrirApp} aria-label="App y notificaciones" title="App y notificaciones">
+              <Icon name="phone" />
+            </button>
             <button className="icon-btn" onClick={signOut} aria-label="Cerrar sesión" title="Cerrar sesión">
               <Icon name="logout" />
             </button>
           </div>
         </header>
-        <main className="main">{children}</main>
+        <main className="main">
+          <SugerenciaApp abrir={abrirApp} />
+          {children}
+        </main>
       </div>
       <Tabbar nav={nav} current={current} go={go} user={user} signOut={signOut} />
+      {appAbierta && <AppYNotificaciones api={api} onClose={() => setAppAbierta(false)} />}
     </div>
   );
 }
