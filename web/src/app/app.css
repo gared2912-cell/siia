@@ -1199,9 +1199,12 @@ table.tbl {
   .stat-value {
     font-size: 1.55rem;
   }
+  /* El chat cabe entre la barra superior y la inferior; al abrirlo se desplaza para que la caja de escribir quede a la vista */
   .chat {
-    height: calc(100vh - 300px);
-    min-height: 320px;
+    height: calc(100vh - 290px);
+    height: calc(100dvh - 290px);
+    min-height: 300px;
+    scroll-margin-bottom: calc(78px + env(safe-area-inset-bottom));
   }
   .bubble {
     max-width: 88%;

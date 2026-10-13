@@ -72,7 +72,21 @@ export function useSincronizarPush(api: ApiApp) {
 }
 
 /** Al cerrar sesión: este dispositivo deja de recibir las notificaciones de la cuenta. */
+type ConInsignia = Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+
+/** Número en el icono de la app instalada (Android / iPhone). 0 lo quita. Sin soporte del navegador no hace nada. */
+export function ponerInsignia(n: number) {
+  const nav = navigator as ConInsignia;
+  if (!nav.setAppBadge || !nav.clearAppBadge) return;
+  (n > 0 ? nav.setAppBadge(n) : nav.clearAppBadge()).catch(() => undefined);
+}
+
+export function useInsigniaApp(n: number) {
+  useEffect(() => ponerInsignia(n), [n]);
+}
+
 export async function bajaDeEsteDispositivo(api: ApiApp) {
+  ponerInsignia(0);
   const s = await suscripcionActual().catch(() => null);
   if (!s) return;
   await llamar(api, 'notificaciones.baja', { endpoint: s.endpoint }).catch(() => undefined);

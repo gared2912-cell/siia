@@ -5,7 +5,8 @@ import webpush from 'web-push';
 import { byIndex, fail, get, put, remove, str, update, type Item } from './db';
 import { VAPID_PUBLIC_KEY, VAPID_SUBJECT, type Categoria } from './notificaciones';
 
-export type Aviso = { title: string; body?: string; url: string; tag?: string };
+/** `badge`: número para el icono de la app (pendientes del destinatario); sin él, el icono no cambia. */
+export type Aviso = { title: string; body?: string; url: string; tag?: string; badge?: number };
 
 let listo = false;
 function configurar() {

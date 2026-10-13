@@ -154,7 +154,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
   const mods = perfil.condominio!.modulos ?? [];
   const has = (m: string) => mods.includes(m);
   const [cur, go] = useHashNav('inicio');
-  const { sinLeer } = useAvisos();
+  const { sinLeer, chatSinLeer } = useAvisos();
 
   const nav: NavItem[] = [
     { key: 'inicio', label: 'Inicio', icon: 'home', count: sinLeer },
@@ -163,7 +163,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
     ...(has('amenidades') ? [{ key: 'amenidades', label: 'Reservas', icon: 'calendar' }] : []),
     ...(has('incidentes') || has('mantenimientos') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert' }] : []),
     ...(has('comunicados') || has('encuestas') ? [{ key: 'comunicados', label: 'Comunicados', icon: 'megaphone' }] : []),
-    ...(has('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat' }] : []),
+    ...(has('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: chatSinLeer }] : []),
     ...(has('mascotas') ? [{ key: 'mascotas', label: 'Mascotas', icon: 'paw' }] : []),
   ];
   const actual = nav.some((n) => n.key === cur) ? cur : 'inicio';

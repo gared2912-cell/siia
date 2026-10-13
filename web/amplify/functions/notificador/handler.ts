@@ -10,6 +10,7 @@ import { byIndex, get, scan, type Item } from '../shared/db';
 import { enviarAUsuario, type Aviso } from '../shared/push';
 import { CATEGORIAS_ADMIN, categoriaDeAviso } from '../shared/notificaciones';
 import { alcanza, normalizarPermisos } from '../shared/permisos';
+import { avisosSinLeer, chatSinLeer } from '../shared/pendientes';
 
 const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 const apagada = (perfil: Item, categoria: string) => (perfil.notifApagadas ?? []).includes(categoria);
@@ -52,6 +53,24 @@ async function enviar(destinatarios: Item[], categoria: string, aviso: Aviso) {
   return n.reduce((s, x) => s + x, 0);
 }
 
+/** A los residentes, cada uno con su número de pendientes (avisos de la unidad + su chat sin leer) para el icono de la app. */
+async function enviarAResidentes(condominioId: string, unidadId: string, categoria: string, aviso: Aviso) {
+  const [perfiles, condominio, avisos] = await Promise.all([
+    residentesDeUnidad(condominioId, unidadId),
+    get('Condominio', { id: condominioId }),
+    avisosSinLeer(unidadId),
+  ]);
+  const n = await Promise.all(
+    perfiles
+      .filter((p) => !apagada(p, categoria))
+      .map(async (p) => {
+        const chat = condominio ? await chatSinLeer(p, condominio, unidadId) : { ADMIN: 0, CASETA: 0 };
+        return enviarAUsuario(p.userId, { ...aviso, badge: avisos + chat.ADMIN + chat.CASETA });
+      }),
+  );
+  return n.reduce((s, x) => s + x, 0);
+}
+
 const etiqueta = async (unidadId?: string) => (unidadId ? ((await get('Unidad', { id: unidadId }))?.etiqueta ?? '') : '');
 const nombreCondo = async (id: string) => (await get('Condominio', { id }))?.nombre ?? '';
 const corto = (s: string, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -59,7 +78,7 @@ const corto = (s: string, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 async function procesar(modelo: string, r: Item): Promise<number> {
   switch (modelo) {
     case 'Aviso':
-      return enviar(await residentesDeUnidad(r.condominioId, r.unidadId), categoriaDeAviso(r.tipo), {
+      return enviarAResidentes(r.condominioId, r.unidadId, categoriaDeAviso(r.tipo), {
         title: r.titulo,
         body: r.texto ? corto(r.texto) : undefined,
         url: '/portal/#inicio',
@@ -81,7 +100,7 @@ async function procesar(modelo: string, r: Item): Promise<number> {
         });
       }
       const de = r.canal === 'CASETA' ? 'la caseta' : 'la administración';
-      return enviar(await residentesDeUnidad(r.condominioId, r.unidadId), 'chat', { title: `Mensaje de ${de}`, body: texto, url: '/portal/#chat', tag: `chat-${r.hilo}` });
+      return enviarAResidentes(r.condominioId, r.unidadId, 'chat', { title: `Mensaje de ${de}`, body: texto, url: '/portal/#chat', tag: `chat-${r.hilo}` });
     }
 
     case 'Pago': {

@@ -263,7 +263,7 @@ function NuevaEncuesta({ onClose, onDone }: { onClose: () => void; onDone: () =>
 }
 
 // ---------- Chat con residentes ----------
-export function ChatAdmin() {
+export function ChatAdmin({ onCambio }: { onCambio?: () => void }) {
   const { condo, unidades, etiqueta, yo, puede } = useAdmin();
   const cid = condo!.id;
   const responde = puede('chat', 'editar');
@@ -339,6 +339,7 @@ export function ChatAdmin() {
                   }),
                 );
                 hilos.reload(true);
+                onCambio?.();
               }}
             />
           ) : (

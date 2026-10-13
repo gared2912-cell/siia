@@ -68,6 +68,9 @@ const schema = a
         condominiosAdmin: a.string().array(),
         // Categorías de notificación push que el usuario apagó (ver shared/notificaciones.ts)
         notifApagadas: a.string().array(),
+        // Solo RESIDENTE: último mensaje de la administración / caseta que ya vio (createdAt), para el contador de chat
+        chatLeidoAdmin: a.string(),
+        chatLeidoCaseta: a.string(),
       })
       .identifier(['userId'])
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('perfilesPorCondominio')])

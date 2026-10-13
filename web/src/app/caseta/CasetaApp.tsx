@@ -8,8 +8,10 @@ import { Shell, useHashNav, type NavItem } from '../Shell';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, PageHead, etiquetaEstado, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import type { PerfilResp } from '../portal/PortalApp';
 import type { Visita } from '../portal/Visitas';
+import { useInsigniaApp } from '../AppMovil';
 
 type V = Visita & { unidad: string };
+type Hilo = { unidadId: string; unidad: string; ultimo: Msg };
 type Panel = {
   hoy: string;
   dentro: V[];
@@ -24,6 +26,12 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   const [cur, go] = useHashNav('escanear');
   const panel = useLoad(() => portal<Panel>('caseta.panel'), []);
   usePoll(() => panel.reload(true), 30000, mods.includes('visitas'));
+  // Conversaciones cuyo último mensaje es de un residente (menú Chat e icono de la app)
+  const conChat = mods.includes('visitas') && mods.includes('chat');
+  const hilos = useLoad(() => (conChat ? portal<Hilo[]>('caseta.hilos') : Promise.resolve([] as Hilo[])), [conChat]);
+  usePoll(() => hilos.reload(true), 15000, conChat);
+  const porResponder = (hilos.data ?? []).filter((h) => h.ultimo.autorRol === 'RESIDENTE').length;
+  useInsigniaApp(porResponder);
 
   if (!mods.includes('visitas'))
     return (
@@ -36,7 +44,7 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
     { key: 'escanear', label: 'Escanear pase', icon: 'qr' },
     { key: 'hoy', label: 'Hoy', icon: 'calendar', count: panel.data?.dentro.length },
     { key: 'llegada', label: 'Registrar llegada', icon: 'package' },
-    ...(mods.includes('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat' }] : []),
+    ...(mods.includes('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: porResponder }] : []),
   ];
   const actual = nav.some((n) => n.key === cur) ? cur : 'escanear';
 
@@ -52,7 +60,7 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
       {actual === 'escanear' && <Escanear onCambio={() => panel.reload(true)} />}
       {actual === 'hoy' && (panel.data ? <Hoy panel={panel.data} onCambio={() => panel.reload(true)} /> : <Loading />)}
       {actual === 'llegada' && (panel.data ? <Llegada unidades={panel.data.unidades} onCambio={() => panel.reload(true)} /> : <Loading />)}
-      {actual === 'chat' && <ChatCaseta unidades={panel.data?.unidades ?? []} />}
+      {actual === 'chat' && <ChatCaseta unidades={panel.data?.unidades ?? []} hilos={hilos} />}
     </Shell>
   );
 }
@@ -312,10 +320,8 @@ function Llegada({ unidades, onCambio }: { unidades: Panel['unidades']; onCambio
   );
 }
 
-function ChatCaseta({ unidades }: { unidades: Panel['unidades'] }) {
-  const hilos = useLoad(() => portal<{ unidadId: string; unidad: string; ultimo: Msg }[]>('caseta.hilos'));
+function ChatCaseta({ unidades, hilos }: { unidades: Panel['unidades']; hilos: { data?: Hilo[]; reload: (silencioso?: boolean) => void } }) {
   const [unidadId, setUnidadId] = useState('');
-  usePoll(() => hilos.reload(true), 15000);
   return (
     <div className="stack">
       <PageHead icon="chat" title="Chat con residentes" />
@@ -337,7 +343,7 @@ function ChatCaseta({ unidades }: { unidades: Panel['unidades'] }) {
               {hilos.data.map((h) => (
                 <li key={h.unidadId} style={{ cursor: 'pointer' }} onClick={() => setUnidadId(h.unidadId)}>
                   <div className="list-main">
-                    <strong>{h.unidad}</strong>
+                    <strong>{h.unidad}</strong> {h.ultimo.autorRol === 'RESIDENTE' && <Badge estado="PENDIENTE">Por responder</Badge>}
                     <div className="list-sub">
                       {h.ultimo.texto.slice(0, 60)} · {fechaHora(h.ultimo.createdAt)}
                     </div>
@@ -356,7 +362,7 @@ function ChatCaseta({ unidades }: { unidades: Panel['unidades'] }) {
               deps={[unidadId]}
               miRol="VIGILANTE"
               cargar={() => portal<Msg[]>('caseta.mensajes', { unidadId })}
-              enviar={(texto) => portal('caseta.enviar', { unidadId, texto })}
+              enviar={(texto) => portal('caseta.enviar', { unidadId, texto }).then(() => hilos.reload(true))}
             />
           ) : (
             <Empty icon="chat">Selecciona una unidad para conversar.</Empty>

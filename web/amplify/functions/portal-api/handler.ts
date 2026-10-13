@@ -22,6 +22,7 @@ import {
 import { emailDe } from '../shared/cognito';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
+import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendientes';
 
 type Ctx = {
   sub: string;
@@ -123,9 +124,10 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     };
   },
 
-  async 'inicio.avisos'({ unidad }) {
-    const avisos = await byIndex('Aviso', 'byUnidad', 'unidadId', unidad!.id);
-    return { sinLeer: avisos.filter((a) => !a.leido).length, avisos: avisos.sort(newest).slice(0, 25).map(sinPrivados) };
+  // Campana: avisos de la unidad + mensajes de chat que este residente aún no ve
+  async 'inicio.avisos'({ condominio, unidad, perfil }) {
+    const [avisos, chat] = await Promise.all([byIndex('Aviso', 'byUnidad', 'unidadId', unidad!.id), chatSinLeer(perfil, condominio, unidad!.id)]);
+    return { sinLeer: avisos.filter((a) => !a.leido).length, avisos: avisos.sort(newest).slice(0, 25).map(sinPrivados), chat };
   },
 
   async 'inicio.leerAvisos'({ unidad }) {
@@ -243,9 +245,12 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   },
 
   // ----- Chat con administración / caseta -----
-  async 'chat.mensajes'({ condominio, unidad, p }) {
+  async 'chat.mensajes'({ condominio, unidad, perfil, p }) {
     const canal = p.canal === 'CASETA' ? 'CASETA' : 'ADMIN';
     const items = await byIndex('Mensaje', 'byHilo', 'hilo', `${condominio.id}#${unidad!.id}#${canal}`);
+    // Abrir la conversación la marca como leída (solo se escribe si llegó algo nuevo)
+    const ultimo = items.filter(deEquipo).reduce((max, m) => (m.createdAt > max ? m.createdAt : max), '');
+    if (ultimo > leidoHasta(perfil, canal, items)) await update('Perfil', { userId: perfil.userId }, { [CAMPO_LEIDO[canal]]: ultimo });
     return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-200).map(sinPrivados);
   },
 

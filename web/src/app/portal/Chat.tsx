@@ -3,10 +3,13 @@ import { portal } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { PageHead, Seg } from '../ui';
 import type { ModProps } from './PortalApp';
+import { useAvisos } from './Notificaciones';
 
 export function Chat({ perfil, has }: ModProps) {
   const [canal, setCanal] = useState<'ADMIN' | 'CASETA'>('ADMIN');
   const tel = perfil.condominio?.telefonoCaseta;
+  const { chat, refrescar } = useAvisos();
+  const etiqueta = (c: 'ADMIN' | 'CASETA', t: string) => (chat[c] ? `${t} (${chat[c]})` : t);
   return (
     <div className="stack">
       <PageHead
@@ -21,14 +24,19 @@ export function Chat({ perfil, has }: ModProps) {
         )}
       </PageHead>
       {has('visitas') && (
-        <Seg value={canal} onChange={setCanal} options={[['ADMIN', 'Administración'], ['CASETA', 'Caseta']]} />
+        <Seg value={canal} onChange={setCanal} options={[['ADMIN', etiqueta('ADMIN', 'Administración')], ['CASETA', etiqueta('CASETA', 'Caseta')]]} />
       )}
       <section className="panel">
         <ChatBox
           key={canal}
           deps={[canal]}
           miRol="RESIDENTE"
-          cargar={() => portal<Msg[]>('chat.mensajes', { canal })}
+          cargar={async () => {
+            // Abrir la conversación la marca como leída en el servidor; se actualizan campana y contadores.
+            const r = await portal<Msg[]>('chat.mensajes', { canal });
+            if (chat[canal]) refrescar();
+            return r;
+          }}
           enviar={(texto) => portal('chat.enviar', { canal, texto })}
         />
       </section>

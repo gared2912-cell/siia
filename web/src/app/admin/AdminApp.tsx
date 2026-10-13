@@ -5,7 +5,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { adminCall, all, db, grupos, type Schema } from '../api';
 import { alcanza, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 import { Acceso, Shell, useHashNav, type NavItem } from '../Shell';
-import { ErrorBox, Field, Icon, Loading, ToastProvider, useLoad } from '../ui';
+import { ErrorBox, Field, Icon, Loading, ToastProvider, useLoad, usePoll } from '../ui';
+import { useInsigniaApp } from '../AppMovil';
 import { Panel } from './Panel';
 import { Administradores } from './Administradores';
 import { Condominios } from './Condominios';
@@ -155,6 +156,17 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     tiene,
   };
 
+  // Conversaciones del condominio cuyo último mensaje es de un residente (menú Chat e icono de la app)
+  const veChat = !!condo && puede('chat');
+  const mensajes = useLoad(
+    () => (veChat ? all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: condo!.id }, o)) : Promise.resolve([])),
+    [condo?.id, veChat],
+  );
+  usePoll(() => mensajes.reload(true), 30000, veChat);
+  const chatPorResponder = useMemo(() => porResponder(mensajes.data ?? [], 'ADMIN'), [mensajes.data]);
+  useInsigniaApp(chatPorResponder);
+  const nav = secciones.map((s) => (s.key === 'chat' ? { ...s, count: chatPorResponder } : s));
+
   const actual = secciones.some((s) => s.key === cur) ? cur : 'panel';
   const sec = secciones.find((s) => s.key === actual)!;
   const necesitaCondo = !sec.global && !condo;
@@ -163,7 +175,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     <AdminCtx.Provider value={ctx}>
       <Shell
         api="admin"
-        nav={secciones}
+        nav={nav}
         current={actual}
         onNav={go}
         title="Administración SIIA"
@@ -209,7 +221,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'finanzas' && <FinanzasAdmin />}
             {actual === 'comunicados' && <ComunicadosAdmin />}
             {actual === 'encuestas' && <EncuestasAdmin />}
-            {actual === 'chat' && <ChatAdmin />}
+            {actual === 'chat' && <ChatAdmin onCambio={() => mensajes.reload(true)} />}
             {actual === 'incidentes' && <IncidentesAdmin />}
             {actual === 'mantenimientos' && <MantenimientosAdmin />}
             {actual === 'amenidades' && <AmenidadesAdmin />}
@@ -220,6 +232,19 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
       </Shell>
     </AdminCtx.Provider>
   );
+}
+
+type Mensaje = Schema['Mensaje']['type'];
+
+/** Hilos de un canal cuyo último mensaje es de un residente (pendientes de respuesta). */
+export function porResponder(mensajes: { unidadId: string; canal?: string | null; autorRol?: string | null; createdAt: string }[], canal: string) {
+  const ultimo = new Map<string, { autorRol?: string | null; createdAt: string }>();
+  for (const m of mensajes) {
+    if (m.canal !== canal) continue;
+    const u = ultimo.get(m.unidadId);
+    if (!u || m.createdAt > u.createdAt) ultimo.set(m.unidadId, m);
+  }
+  return [...ultimo.values()].filter((m) => m.autorRol === 'RESIDENTE').length;
 }
 
 /** Aviso de que un módulo no está habilitado para el condominio seleccionado. */

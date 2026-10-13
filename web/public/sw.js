@@ -10,8 +10,11 @@ self.addEventListener('push', (event) => {
   } catch {
     data = { title: 'SIIA', body: event.data ? event.data.text() : '' };
   }
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'SIIA', {
+  // Número en el icono de la app (Android / iPhone con la app instalada); lo calcula el servidor por usuario.
+  const insignia = typeof data.badge === 'number' && self.navigator.setAppBadge
+    ? (data.badge > 0 ? self.navigator.setAppBadge(data.badge) : self.navigator.clearAppBadge()).catch(() => undefined)
+    : Promise.resolve();
+  event.waitUntil(Promise.all([insignia, self.registration.showNotification(data.title || 'SIIA', {
       body: data.body || '',
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
@@ -19,7 +22,7 @@ self.addEventListener('push', (event) => {
       renotify: !!data.tag,
       data: { url: data.url || '/portal/' },
       lang: 'es-MX',
-    }),
+    })]),
   );
 });
 

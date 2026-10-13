@@ -22,7 +22,13 @@ export function ChatBox({
   const [texto, setTexto] = useState('');
   const { run, busy } = useAction();
   const log = useRef<HTMLDivElement>(null);
+  const caja = useRef<HTMLDivElement>(null);
   usePoll(() => reload(true), 7000);
+
+  // En celular, al abrir la conversación se desplaza la página para que la caja de escribir quede visible
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 640px)').matches) caja.current?.scrollIntoView({ block: 'end' });
+  }, []);
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight });
@@ -40,7 +46,7 @@ export function ChatBox({
   }
 
   return (
-    <div className="chat">
+    <div className="chat" ref={caja}>
       <div className="chat-log" ref={log} aria-live="polite">
         {loading && !data ? (
           <Loading />

@@ -1,24 +1,32 @@
 // Notificaciones en la sesión del residente: campana con contador, lista desplegable y aviso emergente
 // cuando llega algo nuevo (comprobante recibido, pago aprobado, visitas, paquetería…).
+// El contador suma los avisos sin leer y los mensajes de chat que el residente aún no abre; ese total
+// también va al icono de la app instalada.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { portal } from '../api';
 import { Icon, fechaHora, usePoll, useToast } from '../ui';
+import { useInsigniaApp } from '../AppMovil';
 
 export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string; leido?: boolean; createdAt: string };
-type Estado = { sinLeer: number; avisos: Aviso[] };
-type Ctx = Estado & { refrescar: () => void; leerTodo: () => Promise<void> };
+export type ChatSinLeer = { ADMIN: number; CASETA: number };
+type Estado = { sinLeer: number; avisos: Aviso[]; chat: ChatSinLeer };
+/** `total`: avisos sin leer + mensajes de chat sin leer (campana e icono de la app). */
+type Ctx = Estado & { total: number; chatSinLeer: number; refrescar: () => void; leerTodo: () => Promise<void> };
 
-const AvisosCtx = createContext<Ctx>({ sinLeer: 0, avisos: [], refrescar: () => {}, leerTodo: async () => {} });
+const SIN_CHAT: ChatSinLeer = { ADMIN: 0, CASETA: 0 };
+const AvisosCtx = createContext<Ctx>({ sinLeer: 0, avisos: [], chat: SIN_CHAT, total: 0, chatSinLeer: 0, refrescar: () => {}, leerTodo: async () => {} });
 export const useAvisos = () => useContext(AvisosCtx);
 
 export function AvisosProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
-  const [estado, setEstado] = useState<Estado>({ sinLeer: 0, avisos: [] });
+  const [estado, setEstado] = useState<Estado>({ sinLeer: 0, avisos: [], chat: SIN_CHAT });
   const vistos = useRef<Set<string> | null>(null);
+  const chatAntes = useRef<ChatSinLeer | null>(null);
 
   const refrescar = useCallback(async () => {
     try {
       const r = await portal<Estado>('inicio.avisos');
+      r.chat = r.chat ?? SIN_CHAT;
       // Aviso emergente solo para lo que llegó después de abrir la sesión
       if (vistos.current) {
         const nuevos = r.avisos.filter((a) => !a.leido && !vistos.current!.has(a.id));
@@ -26,6 +34,12 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
         else if (nuevos.length > 1) toast(`🔔 Tienes ${nuevos.length} notificaciones nuevas`);
       }
       vistos.current = new Set(r.avisos.map((a) => a.id));
+      // Mensajes nuevos de chat (si no está ya en la conversación)
+      if (chatAntes.current && !location.hash.includes('chat')) {
+        if (r.chat.ADMIN > chatAntes.current.ADMIN) toast('💬 Nuevo mensaje de la administración');
+        else if (r.chat.CASETA > chatAntes.current.CASETA) toast('💬 Nuevo mensaje de la caseta');
+      }
+      chatAntes.current = r.chat;
       setEstado(r);
     } catch {
       /* sin conexión: se reintenta en el siguiente ciclo */
@@ -33,7 +47,7 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   const leerTodo = useCallback(async () => {
-    setEstado((e) => ({ sinLeer: 0, avisos: e.avisos.map((a) => ({ ...a, leido: true })) }));
+    setEstado((e) => ({ ...e, sinLeer: 0, avisos: e.avisos.map((a) => ({ ...a, leido: true })) }));
     await portal('inicio.leerAvisos').catch(() => undefined);
     refrescar();
   }, [refrescar]);
@@ -43,13 +57,17 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
   }, [refrescar]);
   usePoll(refrescar, 30000);
 
-  return <AvisosCtx.Provider value={{ ...estado, refrescar, leerTodo }}>{children}</AvisosCtx.Provider>;
+  const chatSinLeer = estado.chat.ADMIN + estado.chat.CASETA;
+  const total = estado.sinLeer + chatSinLeer;
+  useInsigniaApp(total);
+
+  return <AvisosCtx.Provider value={{ ...estado, total, chatSinLeer, refrescar, leerTodo }}>{children}</AvisosCtx.Provider>;
 }
 
 const ICONO: Record<string, string> = { PAGO: 'money', CASETA: 'shield', VISITA: 'shield', RESERVA: 'calendar', INCIDENTE: 'alert', MASCOTA: 'paw', COMUNICADO: 'megaphone', ENCUESTA: 'vote' };
 
 export function Campana() {
-  const { sinLeer, avisos, leerTodo } = useAvisos();
+  const { sinLeer, total, chat, chatSinLeer, avisos, leerTodo } = useAvisos();
   const [abierto, setAbierto] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -70,11 +88,11 @@ export function Campana() {
       <button
         className="icon-btn"
         onClick={() => setAbierto(!abierto)}
-        aria-label={sinLeer ? `Notificaciones: ${sinLeer} sin leer` : 'Notificaciones'}
+        aria-label={total ? `Notificaciones: ${total} sin leer` : 'Notificaciones'}
         aria-expanded={abierto}
       >
         <Icon name="bell" />
-        {sinLeer > 0 && <span className="campana-n">{sinLeer > 99 ? '99+' : sinLeer}</span>}
+        {total > 0 && <span className="campana-n">{total > 99 ? '99+' : total}</span>}
       </button>
       {abierto && (
         <div className="campana-panel" role="dialog" aria-label="Notificaciones">
@@ -86,6 +104,25 @@ export function Campana() {
               </button>
             )}
           </div>
+          {chatSinLeer > 0 && (
+            <ul className="list campana-lista">
+              {(['ADMIN', 'CASETA'] as const)
+                .filter((c) => chat[c] > 0)
+                .map((c) => (
+                  <li key={c} className="no-leido" style={{ cursor: 'pointer' }} onClick={() => (setAbierto(false), (location.hash = '/chat'))}>
+                    <span className="tile-icon" style={{ width: 32, height: 32 }}>
+                      <Icon name="chat" />
+                    </span>
+                    <div className="list-main">
+                      <strong>
+                        {chat[c] === 1 ? '1 mensaje nuevo' : `${chat[c]} mensajes nuevos`} de {c === 'ADMIN' ? 'la administración' : 'la caseta'}
+                      </strong>
+                      <div className="small">Toca para abrir el chat.</div>
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          )}
           {avisos.length ? (
             <ul className="list campana-lista">
               {avisos.map((a) => (
@@ -102,7 +139,7 @@ export function Campana() {
               ))}
             </ul>
           ) : (
-            <p className="muted small" style={{ padding: 16, margin: 0 }}>
+            !chatSinLeer && <p className="muted small" style={{ padding: 16, margin: 0 }}>
               Sin notificaciones.
             </p>
           )}
