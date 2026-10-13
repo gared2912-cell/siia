@@ -8,7 +8,7 @@ import { Empty, ErrorBox, Icon, Loading, Modal, useAction, useLoad, useToast } f
 import { VAPID_PUBLIC_KEY, type Categoria } from '../../amplify/functions/shared/notificaciones';
 
 export type ApiApp = 'portal' | 'admin';
-type Estado = { categorias: Categoria[]; apagadas: string[]; dispositivos: number; esteDispositivo: boolean };
+type Estado = { categorias: Categoria[]; apagadas: string[]; silencio: boolean; dispositivos: number; esteDispositivo: boolean };
 
 const llamar = <T,>(api: ApiApp, action: string, payload?: object) => (api === 'admin' ? adminCall<T>(action, payload) : portal<T>(action, payload));
 
@@ -125,6 +125,16 @@ export function AppYNotificaciones({ api, onClose }: { api: ApiApp; onClose: () 
       await estado.reload(true);
     }, 'Notificaciones desactivadas en este dispositivo');
   }
+  async function silenciar(silencio: boolean) {
+    estado.setData({ ...estado.data!, silencio });
+    try {
+      await llamar(api, 'notificaciones.preferencias', { silencio });
+      toast(silencio ? 'Notificaciones en silencio: llegarán sin sonido' : 'Notificaciones con sonido');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'No se pudo guardar', true);
+      estado.reload(true);
+    }
+  }
   async function cambiar(key: string, encendida: boolean) {
     const actuales = estado.data!.apagadas;
     const apagadas = encendida ? actuales.filter((k) => k !== key) : [...actuales, key];
@@ -233,6 +243,17 @@ export function AppYNotificaciones({ api, onClose }: { api: ApiApp; onClose: () 
               </div>
             ) : (
               <Empty icon="bell">Tu cuenta no tiene notificaciones disponibles.</Empty>
+            )}
+            {estado.data.categorias.length > 0 && (
+              <label className="check app-categoria" style={{ marginTop: 12 }}>
+                <input type="checkbox" checked={estado.data.silencio} onChange={(e) => silenciar(e.target.checked)} />
+                <span>
+                  <strong>Recibir en silencio</strong>
+                  <small className="muted">
+                    Te llegan igual, pero sin sonido ni vibración.{inst.ios && ' En iPhone, si aún suenan, quita el sonido en Ajustes › Notificaciones › SIIA.'}
+                  </small>
+                </span>
+              </label>
             )}
             <p className="small muted" style={{ margin: '8px 0 0' }}>
               Aplica a todos tus dispositivos ({estado.data.dispositivos} con notificaciones activas).

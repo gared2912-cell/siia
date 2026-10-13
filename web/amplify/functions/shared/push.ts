@@ -5,8 +5,11 @@ import webpush from 'web-push';
 import { byIndex, fail, get, put, remove, str, update, type Item } from './db';
 import { VAPID_PUBLIC_KEY, VAPID_SUBJECT, type Categoria } from './notificaciones';
 
-/** `badge`: número para el icono de la app (pendientes del destinatario); sin él, el icono no cambia. */
-export type Aviso = { title: string; body?: string; url: string; tag?: string; badge?: number };
+/**
+ * `badge`: número para el icono de la app (pendientes del destinatario); sin él, el icono no cambia.
+ * `silent`: sin sonido ni vibración (preferencia Perfil.notifSilencio del destinatario).
+ */
+export type Aviso = { title: string; body?: string; url: string; tag?: string; badge?: number; silent?: boolean };
 
 let listo = false;
 function configurar() {
@@ -55,6 +58,7 @@ export async function accionNotificaciones(action: string, p: Item, userId: stri
       return {
         categorias,
         apagadas: (perfil!.notifApagadas ?? []).filter(Boolean),
+        silencio: !!perfil!.notifSilencio,
         dispositivos: dispositivos.length,
         esteDispositivo: !!endpoint && dispositivos.some((d) => d.endpoint === endpoint),
       };
@@ -81,13 +85,23 @@ export async function accionNotificaciones(action: string, p: Item, userId: stri
       return { ok: true };
     }
     case 'notificaciones.preferencias': {
+      // Cada campo es opcional: solo se cambia lo que se envía (categorías apagadas y/o modo silencio).
       const validas = new Set(categorias.map((c) => c.key));
-      const apagadas = Array.isArray(p.apagadas) ? [...new Set(p.apagadas.map(String))].filter((k) => validas.has(k)) : [];
-      await update('Perfil', { userId }, { notifApagadas: apagadas });
-      return { apagadas };
+      const cambios: Item = {};
+      if (Array.isArray(p.apagadas)) cambios.notifApagadas = [...new Set(p.apagadas.map(String))].filter((k) => validas.has(k));
+      if (typeof p.silencio === 'boolean') cambios.notifSilencio = p.silencio;
+      if (!Object.keys(cambios).length) fail('Sin cambios.');
+      const r = await update('Perfil', { userId }, cambios);
+      return { apagadas: (r.notifApagadas ?? []).filter(Boolean), silencio: !!r.notifSilencio };
     }
     case 'notificaciones.probar': {
-      const enviados = await enviarAUsuario(userId, { title: 'SIIA', body: 'Las notificaciones funcionan en este dispositivo.', url, tag: 'prueba' });
+      const enviados = await enviarAUsuario(userId, {
+        title: 'SIIA',
+        body: perfil!.notifSilencio ? 'Las notificaciones funcionan en este dispositivo (en silencio).' : 'Las notificaciones funcionan en este dispositivo.',
+        url,
+        tag: 'prueba',
+        silent: !!perfil!.notifSilencio,
+      });
       if (!enviados) fail('No hay dispositivos con notificaciones activas en tu cuenta.');
       return { enviados };
     }

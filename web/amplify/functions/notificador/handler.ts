@@ -48,8 +48,8 @@ async function administradores(condominioId: string, categoria: string) {
 }
 
 async function enviar(destinatarios: Item[], categoria: string, aviso: Aviso) {
-  const ids = [...new Set(destinatarios.filter((p) => !apagada(p, categoria)).map((p) => p.userId as string))];
-  const n = await Promise.all(ids.map((id) => enviarAUsuario(id, aviso)));
+  const porId = new Map(destinatarios.filter((p) => !apagada(p, categoria)).map((p) => [p.userId as string, p]));
+  const n = await Promise.all([...porId].map(([id, p]) => enviarAUsuario(id, { ...aviso, silent: !!p.notifSilencio })));
   return n.reduce((s, x) => s + x, 0);
 }
 
@@ -65,7 +65,7 @@ async function enviarAResidentes(condominioId: string, unidadId: string, categor
       .filter((p) => !apagada(p, categoria))
       .map(async (p) => {
         const chat = condominio ? await chatSinLeer(p, condominio, unidadId) : { ADMIN: 0, CASETA: 0 };
-        return enviarAUsuario(p.userId, { ...aviso, badge: avisos + chat.ADMIN + chat.CASETA });
+        return enviarAUsuario(p.userId, { ...aviso, badge: avisos + chat.ADMIN + chat.CASETA, silent: !!p.notifSilencio });
       }),
   );
   return n.reduce((s, x) => s + x, 0);

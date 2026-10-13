@@ -68,6 +68,8 @@ const schema = a
         condominiosAdmin: a.string().array(),
         // Categorías de notificación push que el usuario apagó (ver shared/notificaciones.ts)
         notifApagadas: a.string().array(),
+        // Notificaciones en silencio (sin sonido ni vibración) en todos sus dispositivos
+        notifSilencio: a.boolean(),
         // Solo RESIDENTE: último mensaje de la administración / caseta que ya vio (createdAt), para el contador de chat
         chatLeidoAdmin: a.string(),
         chatLeidoCaseta: a.string(),

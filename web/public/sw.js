@@ -19,7 +19,9 @@ self.addEventListener('push', (event) => {
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
       tag: data.tag,
-      renotify: !!data.tag,
+      // En silencio: sin sonido ni vibración (preferencia del usuario); tampoco vuelve a sonar al reemplazar otra.
+      silent: !!data.silent,
+      renotify: !!data.tag && !data.silent,
       data: { url: data.url || '/portal/' },
       lang: 'es-MX',
     })]),
