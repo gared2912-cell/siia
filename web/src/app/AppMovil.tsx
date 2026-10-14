@@ -59,15 +59,20 @@ function useInstalacion() {
 }
 
 /**
- * Al abrir la app: si este dispositivo ya tenía notificaciones, se vuelve a registrar a nombre de la cuenta actual
- * (un teléfono compartido recibe las de quien inició sesión).
+ * Al abrir la app: si el teléfono ya dio permiso de notificaciones, se registra a nombre de la cuenta actual
+ * (un teléfono compartido recibe las de quien inició sesión). Si la suscripción se dio de baja al cerrar sesión
+ * con otra cuenta, se crea una nueva sin volver a pedir el permiso.
  */
 export function useSincronizarPush(api: ApiApp) {
   useEffect(() => {
     if (!soportaPush() || Notification.permission !== 'granted') return;
-    suscripcionActual()
-      .then((s) => s && llamar(api, 'notificaciones.suscribir', { subscription: s.toJSON(), plataforma: navigator.userAgent.slice(0, 200) }))
-      .catch(() => undefined);
+    (async () => {
+      const reg = await navigator.serviceWorker.ready;
+      const s =
+        (await reg.pushManager.getSubscription()) ??
+        (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: llaveVapid(VAPID_PUBLIC_KEY) }));
+      await llamar(api, 'notificaciones.suscribir', { subscription: s.toJSON(), plataforma: navigator.userAgent.slice(0, 200) });
+    })().catch(() => undefined);
   }, [api]);
 }
 
