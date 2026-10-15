@@ -11,7 +11,9 @@ const year = new Date().getFullYear();
 <footer class="footer">
   <div class="container footer__grid">
     <div class="footer__brand">
-      <Logo variant="stacked" tone="white" class="footer__logo" />
+      <div class="footer__logo">
+        <Logo variant="stacked" tone="white" />
+      </div>
       <p>{site.slogan}</p>
       {site.repse && <p class="footer__badge">Empresa legalmente constituida · Registro REPSE</p>}
     </div>
@@ -86,9 +88,9 @@ const year = new Date().getFullYear();
       grid-template-columns: 1.6fr 1fr 1fr 1.3fr;
     }
   }
-  .footer :global(.footer__logo) {
+  .footer__logo {
     width: 170px;
-    margin-bottom: 18px;
+    margin-bottom: 20px;
   }
   .footer__brand p {
     max-width: 340px;

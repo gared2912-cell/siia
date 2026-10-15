@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import PageHero from '../components/PageHero.astro';
 import Icon from '../components/Icon.astro';
+import LoginResidentes from '../app/LoginResidentes';
 import { photo } from '../data/images';
 import { appFeatures, site, waLink } from '../data/site';
 
@@ -24,14 +25,20 @@ const quick = [
     lead="Tu administración a un click: recibos, estados de cuenta, reportes, visitas y comunicados de tu condominio."
     image={photo('app-tics')}
   >
-    <div class="btn-row portal-cta">
-      {
-        portal ? (
-          <a href={portal} class="btn btn--light">
-            <Icon name="lock" />
-            Ingresar al portal
-          </a>
-        ) : (
+    {
+      portal ? (
+        <div class="login" slot="aside" id="ingresar">
+          <h2 class="login__title"><Icon name="lock" />Ingresa al portal</h2>
+          <div class="login__form">
+            <LoginResidentes client:only="react" />
+          </div>
+          <p class="login__foot">
+            Tus accesos te los envía por correo la administración de tu condominio. ¿No los recibiste o vencieron?{' '}
+            <a href="/contacto/">Pide ayuda</a>
+          </p>
+        </div>
+      ) : (
+        <div class="btn-row portal-cta">
           <a
             href={waLink('Hola SIIA, soy residente y quiero solicitar mi acceso a la app de mi condominio. Condominio: ___ · Casa/Depto: ___')}
             class="btn btn--light"
@@ -41,10 +48,10 @@ const quick = [
             <Icon name="lock" />
             Solicitar mi acceso
           </a>
-        )
-      }
-      <a href="/contacto/" class="btn btn--outline-light">Necesito ayuda</a>
-    </div>
+          <a href="/contacto/" class="btn btn--outline-light">Necesito ayuda</a>
+        </div>
+      )
+    }
   </PageHero>
 
   <section class="section">
@@ -90,6 +97,64 @@ const quick = [
 <style>
   .portal-cta {
     margin-top: 28px;
+  }
+  /* Acceso directo: el formulario de inicio de sesión vive en la cabecera de la página */
+  .login {
+    width: 100%;
+    max-width: 460px;
+    background: #fff;
+    color: var(--ink);
+    border-radius: calc(var(--radius) + 4px);
+    box-shadow: 0 24px 60px -24px rgb(11 30 50 / 0.6);
+    padding: 24px 22px 20px;
+  }
+  .login__title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 6px;
+    font-size: 1.35rem;
+    color: var(--slate-dark);
+  }
+  .login__title :global(svg) {
+    width: 22px;
+    height: 22px;
+    color: var(--teal-dark);
+  }
+  .login__form {
+    min-height: 260px;
+  }
+  /* Dentro de la tarjeta, el formulario de Amplify va sin su propio marco */
+  .login__form :global([data-amplify-router]) {
+    box-shadow: none;
+    border: 0;
+  }
+  .login__form :global([data-amplify-authenticator] [data-amplify-container]) {
+    width: 100%;
+  }
+  .login__form :global(.amplify-authenticator__column),
+  .login__form :global([data-amplify-form]) {
+    padding: 12px 0 4px;
+  }
+  /* Los párrafos de la cabecera son claros; dentro de la tarjeta blanca van oscuros */
+  :global(.page-hero) .login :global(p) {
+    color: var(--ink);
+    font-size: 0.95rem;
+    max-width: none;
+  }
+  :global(.page-hero) .login p.login__foot {
+    margin: 8px 0 0;
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  .login__foot a {
+    color: var(--teal-dark);
+    font-weight: 700;
+  }
+  :global(.login-res__entrando) {
+    padding: 40px 0;
+    text-align: center;
+    color: var(--muted);
   }
   .muted {
     color: var(--muted);

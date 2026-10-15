@@ -374,6 +374,18 @@ p {
   font-size: clamp(1.05rem, 1.7vw, 1.22rem);
   color: #e3f7f5;
 }
+.page-hero__grid {
+  display: grid;
+  gap: 32px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+}
+@media (min-width: 960px) {
+  .page-hero__grid {
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 56px;
+  }
+}
 .breadcrumb {
   display: flex;
   gap: 8px;

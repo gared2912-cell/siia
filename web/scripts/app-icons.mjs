@@ -1,18 +1,13 @@
-// Íconos de la app instalable (PWA) a partir del logotipo vectorial (src/data/logo.ts):
+// Íconos de la app instalable (PWA) a partir del isotipo vectorial (src/data/logo.ts):
 // icon-192 / icon-512 (fondo teal), icon-maskable-512 (con margen de seguridad), apple-180 (iPhone)
 // y badge-96 (monocromo para Android).
 import sharp from 'sharp';
 import fs from 'node:fs';
+import { logoColors, markSvg } from '../src/data/logo.ts';
 
-const src = fs.readFileSync('src/data/logo.ts', 'utf8');
-const get = (key) => {
-  const block = src.split('export const mark = {')[1].split('\n};')[0];
-  const line = block.split('\n').find((l) => l.trim().startsWith(`${key}:`));
-  return line.trim().slice(key.length + 1).trim().replace(/,$/, '').replace(/^'|'$/g, '');
-};
-const mark = { d: get('d'), w: +get('w'), h: +get('h') };
-const svg = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${mark.w} ${mark.h}"><path fill="${color}" d="${mark.d}"/></svg>`;
-const TEAL = '#007c7d';
+const svg = (color) => markSvg(color);
+// Fondo: teal de marca #38CBB9 (como Logos/5.png)
+const TEAL = logoColors.teal;
 
 fs.mkdirSync('public/icons', { recursive: true });
 

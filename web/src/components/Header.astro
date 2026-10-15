@@ -151,11 +151,11 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWit
     text-decoration: none;
     flex: none;
   }
-  .brand :global(.logo-h) {
+  .brand :global(.logo--horizontal) {
     --logo-h: 60px;
   }
   @media (min-width: 1400px) {
-    .brand :global(.logo-h) {
+    .brand :global(.logo--horizontal) {
       --logo-h: 66px;
     }
   }
@@ -234,7 +234,7 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWit
   }
 
   @media (max-width: 520px) {
-    .brand :global(.logo-h) {
+    .brand :global(.logo--horizontal) {
       --logo-h: 52px;
     }
   }

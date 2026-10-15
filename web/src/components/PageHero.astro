@@ -9,16 +9,21 @@ interface Props {
   image: ImageMetadata;
 }
 const { title, lead, crumb, image } = Astro.props;
+// slot «aside»: columna a la derecha en escritorio (debajo del texto en celular)
+const aside = Astro.slots.has('aside');
 ---
 
 <section class="page-hero">
   <Image src={image} alt="" class="page-hero__img" widths={[640, 1024, 1600]} sizes="100vw" loading="eager" />
-  <div class="container">
+  <div class:list={['container', { 'page-hero__grid': aside }]}>
+    <div>
     <nav class="breadcrumb" aria-label="Ruta de navegación">
       <a href="/">Inicio</a><span aria-hidden="true">/</span><span aria-current="page">{crumb}</span>
     </nav>
     <h1>{title}</h1>
     {lead && <p>{lead}</p>}
     <slot />
+    </div>
+    {aside && <div class="page-hero__aside"><slot name="aside" /></div>}
   </div>
 </section>

@@ -2,8 +2,8 @@
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
 import { useEffect, useState, type ReactNode } from 'react';
-import logoBlanco from '../assets/marca/logo-siia-blanco.png';
 import { Icon } from './ui';
+import { camposAcceso } from './camposAcceso';
 import { AppYNotificaciones, SugerenciaApp, bajaDeEsteDispositivo, useSincronizarPush, type ApiApp } from './AppMovil';
 
 export function Acceso({
@@ -35,24 +35,14 @@ function Puerta({ kicker, hideSignUp, foot, children }: { kicker: string; hideSi
       <div className="auth-card">
         <div className="auth-brand">
           <a href="/" aria-label="Ir al sitio de SIIA">
-            <img src="/logo-siia.png" alt="SIIA · Sistemas Integrales Inmobiliarios y de Administración" />
+            <img src="/marca/siia-vertical.svg" alt="SIIA · soluciones inmobiliarias" />
           </a>
           <span className="auth-kicker">{kicker}</span>
         </div>
         <Authenticator
           hideSignUp={hideSignUp}
           loginMechanisms={['email']}
-          formFields={{
-            signUp: {
-              email: { order: 1, label: 'Correo electrónico', placeholder: 'tu@correo.com' },
-              password: { order: 2, label: 'Contraseña', placeholder: 'Mínimo 8 caracteres, con símbolo' },
-              confirm_password: { order: 3, label: 'Confirmar contraseña', placeholder: 'Repite tu contraseña' },
-            },
-            signIn: {
-              username: { label: 'Correo electrónico', placeholder: 'tu@correo.com' },
-              password: { label: 'Contraseña', placeholder: 'Tu contraseña' },
-            },
-          }}
+          formFields={camposAcceso}
         />
         {foot && <div className="auth-foot">{foot}</div>}
       </div>
@@ -99,7 +89,9 @@ export function Shell({
   return (
     <div className="shell">
       <aside className="sidebar">
-        <img className="sidebar-logo" src={logoBlanco.src} alt="SIIA" />
+        <div className="sidebar-logo">
+          <img src="/marca/siia-horizontal-blanco.svg" alt="SIIA · soluciones inmobiliarias" />
+        </div>
         <ul className="navlist">
           {nav.map((n) => (
             <li key={n.key}>

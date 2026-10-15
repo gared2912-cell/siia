@@ -1,0 +1,22 @@
+/* Amplify UI con la identidad de SIIA */
+[data-amplify-authenticator] {
+  --amplify-colors-primary-10: var(--mint-wash);
+  --amplify-colors-primary-20: var(--mint-soft);
+  --amplify-colors-primary-40: var(--mint);
+  --amplify-colors-primary-60: var(--teal);
+  --amplify-colors-primary-80: var(--teal-dark);
+  --amplify-colors-primary-90: var(--teal-deep);
+  --amplify-colors-primary-100: var(--teal-deep);
+  --amplify-fonts-default-variable: var(--font-body);
+  --amplify-fonts-default-static: var(--font-body);
+  --amplify-components-authenticator-router-border-width: 0;
+  --amplify-components-authenticator-router-box-shadow: var(--shadow);
+  --amplify-components-button-border-radius: 999px;
+  --amplify-components-fieldcontrol-border-radius: 10px;
+  --amplify-components-tabs-item-active-border-color: var(--teal);
+  --amplify-components-tabs-item-active-color: var(--teal-dark);
+}
+[data-amplify-authenticator] [data-amplify-router] {
+  border-radius: var(--radius);
+  overflow: hidden;
+}

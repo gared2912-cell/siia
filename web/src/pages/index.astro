@@ -4,7 +4,6 @@ import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import CtaBand from '../components/CtaBand.astro';
 import Logo from '../components/Logo.astro';
-import logoWhite from '../assets/marca/logo-siia-blanco.png';
 import { photo } from '../data/images';
 import { appFeatures, benefits, maintenanceFee, pillars, propertyTypes, quoteNote, services, site } from '../data/site';
 ---
@@ -202,7 +201,7 @@ import { appFeatures, benefits, maintenanceFee, pillars, propertyTypes, quoteNot
       <div class="phone reveal" aria-hidden="true">
         <div class="phone__screen">
           <div class="phone__top">
-            <Image src={logoWhite} alt="" width={40} />
+            <img src="/marca/isotipo-blanco.svg" alt="" width="34" height="34" />
             <span>Mi condominio</span>
           </div>
           <div class="phone__card phone__card--hi">
@@ -361,16 +360,12 @@ import { appFeatures, benefits, maintenanceFee, pillars, propertyTypes, quoteNot
       display: grid;
       place-items: center;
       justify-self: center;
-      width: 380px;
-      aspect-ratio: 1;
-      border-radius: 50%;
-      border: 3px solid rgb(255 255 255 / 0.85);
-      background: rgb(56 203 185 / 0.18);
-      backdrop-filter: blur(2px);
+      width: 360px;
     }
+    /* Logotipo blanco directo sobre la foto, sin recuadro; la sombra lo separa del fondo */
     .hero__badge :global(svg) {
-      width: 236px;
-      filter: drop-shadow(0 2px 10px rgb(11 30 50 / 0.35));
+      width: 100%;
+      filter: drop-shadow(0 2px 3px rgb(11 30 50 / 0.55)) drop-shadow(0 6px 24px rgb(11 30 50 / 0.45));
     }
   }
 

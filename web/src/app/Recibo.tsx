@@ -19,7 +19,7 @@ export function Recibo({ data }: { data: ReciboData }) {
     <>
       <div className="recibo">
         <div className="recibo-head">
-          <img src="/logo-siia.png" alt="SIIA" />
+          <img src="/marca/siia-vertical.svg" alt="SIIA · soluciones inmobiliarias" />
           <div style={{ textAlign: 'right' }}>
             <div className="small muted">Recibo de pago</div>
             <div className="codigo">{pago.folio}</div>
