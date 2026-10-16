@@ -586,12 +586,32 @@ try {
     await bloqueado(cs.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: 1 }));
     return `lee ${l.length} egreso(s)`;
   });
+  await prueba('Gasto del fondo de amenidades: lo ve el residente con su evidencia', async () => {
+    const ev = await subirEvidencia(ct, 'nota-e2e-asador.pdf', 'application/pdf', '%PDF-1.4 nota del asador');
+    const e = await ok(
+      ct.admin('egresos.guardar', { condominioId: X.robles, fecha: hoy, categoria: 'Mantenimiento de amenidades', concepto: 'Parrilla nueva del asador', monto: 1200, evidencias: [ev], fondo: 'AMENIDADES' }),
+    );
+    esperar(e.fondo === 'AMENIDADES', JSON.stringify(e).slice(0, 120));
+    const f = await hasta(() => ok(r1.portal('amenidades.fondo')), (x) => x.gastos.some((g) => g.id === e.id));
+    const g = f.gastos.find((x) => x.id === e.id);
+    esperar(g && f.totalGastos >= 1200 && !('registradoPor' in g), JSON.stringify(f).slice(0, 160));
+    const { url } = await ok(r1.portal('amenidades.fondoEvidencia', { id: e.id, path: ev.path }));
+    const r = await fetch(url);
+    esperar(r.ok && (await r.text()).includes('nota del asador'), `HTTP ${r.status}`);
+    await bloqueado(r1.portal('amenidades.fondoEvidencia', { id: X.egreso, path: X.evidencia }));
+    return `ahorro ${f.saldo}, gasto visible con evidencia`;
+  });
+  await prueba('Contadora ve las reservas de amenidades desde Finanzas', async () => {
+    const l = await ok(ct.admin('amenidades.reservas', { condominioId: X.robles }));
+    esperar(Array.isArray(l), JSON.stringify(l).slice(0, 80));
+    return `${l.length} reserva(s)`;
+  });
   await prueba('Gerente de operación no ve egresos', () => bloqueado(op.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })));
   await prueba('Quitar saldo capturado y eliminar egreso', async () => {
     await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: null }));
     await ok(ct.admin('egresos.borrar', { id: X.egreso }));
-    const l = await hasta(() => ok(ct.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })), (x) => !x.length);
-    esperar(!l.length, `${l.length} egreso(s)`);
+    const l = await hasta(() => ok(ct.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })), (x) => !x.some((e) => e.id === X.egreso));
+    esperar(!l.some((e) => e.id === X.egreso), 'el egreso sigue registrado');
   });
   await prueba('Cargo extraordinario guarda su tipo de ingreso', async () => {
     const r = await ok(ct.admin('cargoExtraordinario', { condominioId: X.robles, concepto: 'Reparación de bomba', monto: 150, vence: manana, tipo: 'MANT_EXTERNO', unidadIds: [X.unidadesRobles[0]] }));
@@ -663,6 +683,65 @@ try {
   await prueba('Rol con chat «solo ver» no puede responder', () =>
     bloqueado(ct.db('Mensaje', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[0], texto: 'x' } })),
   );
+  await prueba('Fotos en el chat: residente ↔ administración', async () => {
+    const key = await r1.subir('chat', 'foto.jpg', 'foto de la fuga', 'image/jpeg');
+    await ok(r1.portal('chat.enviar', { canal: 'ADMIN', imagenPath: key }));
+    const hilo = `${X.robles}#${X.unidadesRobles[0]}#ADMIN`;
+    const m = await hasta(() => ok(ag.db('Mensaje', 'mensajesPorHilo', { args: { hilo } })), (x) => x.some((y) => y.imagenUrl));
+    const conFoto = m.find((y) => y.imagenUrl);
+    esperar(conFoto && conFoto.texto === '📷 Foto' && !conFoto.imagenPath, JSON.stringify(conFoto).slice(0, 120));
+    esperar((await (await fetch(conFoto.imagenUrl)).text()) === 'foto de la fuga', 'la administración no abre la foto');
+    const r = await ok(ag.admin('chat.subirImagen', { condominioId: X.robles, nombre: 'foto-e2e-plano.jpg', tamano: 12 }));
+    esperar((await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: 'plano de obra' })).ok, 'no subió la foto');
+    await ok(ag.db('Mensaje', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[0], texto: 'Aquí el plano', imagenPath: r.path } }));
+    const v = await hasta(() => ok(r1.portal('chat.mensajes', { canal: 'ADMIN' })), (x) => x.filter((y) => y.imagenUrl).length === 2);
+    const deAdmin = v.find((y) => y.autorRol === 'ADMIN' && y.imagenUrl);
+    esperar(deAdmin && !deAdmin.imagenPath && (await (await fetch(deAdmin.imagenUrl)).text()) === 'plano de obra', JSON.stringify(deAdmin).slice(0, 120));
+    return 'foto enviada y recibida en ambos sentidos';
+  });
+  await prueba('Control de accesos: registrar, no repetir códigos y máximo 6', async () => {
+    const r = await ok(ag.admin('accesos.agregar', { userId: r1.sub, accesos: [{ tipo: 'Llavero de proximidad', codigo: 'E2E-001' }, { tipo: 'Control remoto de portón', codigo: 'P-77' }] }));
+    esperar(r.accesos.length === 2 && r.accesos[0].por === E('admin.general'), JSON.stringify(r.accesos[0]));
+    await bloqueado(ag.admin('accesos.agregar', { userId: r2.sub, accesos: [{ tipo: 'Llavero de proximidad', codigo: 'e2e 001' }] }));
+    await bloqueado(ag.admin('accesos.agregar', { userId: r1.sub, accesos: Array.from({ length: 5 }, (_, i) => ({ tipo: 'Tarjeta de proximidad', codigo: `T${i}` })) }));
+    await bloqueado(ag.admin('accesos.agregar', { userId: r1.sub, accesos: [{ tipo: 'Inventado', codigo: '1' }] }));
+    const l = await ok(ag.db('Perfil', 'list'));
+    esperar(JSON.parse(l.find((x) => x.userId === r1.sub).accesos).length === 2, 'no se guardaron');
+    return '2 accesos; repetido y exceso rechazados';
+  });
+  await prueba('Control de accesos: se registra con su estado (activado o suspendido)', async () => {
+    const r = await ok(ag.admin('accesos.agregar', { userId: r2.sub, accesos: [{ tipo: 'Tarjeta de proximidad', codigo: 'E2E-S1', estado: 'SUSPENDIDO' }, { tipo: 'Llave física', codigo: 'E2E-K1' }] }));
+    esperar(r.accesos[0].estado === 'SUSPENDIDO' && r.accesos[1].estado === 'ACTIVO', JSON.stringify(r.accesos));
+    return 'tarjeta suspendida, llave activada';
+  });
+  await prueba('Control de accesos: suspender y activar (importación del Excel)', async () => {
+    const l = await ok(ag.db('Perfil', 'list'));
+    const a = JSON.parse(l.find((x) => x.userId === r1.sub).accesos);
+    const r = await ok(ag.admin('accesos.estados', { cambios: [{ userId: r1.sub, accesoId: a[0].id, estado: 'SUSPENDIDO' }] }));
+    esperar(r.aplicados === 1, JSON.stringify(r));
+    const l2 = await ok(ag.db('Perfil', 'list'));
+    const a2 = JSON.parse(l2.find((x) => x.userId === r1.sub).accesos);
+    esperar(a2[0].estado === 'SUSPENDIDO' && a2[0].estadoPor === E('admin.general') && (a2[1].estado ?? 'ACTIVO') === 'ACTIVO', JSON.stringify(a2));
+    await bloqueado(ag.admin('accesos.estados', { cambios: [{ userId: r1.sub, accesoId: a[0].id, estado: 'APAGADO' }] }));
+    await bloqueado(ct.admin('accesos.estados', { cambios: [{ userId: r1.sub, accesoId: a[0].id, estado: 'ACTIVO' }] }));
+    const r3 = await ok(ag.admin('accesos.estados', { cambios: [{ userId: r1.sub, accesoId: a[0].id, estado: 'ACTIVO' }] }));
+    esperar(r3.aplicados === 1, JSON.stringify(r3));
+    return 'suspendido y reactivado';
+  });
+  await prueba('Control de accesos: solo el superadministrador da de baja', async () => {
+    const l = await ok(ag.db('Perfil', 'list'));
+    const id = JSON.parse(l.find((x) => x.userId === r1.sub).accesos)[0].id;
+    await bloqueado(ag.admin('accesos.eliminar', { userId: r1.sub, accesoId: id }));
+    await bloqueado(ct.admin('accesos.agregar', { userId: r1.sub, accesos: [{ tipo: 'Llave física', codigo: 'K1' }] }));
+    const r = await ok(sa.admin('accesos.eliminar', { userId: r1.sub, accesoId: id }));
+    esperar(r.accesos.length === 1, JSON.stringify(r.accesos));
+  });
+  await prueba('Chat: no se puede enviar la foto de otro ni de otro condominio', async () => {
+    const key = await r1.subir('chat', 'privada.jpg', 'privada', 'image/jpeg');
+    await bloqueado(r2.portal('chat.enviar', { canal: 'ADMIN', imagenPath: key }));
+    await bloqueado(ag.db('Mensaje', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[0], texto: 'x', imagenPath: `condominios/${X.torre}/chat/x.jpg` } }));
+    return bloqueado(ct.admin('chat.subirImagen', { condominioId: X.robles, nombre: 'x.jpg', tamano: 10 }));
+  });
 
   // =====================================================================
   grupo('Operación: incidentes, mantenimientos, amenidades y mascotas');
@@ -784,6 +863,13 @@ try {
     esperar(m.length === 2, `${m.length} mensajes`);
     const h = await ok(g1.portal('caseta.hilos'));
     esperar(h.some((x) => x.unidad === 'Casa 1'), 'sin hilo');
+  });
+  await prueba('Caseta envía una foto al residente', async () => {
+    const key = await g1.subir('chat', 'paquete.jpg', 'foto del paquete', 'image/jpeg');
+    await ok(g1.portal('caseta.enviar', { unidadId: X.unidadesRobles[0], imagenPath: key }));
+    const v = await hasta(() => ok(r1.portal('chat.mensajes', { canal: 'CASETA' })), (x) => x.some((y) => y.imagenUrl));
+    const f = v.find((y) => y.imagenUrl);
+    esperar(f && (await (await fetch(f.imagenUrl)).text()) === 'foto del paquete', JSON.stringify(f).slice(0, 120));
   });
   await prueba('Administrador consulta la bitácora de visitas', async () => {
     const v = await ok(ag.db('Visita', 'visitasPorCondominio', { args: { condominioId: X.robles } }));

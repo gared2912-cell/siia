@@ -4,14 +4,14 @@ import { adminCall, type Schema } from '../api';
 import { Empty, Field, Icon, Modal, fecha, hoy, money, periodoActual, useAction } from '../ui';
 import { useAdmin } from './AdminApp';
 import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
-import { CATEGORIAS_EGRESO, MAX_EVIDENCIAS_EGRESO } from '../../../amplify/functions/shared/finanzas';
+import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO } from '../../../amplify/functions/shared/finanzas';
 
 type Egreso = Schema['Egreso']['type'];
 
 const FORMAS_PAGO = ['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Domiciliación'];
 
 /** Selector de mes con flechas (anterior / siguiente). */
-function Mes({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function Mes({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const siguiente = (() => {
     const [a, m] = value.split('-').map(Number);
     return m === 12 ? `${a + 1}-01` : `${a}-${String(m + 1).padStart(2, '0')}`;
@@ -30,7 +30,7 @@ function Mes({ value, onChange }: { value: string; onChange: (v: string) => void
 }
 
 /** Enlace a un archivo de evidencia: admin-api firma la URL al tocarlo. */
-function VerEvidencia({ egresoId, ev }: { egresoId: string; ev: Evidencia }) {
+export function VerEvidencia({ egresoId, ev }: { egresoId: string; ev: Evidencia }) {
   const { run } = useAction();
   const abrir = () =>
     run(async () => {
@@ -80,7 +80,8 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
                 <div className="list-main">
                   <strong>
                     {e.concepto} · {money(e.monto)}
-                  </strong>
+                  </strong>{' '}
+                  {e.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
                   <div className="list-sub">
                     {fecha(e.fecha)} · {e.categoria}
                     {e.proveedor && ` · ${e.proveedor}`}
@@ -132,7 +133,9 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
 
 type Archivo = { ev?: Evidencia; file?: File };
 
-function EditarEgreso({ e, onClose, onDone }: { e: Partial<Egreso>; onClose: () => void; onDone: (fecha: string) => void }) {
+/** Alta o edición de un egreso. Con `fondo`, es un gasto pagado con el fondo de amenidades. */
+export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>; fondo?: boolean; onClose: () => void; onDone: (fecha: string) => void }) {
+  const delFondo = fondo || e.fondo === FONDO_AMENIDADES;
   const { condoId } = useAdmin();
   const [f, setF] = useState({
     fecha: e.fecha ?? hoy(),
@@ -170,14 +173,20 @@ function EditarEgreso({ e, onClose, onDone }: { e: Partial<Egreso>; onClose: () 
         if (!put.ok) throw new Error(`No se pudo subir ${file.name}. Intenta de nuevo.`);
         evidencias.push({ path: r.path, nombre: file.name || nombre });
       }
-      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias });
+      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias, fondo: delFondo ? FONDO_AMENIDADES : null });
     }, e.id ? 'Egreso actualizado' : 'Egreso registrado');
     if (okk) onDone(f.fecha);
   }
 
   return (
-    <Modal title={e.id ? 'Editar egreso' : 'Registrar egreso'} onClose={onClose} wide>
+    <Modal title={delFondo ? (e.id ? 'Editar gasto del fondo de amenidades' : 'Gasto del fondo de amenidades') : e.id ? 'Editar egreso' : 'Registrar egreso'} onClose={onClose} wide>
       <form className="form" onSubmit={guardar}>
+        {delFondo && (
+          <p className="small muted" style={{ margin: 0 }}>
+            En qué se usó el ahorro de amenidades. Se descuenta del fondo, también cuenta como egreso del condominio y los residentes lo ven en su
+            portal con su evidencia.
+          </p>
+        )}
         <div className="form-2">
           <Field label="Fecha del gasto">
             <input required type="date" value={f.fecha} onChange={(x) => setF({ ...f, fecha: x.target.value })} />

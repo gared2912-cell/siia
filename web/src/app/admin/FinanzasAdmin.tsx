@@ -4,6 +4,7 @@ import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { BalanceMensual, EgresosAdmin } from './Egresos';
+import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
 import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
 
 type Pago = Schema['Pago']['type'];
@@ -20,16 +21,17 @@ export function FinanzasAdmin() {
   const gestiona = puede('finanzas', 'editar');
   const valida = tiene('finanzas.validarPagos');
   const { data, error, loading, reload } = useLoad(async () => {
-    const [pagos, cargos, egresos, saldos] = await Promise.all([
+    const [pagos, cargos, egresos, saldos, reservas] = await Promise.all([
       all<Pago>((o) => db.models.Pago.pagosPorCondominio({ condominioId: id }, o)),
       all<Cargo>((o) => db.models.Cargo.cargosPorCondominio({ condominioId: id }, o)),
       all<Egreso>((o) => db.models.Egreso.egresosPorCondominio({ condominioId: id }, o)),
       all<SaldoMensual>((o) => db.models.SaldoMensual.saldosPorCondominio({ condominioId: id }, o)),
+      adminCall<ReservaFin[]>('amenidades.reservas', { condominioId: id }),
     ]);
-    return { pagos, cargos, egresos, saldos };
+    return { pagos, cargos, egresos, saldos, reservas };
   }, [id]);
   const [vista, setVista] = useState<'ingresos' | 'egresos' | 'balance'>('ingresos');
-  const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos'>('residentes');
+  const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos' | 'amenidades'>('residentes');
   const [generar, setGenerar] = useState(false);
   const [cobranza, setCobranza] = useState(false);
   const [cargo, setCargo] = useState(false);
@@ -41,6 +43,7 @@ export function FinanzasAdmin() {
   if (error) return <ErrorBox error={error} retry={reload} />;
   const { pagos, cargos } = data!;
   const hoyStr = hoy();
+  const amenidadesPend = reservasPorAprobar(data!.reservas, pagos).length;
   const revision = pagos.filter((p) => p.estado === 'EN_REVISION').sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const procesados = pagos.filter((p) => p.estado !== 'EN_REVISION').sort((a, b) => String(b.validadoEn ?? b.createdAt).localeCompare(String(a.validadoEn ?? a.createdAt)));
   const cargosVista = cargos
@@ -127,11 +130,13 @@ export function FinanzasAdmin() {
           ['pagos', 'Pagos procesados'],
           ['cargos', 'Cargos'],
           ['saldos', 'Saldos por unidad'],
+          ['amenidades', amenidadesPend ? `Amenidades (${amenidadesPend})` : 'Amenidades'],
         ]}
       />
       )}
 
       {vista === 'ingresos' && tab === 'residentes' && <ResidentesFinanzas pagos={pagos} cargos={cargos} />}
+      {vista === 'ingresos' && tab === 'amenidades' && <AmenidadesFinanzas datos={data!} reservas={data!.reservas} reload={() => reload(true)} />}
 
       {vista === 'ingresos' && tab === 'revision' && (
         <section className="panel">

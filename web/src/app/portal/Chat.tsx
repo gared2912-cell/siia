@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { portal } from '../api';
+import { portal, subirArchivo } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { PageHead, Seg } from '../ui';
 import type { ModProps } from './PortalApp';
@@ -37,7 +37,7 @@ export function Chat({ perfil, has }: ModProps) {
             if (chat[canal]) refrescar();
             return r;
           }}
-          enviar={(texto) => portal('chat.enviar', { canal, texto })}
+          enviar={async (texto, imagen) => portal('chat.enviar', { canal, texto, imagenPath: imagen ? await subirArchivo(imagen, 'chat') : undefined })}
         />
       </section>
     </div>

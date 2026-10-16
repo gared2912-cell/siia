@@ -6,6 +6,7 @@ import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, errMsg, fecha
 import { claveUnidad, etiquetaUnidad, prefijoUnidad } from '../../../amplify/functions/shared/unidades';
 import { useAdmin, type Unidad } from './AdminApp';
 import { descargarMachote, leerMachote, type FilaActual, type FilaMachote } from './excel';
+import { ChatUnidad } from './Comunicacion';
 
 type Perfil = Schema['Perfil']['type'];
 type Cuenta = { status?: string; enabled?: boolean; creado?: string };
@@ -24,6 +25,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
   const veUsuarios = puede('usuarios');
   const gestionaUsuarios = puede('usuarios', 'editar');
   const gestionaUnidades = puede('condominios', 'editar');
+  const veChat = puede('chat');
   const perfiles = useLoad(
     () => (veUsuarios ? all<Perfil>((o) => db.models.Perfil.list(o)) : Promise.resolve([] as Perfil[])),
     [veUsuarios],
@@ -39,6 +41,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
     | { t: 'asignar'; p: Perfil }
     | { t: 'persona'; p: Perfil }
     | { t: 'contrasena'; p: Perfil }
+    | { t: 'chat'; p: Perfil }
     | null
   >(null);
   const { run, busy } = useAction();
@@ -91,8 +94,16 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
 
   /** Acciones de un residente o vigilante según su estado. */
   const acciones = (p: Perfil) =>
-    gestionaUsuarios && (
+    (gestionaUsuarios || veChat) && (
       <div className="row-actions">
+        {veChat && p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.unidadId && (
+          <button className="btn-app sm secondary" onClick={() => setModal({ t: 'chat', p })}>
+            <Icon name="chat" />
+            Chat
+          </button>
+        )}
+        {gestionaUsuarios && (
+          <>
         {(p.estado === 'PENDIENTE' || p.estado === 'RECHAZADO') && (
           <button className="btn-app sm" onClick={() => setModal({ t: 'asignar', p })}>
             Autorizar
@@ -117,15 +128,15 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
         )}
         {p.estado === 'APROBADO' && (
           <>
+            {p.rol === 'RESIDENTE' && !unidades.some((u) => u.id === p.unidadId) && (
+              <button className="btn-app sm" onClick={() => setModal({ t: 'asignar', p })}>
+                Asignar unidad
+              </button>
+            )}
             <button className="btn-app sm secondary" disabled={busy} onClick={() => setModal({ t: 'contrasena', p })}>
               <Icon name="shield" />
               Contraseña
             </button>
-            {p.rol === 'RESIDENTE' && (
-              <button className="btn-app sm secondary" onClick={() => setModal({ t: 'asignar', p })}>
-                Cambiar unidad
-              </button>
-            )}
             <button className="btn-app sm danger" disabled={busy} onClick={() => confirm(`¿Suspender el acceso de ${p.email}?`) && accion('suspender', p, 'Acceso suspendido')}>
               Suspender
             </button>
@@ -144,6 +155,8 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
           >
             Eliminar
           </button>
+        )}
+          </>
         )}
       </div>
     );
@@ -291,6 +304,11 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
         <Contrasena p={modal.p} sinPrimerIngreso={sinPrimerIngreso(modal.p)} onClose={() => (setModal(null), cuentas.reload(true))} />
       )}
       {modal?.t === 'persona' && <EditarPersona p={modal.p} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />}
+      {modal?.t === 'chat' && (
+        <Modal title={`Chat con ${unidades.find((u) => u.id === modal.p.unidadId)?.etiqueta ?? ''} · ${modal.p.nombre || modal.p.email}`} onClose={() => setModal(null)} wide>
+          <ChatUnidad unidadId={modal.p.unidadId!} />
+        </Modal>
+      )}
       {modal?.t === 'asignar' && <AsignarUnidad perfil={modal.p} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />}
     </div>
   );
@@ -642,15 +660,18 @@ function CamposPersona({ d, onChange, disabled }: { d: DatosPersona; onChange: (
 }
 
 function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residentes: Perfil[]; onClose: () => void; onDone: () => void }) {
-  const { puede } = useAdmin();
+  const { puede, unidades, condoId } = useAdmin();
   const gestionaUnidad = puede('condominios', 'editar');
   const gestionaUsuarios = puede('usuarios', 'editar');
   const [f, setF] = useState({ etiqueta: u.etiqueta, fechaEntrega: u.fechaEntrega ?? '', propietario: u.propietario ?? '', notas: u.notas ?? '' });
   const [personas, setPersonas] = useState<DatosPersona[]>(() => residentes.map(datosDe));
+  // Casa o departamento de cada residente: cambiarla aquí lo mueve de unidad.
+  const [destino, setDestino] = useState<string[]>(() => residentes.map((p) => p.unidadId ?? u.id));
   const { run, busy } = useAction();
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     let accesos = 0;
+    let movidos = 0;
     const okk = await run(async () => {
       const unidadCambia =
         f.etiqueta.trim() !== u.etiqueta || f.fechaEntrega !== (u.fechaEntrega ?? '') || f.propietario !== (u.propietario ?? '') || f.notas !== (u.notas ?? '');
@@ -666,9 +687,17 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
         );
       }
       if (gestionaUsuarios) for (const [i, p] of residentes.entries()) if (await guardarPersona(p, personas[i])) accesos++;
+      if (gestionaUsuarios)
+        for (const [i, p] of residentes.entries()) {
+          if (destino[i] && destino[i] !== (p.unidadId ?? u.id)) {
+            await adminCall('aprobar', { userId: p.userId, rol: 'RESIDENTE', condominioId: condoId, unidadId: destino[i] });
+            movidos++;
+          }
+        }
     }, 'Cambios guardados');
     if (okk) {
       if (accesos) alert('Enviamos accesos nuevos al correo actualizado.');
+      if (movidos) alert(`${movidos === 1 ? 'El residente cambió' : 'Los residentes cambiaron'} de casa o departamento.`);
       onDone();
     }
   }
@@ -687,6 +716,17 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
           <fieldset key={p.userId} className="fld" style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, margin: 0, display: 'grid', gap: 12 }}>
             <span>Residente{residentes.length > 1 ? ` ${i + 1}` : ''}</span>
             <CamposPersona d={personas[i]} onChange={(d) => setPersonas(personas.map((x, j) => (j === i ? d : x)))} disabled={!gestionaUsuarios} />
+            {p.estado === 'APROBADO' && (
+              <Field label="Casa o departamento" hint="Para mover al residente a otra unidad del condominio.">
+                <select value={destino[i]} onChange={(e) => setDestino(destino.map((x, j) => (j === i ? e.target.value : x)))} disabled={!gestionaUsuarios}>
+                  {unidades.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.etiqueta}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
           </fieldset>
         ))}
         <Field label="Propietario" hint="Si es distinto del residente (por ejemplo, unidad rentada).">
@@ -730,7 +770,7 @@ function EditarPersona({ p, onClose, onDone }: { p: Perfil; onClose: () => void;
 }
 
 /** Dos formas de dar acceso: reenviarlo al correo registrado o generar una contraseña para compartirla. */
-function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPrimerIngreso: boolean; onClose: () => void }) {
+export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPrimerIngreso: boolean; onClose: () => void }) {
   const [escribir, setEscribir] = useState(false);
   const [pass, setPass] = useState('');
   const [generada, setGenerada] = useState('');

@@ -1,5 +1,5 @@
 import { all, db } from '../api';
-import { ErrorBox, Loading, PageHead, money, hoy, useLoad } from '../ui';
+import { ErrorBox, Icon, Loading, PageHead, money, hoy, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 
 export function Panel({ go }: { go: (k: string) => void }) {
@@ -41,7 +41,7 @@ export function Panel({ go }: { go: (k: string) => void }) {
   // Las solicitudes de acceso (permiso «usuarios») se atienden en Condominios › Residentes.
   const tarjeta = (label: string, valor: string | number, sub: string, destino: string, alerta = false) =>
     puede(destino) && (
-    <button className="tile" style={{ display: 'block' }} onClick={() => go(destino === 'usuarios' ? 'condominios' : destino)}>
+    <button className="tile" style={{ display: 'block' }} onClick={() => go(destino === 'usuarios' ? 'condominios/residentes' : destino)}>
       <div className="stat-label">{label}</div>
       <div className={`stat-value ${alerta ? 'is-alert' : ''}`}>{valor}</div>
       <span>{sub}</span>
@@ -57,6 +57,19 @@ export function Panel({ go }: { go: (k: string) => void }) {
         title="Panel"
         sub={`${condo!.nombre} · ${unidades.length} unidades${puede('usuarios') ? ` · ${d.residentes} residentes con acceso` : ''}`}
       />
+      {puede('usuarios') && (
+        <button className="tile tile-acceso" onClick={() => go('residentes')}>
+          <Icon name="users" />
+          <span className="tile-acceso-txt">
+            <strong>Residentes</strong>
+            <span>
+              {unidades.length} {condo!.tipoUnidad === 'DEPARTAMENTO' ? 'departamentos' : condo!.tipoUnidad === 'CASA' ? 'casas' : 'unidades'}
+              {puede('usuarios') ? ` · ${d.residentes} con acceso` : ''} · chat y contraseña
+            </span>
+          </span>
+          <Icon name="arrow" />
+        </button>
+      )}
       {!pendientes && !situacion && <div className="alert">Tu rol no incluye secciones con indicadores. Usa el menú para ir a tus secciones.</div>}
       {pendientes && <h2 style={{ fontSize: '1.1rem' }}>Pendientes de autorizar</h2>}
       <div className="grid-cards">

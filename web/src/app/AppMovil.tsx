@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { adminCall, portal } from './api';
 import { Empty, ErrorBox, Icon, Loading, Modal, useAction, useLoad, useToast } from './ui';
 import { VAPID_PUBLIC_KEY, type Categoria } from '../../amplify/functions/shared/notificaciones';
+import { PermisoCamara } from './camara';
 
 export type ApiApp = 'portal' | 'admin';
 type Estado = { categorias: Categoria[]; apagadas: string[]; silencio: boolean; dispositivos: number; esteDispositivo: boolean };
@@ -230,6 +231,8 @@ export function AppYNotificaciones({ api, onClose }: { api: ApiApp; onClose: () 
             </>
           )}
         </section>
+
+        <PermisoCamara />
 
         {estado.data && (
           <section className="app-paso">

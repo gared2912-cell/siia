@@ -91,6 +91,8 @@ const schema = a
         notifSilencio: a.boolean(),
         // Solo RESIDENTE: último mensaje de la administración / caseta que ya vio (createdAt), para el contador de chat
         chatLeidoAdmin: a.string(),
+        // Solo RESIDENTE: llaveros, tarjetas, controles… asignados (ver shared/accesos.ts)
+        accesos: a.json(),
         chatLeidoCaseta: a.string(),
       })
       .identifier(['userId'])
@@ -148,6 +150,8 @@ const schema = a
         formaPago: a.string(),
         monto: a.float().required(),
         evidencias: a.json(),
+        // AMENIDADES: gasto pagado con el fondo de amenidades (se descuenta del ahorro de amenidades)
+        fondo: a.string(),
         registradoPor: a.string(),
         registradoPorNombre: a.string(),
       })
@@ -213,6 +217,8 @@ const schema = a
         autorNombre: a.string(),
         autorRol: a.string(),
         texto: a.string().required(),
+        // Foto adjunta (S3): de residentes y caseta en su carpeta; de la administración en condominios/<id>/chat/
+        imagenPath: a.string(),
       })
       .secondaryIndexes((i) => [
         i('hilo').name('byHilo').queryField('mensajesPorHilo'),

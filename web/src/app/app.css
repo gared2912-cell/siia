@@ -815,6 +815,72 @@ table.tbl {
 }
 .chat-form .input {
   flex: 1;
+  min-width: 0;
+}
+.chat-form .chat-clip {
+  flex: none;
+  align-self: center;
+  color: var(--teal-dark);
+}
+@media (max-width: 420px) {
+  .chat-form .btn-app {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+/* Foto en el chat */
+.chat-foto {
+  display: block;
+  padding: 0;
+  margin: 4px 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.chat-foto img {
+  display: block;
+  width: 220px;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+.chat-adjunto {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 0;
+}
+.chat-adjunto img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: none;
+}
+.chat-adjunto span {
+  flex: 1;
+}
+.foto-completa {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 20, 30, 0.88);
+  cursor: zoom-out;
+}
+.foto-completa img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+}
+.foto-completa .icon-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: #fff;
 }
 
 /* QR / pases */
@@ -1342,4 +1408,237 @@ table.tbl {
   border-radius: 50%;
   background: var(--teal);
   border: 2px solid #fff;
+}
+
+/* Acceso directo del Panel (p. ej. Residentes) */
+.tile.tile-acceso {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+}
+.tile-acceso > svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--teal-dark);
+}
+.tile-acceso > svg:last-child {
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+}
+.tile-acceso-txt {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.tile-acceso-txt strong {
+  font-size: 1.05rem;
+  color: var(--slate);
+}
+
+/* Control de accesos */
+.accesos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.acceso-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  font-size: 0.78rem;
+  color: var(--slate);
+}
+.acceso-fila {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 0.9fr auto;
+  gap: 10px;
+  align-items: end;
+}
+@media (max-width: 560px) {
+  .acceso-fila {
+    grid-template-columns: 1fr 1fr auto;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--line);
+  }
+  .acceso-fila > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Etiquetas de estado (pastillas) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: var(--bg-soft);
+  color: var(--slate);
+}
+.pill.sm {
+  padding: 2px 8px;
+  font-size: 0.74rem;
+}
+.pill.ok {
+  background: #e6f4ec;
+  color: #1e7d4f;
+}
+.pill.mal {
+  background: #fdecea;
+  color: #b42318;
+}
+.pill.warn {
+  background: #fff4d6;
+  color: #8a6100;
+}
+.pill.info {
+  background: #e8f8f6;
+  color: #007c7d;
+}
+.pill b {
+  font-weight: 700;
+}
+.pill-punto {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Panel › Residentes: una tarjeta por casa o departamento */
+.res-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.res-unidad {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+}
+.res-cab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line);
+}
+.res-titulo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.res-titulo strong {
+  font-size: 1.05rem;
+  color: var(--slate);
+}
+.res-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.res-persona {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 14px;
+}
+.res-persona + .res-persona {
+  border-top: 1px dashed var(--line);
+}
+.res-persona-info {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+.res-nombre {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.res-persona-info .accesos {
+  margin-top: 0;
+}
+@media (max-width: 560px) {
+  .res-cab .res-acciones,
+  .res-persona .res-acciones {
+    width: 100%;
+  }
+  .res-acciones .btn-app {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* Historial de pagos en pantalla */
+.hist-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.hist-resumen > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+  text-align: center;
+}
+.hist-resumen span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hist-resumen strong {
+  font-size: 1.15rem;
+}
+.hist-resumen .ok {
+  background: #e6f4ec;
+}
+.hist-resumen .ok strong {
+  color: #1e7d4f;
+}
+.hist-resumen .mal {
+  background: #fdecea;
+}
+.hist-resumen .mal strong {
+  color: #b42318;
+}
+.hist-resumen .info {
+  background: #e8f8f6;
+}
+.hist-resumen .info strong {
+  color: #007c7d;
+}
+
+.acceso-chip.suspendido {
+  background: #fdecea;
+  border-color: #f4c7c3;
+  color: #b42318;
+}
+.acceso-chip em {
+  font-style: normal;
+  font-weight: 600;
 }

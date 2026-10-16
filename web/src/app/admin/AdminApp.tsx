@@ -13,6 +13,7 @@ import { Condominios } from './Condominios';
 import { FinanzasAdmin } from './FinanzasAdmin';
 import { ComunicadosAdmin, EncuestasAdmin, ChatAdmin } from './Comunicacion';
 import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, MascotasAdmin } from './Operacion';
+import { ResidentesRapido } from './ResidentesRapido';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -170,7 +171,11 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   useInsigniaApp(chatPorResponder);
   const nav = secciones.map((s) => (s.key === 'chat' ? { ...s, count: chatPorResponder } : s));
 
-  const actual = secciones.some((s) => s.key === cur) ? cur : 'panel';
+  // «sección/subsección» abre una parte concreta (p. ej. condominios/residentes, acceso directo desde el Panel).
+  const [base, sub] = cur.split('/');
+  // «residentes»: lista rápida del Panel (chat y contraseña); se muestra dentro de Panel.
+  const rapido = base === 'residentes' && puede('usuarios');
+  const actual = secciones.some((s) => s.key === base) ? base : 'panel';
   const sec = secciones.find((s) => s.key === actual)!;
   const necesitaCondo = !sec.global && !condo;
 
@@ -217,9 +222,9 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
           </div>
         ) : (
           <>
-            {actual === 'panel' && <Panel go={go} />}
+            {actual === 'panel' && (rapido ? <ResidentesRapido go={go} /> : <Panel go={go} />)}
             {actual === 'administradores' && <Administradores />}
-            {actual === 'condominios' && <Condominios />}
+            {actual === 'condominios' && <Condominios key={cur} inicio={sub === 'residentes' ? 'residentes' : undefined} />}
             {actual === 'finanzas' && <FinanzasAdmin />}
             {actual === 'comunicados' && <ComunicadosAdmin />}
             {actual === 'encuestas' && <EncuestasAdmin />}

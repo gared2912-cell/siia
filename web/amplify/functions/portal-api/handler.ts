@@ -20,6 +20,7 @@ import {
   type Item,
 } from '../shared/db';
 import { emailDe } from '../shared/cognito';
+import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../shared/finanzas';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
 import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendientes';
@@ -59,7 +60,22 @@ const TIPOS_ARCHIVO: Record<string, RegExp> = {
   comprobantes: /^(image\/[\w.+-]+|application\/pdf)$/,
   incidentes: /^image\/[\w.+-]+$/,
   mascotas: /^image\/[\w.+-]+$/,
+  chat: /^image\/[\w.+-]+$/,
 };
+
+// Mensaje de chat con su foto como URL temporal (la ruta en S3 no se comparte).
+const TEXTO_FOTO = '📷 Foto';
+async function conImagen(m: Item) {
+  const { imagenPath, ...rest } = sinPrivados(m);
+  return imagenPath ? { ...rest, imagenUrl: await fotoUrl(imagenPath) } : rest;
+}
+/** Texto y foto de un mensaje nuevo: al menos uno de los dos. */
+async function contenidoMensaje(p: Item, sub: string) {
+  const imagenPath = p.imagenPath ? await archivoPropio(p.imagenPath, sub, 'chat') : null;
+  const texto = str(p.texto, 2000) || (imagenPath ? TEXTO_FOTO : '');
+  if (!texto) fail('Escribe un mensaje.');
+  return { texto, ...(imagenPath ? { imagenPath } : {}) };
+}
 async function archivoPropio(path: string, sub: string, carpeta: keyof typeof TIPOS_ARCHIVO): Promise<string> {
   const p = str(path, 300);
   const [raiz, identidad, subcarpeta, nombre, ...resto] = p.split('/');
@@ -257,13 +273,12 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     // Abrir la conversación la marca como leída (solo se escribe si llegó algo nuevo)
     const ultimo = items.filter(deEquipo).reduce((max, m) => (m.createdAt > max ? m.createdAt : max), '');
     if (ultimo > leidoHasta(perfil, canal, items)) await update('Perfil', { userId: perfil.userId }, { [CAMPO_LEIDO[canal]]: ultimo });
-    return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-200).map(sinPrivados);
+    return Promise.all(items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-200).map(conImagen));
   },
 
   async 'chat.enviar'({ condominio, unidad, perfil, sub, p }) {
     const canal = p.canal === 'CASETA' ? 'CASETA' : 'ADMIN';
-    const texto = str(p.texto, 2000);
-    if (!texto) fail('Escribe un mensaje.');
+    const contenido = await contenidoMensaje(p, sub);
     const m = await put('Mensaje', {
       condominioId: condominio.id,
       unidadId: unidad!.id,
@@ -272,9 +287,9 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       autorId: sub,
       autorNombre: `${perfil.nombre ?? perfil.email} · ${unidad!.etiqueta}`,
       autorRol: 'RESIDENTE',
-      texto,
+      ...contenido,
     });
-    return sinPrivados(m);
+    return conImagen(m);
   },
 
   // ----- Incidentes y mantenimientos -----
@@ -323,6 +338,44 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         .sort((a, b) => (b.fecha + b.horaInicio).localeCompare(a.fecha + a.horaInicio))
         .map((r) => ({ ...sinPrivados(r), ...(r.estado === 'PENDIENTE_PAGO' ? { limitePago: limitePago(r).toISOString() } : {}) })),
     };
+  },
+
+  // Ahorro de amenidades del condominio: cuánto se ha recaudado por reservas, en qué se ha gastado y cuánto queda.
+  async 'amenidades.fondo'({ condominio }) {
+    const [pagos, cargos, egresos] = await Promise.all([
+      byIndex('Pago', 'byCondominio', 'condominioId', condominio.id),
+      byIndex('Cargo', 'byCondominio', 'condominioId', condominio.id),
+      byIndex('Egreso', 'byCondominio', 'condominioId', condominio.id),
+    ]);
+    const f = calcularFondoAmenidades({ pagos: pagos as any, cargos: cargos as any, egresos: egresos as any }, hoyMX().slice(0, 7));
+    const gastos = egresos
+      .filter((e) => e.fondo === FONDO_AMENIDADES)
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+      .map((e) => {
+        let ev: any = e.evidencias;
+        for (let k = 0; k < 2 && typeof ev === 'string'; k++) ev = JSON.parse(ev);
+        return {
+          id: e.id,
+          fecha: e.fecha,
+          categoria: e.categoria,
+          concepto: e.concepto,
+          proveedor: e.proveedor ?? null,
+          monto: e.monto,
+          evidencias: (Array.isArray(ev) ? ev : []).map((x: Item) => ({ path: x.path, nombre: x.nombre })),
+        };
+      });
+    return { ...f, gastos };
+  },
+
+  // URL firmada de una evidencia de gasto del fondo de amenidades (transparencia para los residentes).
+  async 'amenidades.fondoEvidencia'({ condominio, p }) {
+    const e = await get('Egreso', { id: str(p.id, 64) });
+    if (!e || e.condominioId !== condominio.id || e.fondo !== FONDO_AMENIDADES) fail('Archivo no disponible.');
+    let ev: any = e!.evidencias;
+    for (let k = 0; k < 2 && typeof ev === 'string'; k++) ev = JSON.parse(ev);
+    const path = str(p.path, 400);
+    if (!Array.isArray(ev) || !ev.some((x: Item) => x.path === path)) fail('Archivo no disponible.');
+    return { url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path }), { expiresIn: 900 }) };
   },
 
   async 'amenidades.documento'({ condominio, p }) {
@@ -686,7 +739,7 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
     modulo: 'chat',
     async fn({ condominio, p }) {
       const items = await byIndex('Mensaje', 'byHilo', 'hilo', `${condominio.id}#${str(p.unidadId, 64)}#CASETA`);
-      return items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-200).map(sinPrivados);
+      return Promise.all(items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-200).map(conImagen));
     },
   },
 
@@ -695,8 +748,7 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
     async fn({ condominio, perfil, sub, p }) {
       const unidad = await get('Unidad', { id: str(p.unidadId, 64) });
       if (!unidad || unidad.condominioId !== condominio.id) fail('Selecciona la unidad.');
-      const texto = str(p.texto, 2000);
-      if (!texto) fail('Escribe un mensaje.');
+      const contenido = await contenidoMensaje(p, sub);
       const m = await put('Mensaje', {
         condominioId: condominio.id,
         unidadId: unidad!.id,
@@ -705,9 +757,9 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
         autorId: sub,
         autorNombre: `Caseta · ${perfil.nombre ?? ''}`.trim(),
         autorRol: 'VIGILANTE',
-        texto,
+        ...contenido,
       });
-      return sinPrivados(m);
+      return conImagen(m);
     },
   },
 };

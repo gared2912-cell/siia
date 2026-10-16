@@ -163,7 +163,91 @@ export function Amenidades(_: ModProps) {
           }}
         />
       )}
+      <FondoAmenidades />
     </div>
+  );
+}
+
+type Fondo = {
+  saldo: number;
+  totalIngresos: number;
+  totalGastos: number;
+  desde: string;
+  meses: { periodo: string; inicial: number; ingresos: number; gastos: number; final: number }[];
+  gastos: { id: string; fecha: string; categoria: string; concepto: string; proveedor?: string | null; monto: number; evidencias: { path: string; nombre: string }[] }[];
+};
+const mesLargo = (p: string) => {
+  const [a, m] = p.split('-').map(Number);
+  const s = new Date(a, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+/** Ahorro de amenidades: lo recaudado por reservas, en qué se ha usado (con evidencia) y cuánto queda. */
+function FondoAmenidades() {
+  const { data } = useLoad(() => portal<Fondo>('amenidades.fondo'));
+  const { run } = useAction();
+  if (!data || (!data.totalIngresos && !data.gastos.length)) return null;
+  const abrir = (id: string, path: string) =>
+    run(async () => {
+      const ventana = window.open('', '_blank');
+      const { url } = await portal<{ url: string }>('amenidades.fondoEvidencia', { id, path });
+      if (ventana) ventana.location.href = url;
+      else window.location.href = url;
+    });
+  return (
+    <section className="panel">
+      <h2>Ahorro de amenidades</h2>
+      <p className="small muted" style={{ marginTop: -6 }}>
+        Lo que se recauda por la renta de amenidades se guarda en un fondo. Aquí ves cuánto hay y en qué se ha usado.
+      </p>
+      <div className="grid-cards">
+        <div className="stat" style={{ background: 'var(--teal-dark)', borderColor: 'var(--teal-dark)' }}>
+          <div className="stat-label" style={{ color: '#cff3ef' }}>
+            Ahorro disponible
+          </div>
+          <div className="stat-value" style={{ color: '#fff' }}>
+            {money(data.saldo)}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Recaudado</div>
+          <div className="stat-value is-ok">{money(data.totalIngresos)}</div>
+          <div className="small muted">Desde {mesLargo(data.desde).toLowerCase()}</div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Usado</div>
+          <div className="stat-value">{money(data.totalGastos)}</div>
+          <div className="small muted">{data.gastos.length} gasto(s) con evidencia</div>
+        </div>
+      </div>
+      <h3 style={{ marginTop: 18 }}>En qué se ha usado</h3>
+      {data.gastos.length ? (
+        <ul className="list">
+          {data.gastos.map((g) => (
+            <li key={g.id} style={{ alignItems: 'flex-start' }}>
+              <div className="list-main">
+                <strong>
+                  {g.concepto} · {money(g.monto)}
+                </strong>
+                <div className="list-sub">
+                  {fecha(g.fecha)} · {g.categoria}
+                  {g.proveedor && ` · ${g.proveedor}`}
+                </div>
+                <div className="row-actions" style={{ marginTop: 4, gap: 10 }}>
+                  {g.evidencias.map((ev) => (
+                    <button key={ev.path} type="button" className="linklike small" onClick={() => abrir(g.id, ev.path)}>
+                      <Icon name="file" /> {ev.nombre.length > 28 ? `${ev.nombre.slice(0, 25)}…` : ev.nombre}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Empty icon="money">Aún no se ha usado el fondo.</Empty>
+      )}
+    </section>
   );
 }
 

@@ -293,9 +293,8 @@ function NuevaEncuesta({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 // ---------- Chat con residentes ----------
 export function ChatAdmin({ onCambio }: { onCambio?: () => void }) {
-  const { condo, unidades, etiqueta, yo, puede } = useAdmin();
+  const { condo, unidades, etiqueta } = useAdmin();
   const cid = condo!.id;
-  const responde = puede('chat', 'editar');
   const hilos = useLoad(() => all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: cid }, o)), [cid]);
   usePoll(() => hilos.reload(true), 15000);
   const [unidadId, setUnidadId] = useState('');
@@ -345,37 +344,69 @@ export function ChatAdmin({ onCambio }: { onCambio?: () => void }) {
         </section>
         <section className="panel">
           {unidadId ? (
-            <ChatBox
-              key={unidadId}
-              deps={[unidadId]}
-              miRol="ADMIN"
-              cargar={async () =>
-                (await all<Mensaje>((o) => db.models.Mensaje.mensajesPorHilo({ hilo: `${cid}#${unidadId}#ADMIN` }, o)))
-                  .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-                  .map((m) => ({ id: m.id, texto: m.texto, autorNombre: m.autorNombre ?? '', autorRol: m.autorRol ?? '', createdAt: m.createdAt }) as Msg)
-              }
-              enviar={!responde ? undefined : async (texto) => {
-                ok(
-                  await db.models.Mensaje.create({
-                    condominioId: cid,
-                    unidadId,
-                    canal: 'ADMIN',
-                    hilo: `${cid}#${unidadId}#ADMIN`,
-                    autorNombre: 'Administración SIIA',
-                    autorRol: 'ADMIN',
-                    autorId: yo,
-                    texto,
-                  }),
-                );
-                hilos.reload(true);
-                onCambio?.();
-              }}
-            />
+            <ChatUnidad key={unidadId} unidadId={unidadId} onEnviado={() => (hilos.reload(true), onCambio?.())} />
           ) : (
             <Empty icon="chat">Selecciona una unidad para conversar.</Empty>
           )}
         </section>
       </div>
     </div>
+  );
+}
+
+/** Conversación de la administración con una unidad (canal ADMIN), con fotos. La usan Chat y Condominios › Residentes. */
+export function ChatUnidad({ unidadId, onEnviado }: { unidadId: string; onEnviado?: () => void }) {
+  const { condo, yo, puede } = useAdmin();
+  const cid = condo!.id;
+  const responde = puede('chat', 'editar');
+  return (
+    <ChatBox
+      deps={[unidadId]}
+      miRol="ADMIN"
+      cargar={async () =>
+        (await all<Mensaje>((o) => db.models.Mensaje.mensajesPorHilo({ hilo: `${cid}#${unidadId}#ADMIN` }, o)))
+          .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+          .map(
+            (m) =>
+              ({
+                id: m.id,
+                texto: m.texto,
+                autorNombre: m.autorNombre ?? '',
+                autorRol: m.autorRol ?? '',
+                createdAt: m.createdAt,
+                imagenUrl: (m as Mensaje & { imagenUrl?: string }).imagenUrl,
+              }) as Msg,
+          )
+      }
+      enviar={
+        !responde
+          ? undefined
+          : async (texto, imagen) => {
+              // La foto se sube a la carpeta del condominio con una URL firmada de admin-api.
+              let imagenPath: string | undefined;
+              if (imagen) {
+                const nombre = /\.[a-z0-9]+$/i.test(imagen.name) ? imagen.name : 'foto.jpg';
+                const r = await adminCall<{ url: string; path: string; contentType: string }>('chat.subirImagen', { condominioId: cid, nombre, tamano: imagen.size });
+                const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: imagen });
+                if (!put.ok) throw new Error('No se pudo subir la foto. Intenta de nuevo.');
+                imagenPath = r.path;
+              }
+              ok(
+                await db.models.Mensaje.create({
+                  condominioId: cid,
+                  unidadId,
+                  canal: 'ADMIN',
+                  hilo: `${cid}#${unidadId}#ADMIN`,
+                  autorNombre: 'Administración SIIA',
+                  autorRol: 'ADMIN',
+                  autorId: yo,
+                  texto,
+                  imagenPath,
+                }),
+              );
+              onEnviado?.();
+            }
+      }
+    />
   );
 }

@@ -32,7 +32,8 @@ import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
-import { CATEGORIAS_EGRESO, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
+import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
+import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -212,7 +213,7 @@ const REGLAS: Record<string, Regla> = {
   Mensaje: {
     seccion: 'chat',
     indices: { mensajesPorCondominio: 'condominioId', mensajesPorHilo: 'hilo' },
-    crear: ['condominioId', 'unidadId', 'canal', 'hilo', 'autorNombre', 'autorRol', 'autorId', 'texto'],
+    crear: ['condominioId', 'unidadId', 'canal', 'hilo', 'autorNombre', 'autorRol', 'autorId', 'texto', 'imagenPath'],
   },
   // Se atiende con la acción incidentes.atender (foto de evidencia obligatoria y bitácora).
   Incidente: { seccion: 'incidentes', indices: { incidentesPorCondominio: 'condominioId' } },
@@ -304,6 +305,14 @@ async function db(p: Item, yo: Yo) {
     if (campo === 'hilo') exigirCondo(yo, valor.split('#')[0]);
     if (campo === 'encuestaId') exigirCondo(yo, (await get('Encuesta', { id: valor }))?.condominioId);
     const items = await leerTodo((o) => M[op]({ [campo]: valor }, o));
+    // Fotos del chat: URL temporal en lugar de la ruta en S3.
+    if (m === 'Mensaje') {
+      return Promise.all(
+        items.map(async ({ imagenPath, ...x }) =>
+          imagenPath ? { ...x, imagenUrl: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: imagenPath }), { expiresIn: 3600 }) } : x,
+        ),
+      );
+    }
     // Todos los administradores ven el nombre de quien registró cada etapa; el correo solo el superadministrador.
     if (m === 'Incidente' && !yo.superadmin) {
       return items.map((i) => ({
@@ -341,6 +350,18 @@ async function db(p: Item, yo: Yo) {
       input.tipo = (TIPOS_CARGO_MANUAL as readonly string[]).includes(input.tipo) ? input.tipo : 'OTRO';
     }
     if (m === 'Mensaje') {
+      // Foto de la administración: subida con chat.subirImagen a la carpeta del condominio.
+      if (input.imagenPath) {
+        const path = str(input.imagenPath, 400);
+        if (!path.startsWith(`condominios/${input.condominioId}/chat/`)) fail('Foto no válida.');
+        const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: path })).catch(() => undefined);
+        if (!h) fail('No encontramos la foto. Vuelve a subirla.');
+        input.imagenPath = path;
+      } else delete input.imagenPath;
+      if (!str(input.texto, 2000)) {
+        if (!input.imagenPath) fail('Escribe un mensaje.');
+        input.texto = '📷 Foto';
+      }
       Object.assign(input, {
         canal: 'ADMIN',
         hilo: `${input.condominioId}#${input.unidadId}#ADMIN`,
@@ -558,6 +579,8 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
       formaPago: str(p.formaPago, 60) || null,
       monto,
       evidencias: JSON.stringify(evidencias),
+      // Gasto pagado con el fondo de amenidades (se descuenta del ahorro de amenidades)
+      fondo: p.fondo === FONDO_AMENIDADES ? FONDO_AMENIDADES : null,
     };
     if (actual) return update('Egreso', { id: actual.id }, datos);
     const yoPerfil = await get('Perfil', { userId: yo.sub });
@@ -584,6 +607,124 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     for (let k = 0; k < 2 && typeof lista === 'string'; k++) lista = JSON.parse(lista);
     if (!Array.isArray(lista) || !lista.some((x: Item) => x.path === path)) fail('Archivo no disponible.');
     return { url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path }), { expiresIn: 900 }) };
+  },
+
+  // Reservas de amenidades para Finanzas › Ingresos › Amenidades (con el nombre de la amenidad); basta con ver
+  // Finanzas. Las canceladas no se incluyen.
+  async 'amenidades.reservas'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'ver');
+    const [amenidades, reservas] = await Promise.all([
+      byIndex('Amenidad', 'byCondominio', 'condominioId', c.id),
+      byIndex('Reserva', 'byCondominio', 'condominioId', c.id),
+    ]);
+    const nombre = (id: string) => {
+      const a = amenidades.find((x) => x.id === id);
+      const padre = a?.parteDeId ? amenidades.find((x) => x.id === a.parteDeId) : undefined;
+      return a ? (padre ? `${padre.nombre} · ${a.nombre}` : a.nombre) : 'Amenidad';
+    };
+    return reservas
+      .filter((r) => r.estado !== 'CANCELADA')
+      .map(({ __typename, userId, ...r }) => ({ ...r, amenidad: nombre(r.amenidadId) }));
+  },
+
+  // Control de accesos: registrar llaveros, tarjetas, controles… de un residente (hasta 6). Lo registrado ya no se
+  // modifica; el mismo código no puede estar asignado dos veces en el condominio.
+  async 'accesos.agregar'(p, yo) {
+    exigir(yo, 'usuarios', 'editar');
+    const perfil = await get('Perfil', { userId: str(p.userId, 64) });
+    if (!perfil || perfil.rol !== 'RESIDENTE') fail('Residente no encontrado.');
+    exigirCondo(yo, perfil!.condominioId);
+    const actuales = accesosDe(perfil!.accesos);
+    const nuevos: Item[] = (Array.isArray(p.accesos) ? p.accesos : []).map((x: Item) => ({
+      tipo: str(x?.tipo, 60),
+      codigo: str(x?.codigo, 40),
+      estado: x?.estado === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'ACTIVO',
+    }));
+    if (!nuevos.length) fail('Agrega al menos un acceso.');
+    if (actuales.length + nuevos.length > MAX_ACCESOS) fail(`Cada residente puede tener hasta ${MAX_ACCESOS} accesos (ya tiene ${actuales.length}).`);
+    for (const x of nuevos) {
+      if (!TIPOS_ACCESO.includes(x.tipo)) fail('Elige el tipo de acceso.');
+      if (!x.codigo) fail(`Escribe el código del ${x.tipo.toLowerCase()}.`);
+    }
+    // Mismo código repetido en el condominio (o dos veces en esta captura)
+    const vecinos = await byIndex('Perfil', 'byCondominio', 'condominioId', perfil!.condominioId);
+    const usados = new Map<string, string>();
+    for (const v of vecinos) for (const a of accesosDe(v.accesos)) usados.set(claveCodigo(a.tipo, a.codigo), v.nombre || v.email);
+    for (const x of nuevos) {
+      const k = claveCodigo(x.tipo, x.codigo);
+      if (usados.has(k)) fail(`El ${x.tipo.toLowerCase()} con código ${x.codigo} ya está asignado a ${usados.get(k)}.`);
+      usados.set(k, perfil!.nombre || perfil!.email);
+    }
+    const yoPerfil = await get('Perfil', { userId: yo.sub });
+    const alta = now();
+    const accesos = [
+      ...actuales,
+      ...nuevos.map((x) => ({
+        id: randomUUID(),
+        tipo: x.tipo,
+        codigo: x.codigo,
+        estado: x.estado,
+        alta,
+        por: yo.email,
+        porNombre: yoPerfil?.nombre || null,
+        estadoEn: alta,
+        estadoPor: yo.email,
+      })),
+    ];
+    await update('Perfil', { userId: perfil!.userId }, { accesos: JSON.stringify(accesos) });
+    return { accesos };
+  },
+
+  // Activar o suspender accesos (Excel de control de accesos): [{ userId, accesoId, estado }].
+  async 'accesos.estados'(p, yo) {
+    exigir(yo, 'usuarios', 'editar');
+    const cambios: Item[] = Array.isArray(p.cambios) ? p.cambios.slice(0, 600) : [];
+    const porResidente = new Map<string, Item[]>();
+    for (const c of cambios) {
+      if (c?.estado !== 'ACTIVO' && c?.estado !== 'SUSPENDIDO') fail('Estado no válido: usa Activado o Suspendido.');
+      const id = str(c.userId, 64);
+      porResidente.set(id, [...(porResidente.get(id) ?? []), c]);
+    }
+    let aplicados = 0;
+    const ts = now();
+    for (const [userId, lista] of porResidente) {
+      const perfil = await get('Perfil', { userId });
+      if (!perfil || perfil.rol !== 'RESIDENTE') fail('Residente no encontrado.');
+      exigirCondo(yo, perfil!.condominioId);
+      const accesos = accesosDe(perfil!.accesos).map((a) => {
+        const c = lista.find((x) => x.accesoId === a.id);
+        if (!c || (a.estado ?? 'ACTIVO') === c.estado) return a;
+        aplicados++;
+        return { ...a, estado: c.estado, estadoEn: ts, estadoPor: yo.email };
+      });
+      await update('Perfil', { userId }, { accesos: JSON.stringify(accesos) });
+    }
+    return { aplicados };
+  },
+
+  // Baja de un acceso: solo el superadministrador.
+  async 'accesos.eliminar'(p, yo) {
+    if (!yo.superadmin) fail('Solo el superadministrador puede dar de baja un acceso.');
+    const perfil = await get('Perfil', { userId: str(p.userId, 64) });
+    if (!perfil) fail('Residente no encontrado.');
+    const accesos = accesosDe(perfil!.accesos).filter((a) => a.id !== str(p.accesoId, 64));
+    await update('Perfil', { userId: perfil!.userId }, { accesos: JSON.stringify(accesos) });
+    return { accesos };
+  },
+
+  // URL firmada para subir una foto al chat con una unidad (10 minutos, imagen de 10 MB máximo).
+  async 'chat.subirImagen'(p, yo) {
+    exigir(yo, 'chat', 'editar');
+    const c = await get('Condominio', { id: str(p.condominioId, 64) });
+    if (!c) fail('Selecciona el condominio.');
+    exigirCondo(yo, c!.id);
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'foto.jpg';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_FOTO[ext]) fail('Adjunta una imagen (JPG, PNG, WEBP o HEIC).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('La foto debe pesar máximo 10 MB.');
+    const path = `condominios/${c!.id}/chat/${randomUUID()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_FOTO[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_FOTO[ext] };
   },
 
   // Residentes de cada unidad (nombre, teléfono y correo) para el reporte de cobranza; basta con ver Finanzas.

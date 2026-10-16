@@ -16,10 +16,11 @@ type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
 const TIPOS = ['Condominio horizontal', 'Condominio vertical (edificio)', 'Fraccionamiento cerrado', 'Uso mixto / otro'];
 const nombreTipoUnidad = (t?: string | null) => (t === 'DEPARTAMENTO' ? 'Departamentos' : t === 'CASA' ? 'Casas' : 'Sin definir');
 
-export function Condominios() {
+/** `inicio`: abre directo la ficha del condominio seleccionado en esa pestaña (acceso directo del Panel). */
+export function Condominios({ inicio }: { inicio?: Tab } = {}) {
   const { condos, condo, setCondoId, puede, tiene } = useAdmin();
-  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (condos.length === 1 ? 'ficha' : 'lista'));
-  const [tab, setTab] = useState<Tab>('general');
+  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (inicio || condos.length === 1 ? 'ficha' : 'lista'));
+  const [tab, setTab] = useState<Tab>(inicio ?? 'general');
   const alta = puede('condominios', 'editar') && tiene('condominios.alta');
 
   if (vista === 'nuevo')

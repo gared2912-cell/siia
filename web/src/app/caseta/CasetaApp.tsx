@@ -2,13 +2,14 @@
 // alertas a residentes y chat con las unidades.
 import QrScanner from 'qr-scanner';
 import { useEffect, useRef, useState } from 'react';
-import { portal } from '../api';
+import { portal, subirArchivo } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Shell, useHashNav, type NavItem } from '../Shell';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, PageHead, etiquetaEstado, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import type { PerfilResp } from '../portal/PortalApp';
 import type { Visita } from '../portal/Visitas';
 import { useInsigniaApp } from '../AppMovil';
+import { comprimirImagen, mensajeErrorCamara, pedirCamara } from '../camara';
 
 type V = Visita & { unidad: string };
 type Hilo = { unidadId: string; unidad: string; ultimo: Msg };
@@ -69,6 +70,8 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const scanner = useRef<QrScanner | null>(null);
   const [camara, setCamara] = useState(false);
+  const [errorCamara, setErrorCamara] = useState('');
+  const foto = useRef<HTMLInputElement>(null);
   const [codigo, setCodigo] = useState('');
   const [visita, setVisita] = useState<V | null>(null);
   const { run, busy } = useAction();
@@ -79,6 +82,23 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
       setVisita(await portal<V>('caseta.validar', { codigo: c }));
     });
 
+  const leido = (data: string) => {
+    setCodigo(data.replace(/^SIIA:/, ''));
+    validar(data);
+  };
+
+  // Primero se pide la cámara (así el teléfono muestra su aviso de permiso) y luego arranca el escáner.
+  // Si algo falla se explica el motivo y cómo resolverlo, en lugar de cerrar la cámara sin decir nada.
+  const abrirCamara = async () => {
+    setErrorCamara('');
+    try {
+      await pedirCamara();
+      setCamara(true);
+    } catch (e) {
+      setErrorCamara(mensajeErrorCamara(e));
+    }
+  };
+
   useEffect(() => {
     if (!camara || !video.current) return;
     const s = new QrScanner(
@@ -86,16 +106,31 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
       (r) => {
         s.stop();
         setCamara(false);
-        setCodigo(r.data.replace(/^SIIA:/, ''));
-        validar(r.data);
+        leido(r.data);
       },
-      { preferredCamera: 'environment', highlightScanRegion: true, returnDetailedScanResult: true },
+      { preferredCamera: 'environment', highlightScanRegion: true, returnDetailedScanResult: true, maxScansPerSecond: 8 },
     );
     scanner.current = s;
-    s.start().catch(() => setCamara(false));
+    s.start().catch((e) => {
+      setCamara(false);
+      setErrorCamara(mensajeErrorCamara(e));
+    });
     return () => s.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camara]);
+
+  // Respaldo: tomar una foto del QR con la cámara del teléfono y leerla.
+  const desdeFoto = (f?: File) =>
+    f &&
+    run(async () => {
+      setErrorCamara('');
+      try {
+        const r = await QrScanner.scanImage(await comprimirImagen(f, 1400), { returnDetailedScanResult: true });
+        leido(r.data);
+      } catch {
+        throw new Error('No encontramos un código QR en la foto. Acércate al código, que se vea completo y con buena luz.');
+      }
+    });
 
   const entrada = () =>
     run(async () => {
@@ -117,10 +152,22 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
             </button>
           </>
         ) : (
-          <button className="btn-app block" onClick={() => setCamara(true)}>
-            <Icon name="camera" />
-            Escanear con la cámara
-          </button>
+          <>
+            <button className="btn-app block" onClick={abrirCamara}>
+              <Icon name="camera" />
+              Escanear con la cámara
+            </button>
+            <button className="btn-app block secondary" style={{ marginTop: 8 }} disabled={busy} onClick={() => foto.current?.click()}>
+              <Icon name="qr" />
+              Tomar foto del código
+            </button>
+            <input ref={foto} type="file" accept="image/*" capture="environment" hidden onChange={(e) => (desdeFoto(e.target.files?.[0]), (e.target.value = ''))} />
+          </>
+        )}
+        {errorCamara && (
+          <div className="alert error small" style={{ marginTop: 10 }}>
+            {errorCamara}
+          </div>
         )}
         <form
           className="chat-form"
@@ -362,7 +409,10 @@ function ChatCaseta({ unidades, hilos }: { unidades: Panel['unidades']; hilos: {
               deps={[unidadId]}
               miRol="VIGILANTE"
               cargar={() => portal<Msg[]>('caseta.mensajes', { unidadId })}
-              enviar={(texto) => portal('caseta.enviar', { unidadId, texto }).then(() => hilos.reload(true))}
+              enviar={async (texto, imagen) => {
+                await portal('caseta.enviar', { unidadId, texto, imagenPath: imagen ? await subirArchivo(imagen, 'chat') : undefined });
+                hilos.reload(true);
+              }}
             />
           ) : (
             <Empty icon="chat">Selecciona una unidad para conversar.</Empty>
