@@ -1243,3 +1243,59 @@ table.tbl {
   font-size: 0.9rem;
   color: var(--muted);
 }
+
+/* Condominios › Cuotas: recargo por pago tardío */
+.recargo {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fafcfc;
+}
+
+/* Incidentes: fila que abre el seguimiento */
+.fila-click {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.fila-click:hover strong {
+  color: var(--teal-dark);
+}
+.fila-click > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+/* Incidentes: línea de tiempo del seguimiento */
+.etapas {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  border-left: 2px solid var(--line);
+  display: grid;
+  gap: 16px;
+}
+.etapa {
+  position: relative;
+}
+.etapa::before {
+  content: '';
+  position: absolute;
+  left: -25px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--teal);
+  border: 2px solid #fff;
+}

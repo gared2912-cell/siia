@@ -10,7 +10,6 @@ import { useInsigniaApp } from '../AppMovil';
 import { Panel } from './Panel';
 import { Administradores } from './Administradores';
 import { Condominios } from './Condominios';
-import { Usuarios } from './Usuarios';
 import { FinanzasAdmin } from './FinanzasAdmin';
 import { ComunicadosAdmin, EncuestasAdmin, ChatAdmin } from './Comunicacion';
 import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, MascotasAdmin } from './Operacion';
@@ -89,7 +88,6 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'panel', label: 'Panel', icon: 'home' },
   { key: 'administradores', label: 'Administradores', icon: 'shield', global: true, soloSuper: true },
   { key: 'condominios', label: 'Condominios', icon: 'building', global: true },
-  { key: 'usuarios', label: 'Usuarios', icon: 'users', global: true },
   { key: 'finanzas', label: 'Finanzas', icon: 'money' },
   { key: 'comunicados', label: 'Comunicados', icon: 'megaphone' },
   { key: 'encuestas', label: 'Encuestas', icon: 'vote' },
@@ -107,7 +105,9 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   const [cur, go] = useHashNav('panel');
   const puede = (seccion: string, nivel: Nivel = 'ver') => mios.superadmin || alcanza(mios.permisos.secciones[seccion], nivel);
   const tiene = (extra: string) => mios.superadmin || mios.permisos.extras.includes(extra);
-  const secciones = SECCIONES.filter((s) => (s.soloSuper ? mios.superadmin : s.key === 'panel' || puede(s.key)));
+  // Condominios incluye a sus residentes: lo ve quien tenga acceso a condominios o a usuarios.
+  const visible = (k: string) => k === 'panel' || puede(k) || (k === 'condominios' && puede('usuarios'));
+  const secciones = SECCIONES.filter((s) => (s.soloSuper ? mios.superadmin : visible(s.key)));
   const condos = useLoad(() => all<Condominio>((o) => db.models.Condominio.list(o)));
   const [condoId, setCondoIdState] = useState<string>(() => {
     try {
@@ -217,7 +217,6 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'panel' && <Panel go={go} />}
             {actual === 'administradores' && <Administradores />}
             {actual === 'condominios' && <Condominios />}
-            {actual === 'usuarios' && <Usuarios />}
             {actual === 'finanzas' && <FinanzasAdmin />}
             {actual === 'comunicados' && <ComunicadosAdmin />}
             {actual === 'encuestas' && <EncuestasAdmin />}
@@ -253,7 +252,7 @@ export function ModuloInactivo({ modulo }: { modulo: string }) {
   if ((condo?.modulos ?? []).includes(modulo)) return null;
   return (
     <div className="alert" style={{ marginBottom: 16 }}>
-      Este servicio no está habilitado para {condo?.nombre}. Los residentes no lo verán hasta que lo actives en Condominios.
+      Este servicio no está habilitado para {condo?.nombre}. Los residentes no lo verán hasta que lo actives en Condominios › Servicios del portal.
     </div>
   );
 }

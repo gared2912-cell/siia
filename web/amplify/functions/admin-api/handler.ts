@@ -12,15 +12,16 @@ import {
   AdminEnableUserCommand,
   AdminGetUserCommand,
   AdminSetUserPasswordCommand,
+  AdminUpdateUserAttributesCommand,
   ListUsersCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
   AdminUserGlobalSignOutCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
@@ -28,6 +29,9 @@ import type { Schema } from '../../data/resource';
 import { cognito, emailDe } from '../shared/cognito';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
+import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
+import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
+import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -154,21 +158,28 @@ type Regla = {
   extras?: Record<string, string>;
   valores?: Record<string, string[]>; // valores permitidos al editar
 };
+// Datos bancarios y cuota del condominio: requieren el permiso «condominios.datosPago».
+const CAMPOS_PAGO = ['datosPago', 'banco', 'beneficiario', 'clabe', 'cuentaBancaria', 'referenciaPago', 'notasPago', 'cuotaMensual', 'diaVencimiento', 'recargoActivo', 'recargoMonto', 'recargoDesde'];
+
 const REGLAS: Record<string, Regla> = {
   Condominio: {
     seccion: 'condominios',
     lecturaLibre: true,
     indices: {},
-    crear: ['nombre', 'tipo', 'direccion', 'telefonoCaseta', 'modulos', 'activo', 'datosPago'],
-    editar: ['nombre', 'tipo', 'direccion', 'telefonoCaseta', 'modulos', 'activo', 'datosPago'],
-    extras: { modulos: 'condominios.servicios', activo: 'condominios.servicios', datosPago: 'condominios.datosPago' },
+    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'modulos', 'activo', ...CAMPOS_PAGO],
+    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'modulos', 'activo', ...CAMPOS_PAGO],
+    extras: {
+      modulos: 'condominios.servicios',
+      activo: 'condominios.servicios',
+      ...Object.fromEntries(CAMPOS_PAGO.map((k) => [k, 'condominios.datosPago'])),
+    },
   },
   Unidad: {
     seccion: 'condominios',
     lecturaLibre: true,
     indices: { unidadesPorCondominio: 'condominioId' },
-    crear: ['condominioId', 'etiqueta', 'cuota', 'propietario', 'notas'],
-    editar: ['etiqueta', 'cuota', 'propietario', 'notas'],
+    crear: ['condominioId', 'etiqueta', 'cuota', 'propietario', 'fechaEntrega', 'notas'],
+    editar: ['etiqueta', 'cuota', 'propietario', 'fechaEntrega', 'notas'],
     borrar: true,
   },
   Cargo: {
@@ -199,7 +210,8 @@ const REGLAS: Record<string, Regla> = {
     indices: { mensajesPorCondominio: 'condominioId', mensajesPorHilo: 'hilo' },
     crear: ['condominioId', 'unidadId', 'canal', 'hilo', 'autorNombre', 'autorRol', 'autorId', 'texto'],
   },
-  Incidente: { seccion: 'incidentes', indices: { incidentesPorCondominio: 'condominioId' }, editar: ['estado', 'respuesta'] },
+  // Se atiende con la acción incidentes.atender (foto de evidencia obligatoria y bitácora).
+  Incidente: { seccion: 'incidentes', indices: { incidentesPorCondominio: 'condominioId' } },
   Mantenimiento: {
     seccion: 'mantenimientos',
     indices: { mantenimientosPorCondominio: 'condominioId' },
@@ -222,8 +234,9 @@ const REGLAS: Record<string, Regla> = {
       'requiereAprobacion',
       'activa',
       'reglas',
+      'parteDeId',
     ],
-    editar: ['nombre', 'descripcion', 'horaApertura', 'horaCierre', 'maxHoras', 'capacidad', 'costo', 'requiereAprobacion', 'activa', 'reglas'],
+    editar: ['nombre', 'descripcion', 'horaApertura', 'horaCierre', 'maxHoras', 'capacidad', 'costo', 'requiereAprobacion', 'activa', 'reglas', 'parteDeId'],
   },
   Reserva: { seccion: 'amenidades', indices: { reservasPorCondominio: 'condominioId' }, editar: ['estado', 'nota'] },
   Visita: { seccion: 'visitas', indices: { visitasPorCondominio: 'condominioId' } },
@@ -231,6 +244,22 @@ const REGLAS: Record<string, Regla> = {
 };
 
 const condoDe = (m: string, item: Item) => (m === 'Condominio' ? item.id : item.condominioId);
+
+/** Una sección pertenece a una amenidad completa del mismo condominio; no hay secciones de secciones. */
+async function validarParte(input: Item, condominioId: string, id?: string) {
+  const parte = str(input.parteDeId, 64);
+  if (!parte) {
+    if ('parteDeId' in input) input.parteDeId = null;
+    return;
+  }
+  if (parte === id) fail('Una amenidad no puede ser sección de sí misma.');
+  const padre = await get('Amenidad', { id: parte });
+  if (!padre || padre.condominioId !== condominioId) fail('Amenidad principal no encontrada.');
+  if (padre!.parteDeId) fail('Elige una amenidad principal (no otra sección).');
+  if (id && (await byIndex('Amenidad', 'byCondominio', 'condominioId', condominioId)).some((a) => a.parteDeId === id)) {
+    fail('Esta amenidad tiene secciones; no puede ser sección de otra.');
+  }
+}
 
 function soloCampos(input: Item, permitidos: string[], omitir: string[] = []) {
   const fuera = Object.keys(input).filter((k) => !permitidos.includes(k) && !omitir.includes(k));
@@ -270,7 +299,12 @@ async function db(p: Item, yo: Yo) {
     if (campo === 'condominioId') exigirCondo(yo, valor);
     if (campo === 'hilo') exigirCondo(yo, valor.split('#')[0]);
     if (campo === 'encuestaId') exigirCondo(yo, (await get('Encuesta', { id: valor }))?.condominioId);
-    return leerTodo((o) => M[op]({ [campo]: valor }, o));
+    const items = await leerTodo((o) => M[op]({ [campo]: valor }, o));
+    // Quién atendió cada incidente solo lo ve el superadministrador.
+    if (m === 'Incidente' && !yo.superadmin) {
+      return items.map((i) => ({ ...i, historial: JSON.stringify(historialDe(i).map(({ por, porNombre, ...h }) => h)) }));
+    }
+    return items;
   }
 
   // ----- escrituras -----
@@ -288,12 +322,13 @@ async function db(p: Item, yo: Yo) {
     if (!yo.superadmin && m === 'Condominio') {
       // Lo que requiere permiso especial se crea vacío si no lo tiene.
       if (!yo.permisos.extras.includes('condominios.servicios')) Object.assign(input, { modulos: [], activo: true });
-      if (!yo.permisos.extras.includes('condominios.datosPago')) delete input.datosPago;
+      if (!yo.permisos.extras.includes('condominios.datosPago')) CAMPOS_PAGO.forEach((k) => delete input[k]);
     }
     if (input.unidadId) {
       const u = await get('Unidad', { id: str(input.unidadId, 64) });
       if (!u || u.condominioId !== input.condominioId) fail('La unidad no pertenece al condominio.');
     }
+    if (m === 'Amenidad') await validarParte(input, input.condominioId);
     if (m === 'Cargo') input.estado = 'PENDIENTE';
     if (m === 'Mensaje') {
       Object.assign(input, {
@@ -337,6 +372,16 @@ async function db(p: Item, yo: Yo) {
     for (const [campo, permitidos] of Object.entries(regla!.valores ?? {})) {
       if (campo in input && !permitidos.includes(input[campo])) fail('Cambio no permitido.');
     }
+    if (m === 'Amenidad' && 'parteDeId' in input) await validarParte(input, actual!.condominioId, actual!.id);
+    if (m === 'Reserva' && input.estado === 'APROBADA' && actual!.estado !== 'APROBADA') {
+      // Las que tienen costo se aprueban al validar su pago; las gratuitas, aquí (bloquean el horario).
+      if (actual!.estado === 'PENDIENTE_PAGO') fail('Esta reserva se confirma al validar su pago en Finanzas.');
+      const nota = 'nota' in input ? input.nota : undefined;
+      const c = await confirmarReserva(actual!);
+      if (!c.ok) fail(`Ese horario ya está apartado por una reserva de ${c.nombre}.`);
+      return resultado(await M.update({ id: actual!.id, ...(nota !== undefined ? { nota } : {}) }));
+    }
+    if (m === 'Reserva' && (input.estado === 'RECHAZADA' || input.estado === 'CANCELADA')) await cancelarCargoReserva(actual!.id);
     return resultado(await M.update(input));
   }
 
@@ -360,6 +405,188 @@ async function archivo(p: Item, yo: Yo) {
   const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: item![a!.campo] }), { expiresIn: 900 });
   return { url };
 }
+
+// ---------- documentos del condominio (reglamento y otros dos con título libre) ----------
+const SLOTS = SLOTS_DOC.map((x) => x.slot);
+const MAX_DOC = 20 * 1024 * 1024;
+const TIPOS_DOC: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+};
+
+/** Los documentos de amenidades piden permiso en Amenidades; los generales, en Condominios. */
+const seccionDoc = (slot: string) => (SLOTS_AMENIDADES.includes(slot) ? 'amenidades' : 'condominios');
+
+async function condoDoc(p: Item, yo: Yo, nivel: Nivel) {
+  exigir(yo, seccionDoc(str(p.slot, 30)), nivel);
+  const c = await get('Condominio', { id: str(p.condominioId, 64) });
+  if (!c) fail('Selecciona el condominio.');
+  exigirCondo(yo, c!.id);
+  return c!;
+}
+
+const accionesDocumentos: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // URL firmada para subir el archivo directo a S3 (válida 10 minutos).
+  async 'documentos.subir'(p, yo) {
+    const c = await condoDoc(p, yo, 'editar');
+    const slot = str(p.slot, 30);
+    if (!SLOTS.includes(slot)) fail('Documento no válido.');
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_');
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_DOC[ext]) fail('Sube un archivo PDF, Word, Excel o imagen (JPG o PNG).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > MAX_DOC) fail('El archivo debe pesar máximo 20 MB.');
+    const path = `condominios/${c.id}/documentos/${slot}-${Date.now()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_DOC[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_DOC[ext] };
+  },
+
+  // Registra el archivo ya subido (o solo cambia el título) en el condominio.
+  async 'documentos.guardar'(p, yo) {
+    const c = await condoDoc(p, yo, 'editar');
+    const slot = str(p.slot, 30);
+    if (!SLOTS.includes(slot)) fail('Documento no válido.');
+    const titulo = SLOTS_DOC.find((x) => x.slot === slot)?.titulo ?? str(p.titulo, 80);
+    if (!titulo) fail('Escribe el título del documento.');
+    const docs = documentosDe(c.documentos);
+    const actual = docs.find((d) => d.slot === slot);
+    let doc: Documento;
+    const path = str(p.path, 400);
+    if (path) {
+      if (!path.startsWith(`condominios/${c.id}/documentos/${slot}-`)) fail('Archivo no válido.');
+      const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: path })).catch(() => undefined);
+      if (!h) fail('No encontramos el archivo. Vuelve a subirlo.');
+      if ((h!.ContentLength ?? 0) > MAX_DOC) fail('El archivo debe pesar máximo 20 MB.');
+      doc = { slot, titulo, path, nombre: str(p.nombre, 120) || path.split('/').pop()!, tamano: h!.ContentLength ?? 0, subido: now() };
+    } else {
+      if (!actual) fail('Sube el archivo.');
+      doc = { ...actual!, titulo };
+    }
+    const documentos = [...docs.filter((d) => d.slot !== slot), doc];
+    await update('Condominio', { id: c.id }, { documentos: JSON.stringify(documentos) });
+    return documentos;
+  },
+
+  // Quita el documento del condominio (el archivo se conserva en el historial del bucket).
+  async 'documentos.quitar'(p, yo) {
+    const c = await condoDoc(p, yo, 'editar');
+    const documentos = documentosDe(c.documentos).filter((d) => d.slot !== str(p.slot, 30));
+    await update('Condominio', { id: c.id }, { documentos: JSON.stringify(documentos) });
+    return documentos;
+  },
+
+  // URL firmada para ver o descargar (15 minutos).
+  async 'documentos.url'(p, yo) {
+    const c = await condoDoc(p, yo, 'ver');
+    const d = documentosDe(c.documentos).find((x) => x.slot === str(p.slot, 30));
+    if (!d) fail('Documento no disponible.');
+    const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: d!.path }), { expiresIn: 900 });
+    return { url };
+  },
+};
+
+// ---------- incidentes: atención con evidencia ----------
+// Etapas en orden. Cada etapa guardada queda fija; el administrador solo puede avanzar (puede saltar etapas).
+const ESTADOS_INCIDENTE = ['ABIERTO', 'EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
+const ORDEN_INCIDENTE: Record<string, number> = { ABIERTO: 0, EN_SEGUIMIENTO: 1, EN_PROCESO: 2, RESUELTO: 2, CERRADO: 3 };
+const CON_EVIDENCIA = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
+const TIPOS_FOTO: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
+type Paso = { estado: string; respuesta?: string | null; fotoPath?: string | null; por?: string; porNombre?: string | null; en: string; reabierto?: boolean };
+
+function historialDe(i: Item): Paso[] {
+  let h: any = i.historial;
+  for (let k = 0; k < 2 && typeof h === 'string'; k++) {
+    try {
+      h = JSON.parse(h);
+    } catch {
+      h = [];
+    }
+  }
+  return Array.isArray(h) ? h : [];
+}
+
+async function incidenteDe(p: Item, yo: Yo, nivel: Nivel) {
+  exigir(yo, 'incidentes', nivel);
+  const i = await get('Incidente', { id: str(p.incidenteId, 64) });
+  if (!i) fail('Incidente no encontrado.');
+  exigirCondo(yo, i!.condominioId);
+  return i!;
+}
+
+const accionesIncidentes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // URL firmada para subir la foto de evidencia (10 minutos).
+  async 'incidentes.subirEvidencia'(p, yo) {
+    const i = await incidenteDe(p, yo, 'editar');
+    if (i.estado === 'CERRADO' && !yo.superadmin) fail('El incidente está cerrado; solo el superadministrador puede modificarlo.');
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'foto.jpg';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_FOTO[ext]) fail('La evidencia debe ser una foto (JPG, PNG, WEBP o HEIC).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('La foto debe pesar máximo 10 MB.');
+    const path = `condominios/${i.condominioId}/incidentes/${i.id}/${Date.now()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_FOTO[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_FOTO[ext] };
+  },
+
+  // Seguimiento por etapas (En seguimiento → En proceso → Cerrado): el administrador elige cualquiera de las
+  // etapas que siguen, con descripción y foto de evidencia obligatorias; lo guardado ya no se modifica. Un
+  // incidente cerrado ya no cambia, salvo que lo modifique el superadministrador (puede regresarlo a cualquier etapa).
+  async 'incidentes.atender'(p, yo) {
+    const i = await incidenteDe(p, yo, 'editar');
+    if (i.estado === 'CERRADO' && !yo.superadmin) fail('El incidente está cerrado; solo el superadministrador puede modificarlo.');
+    const estado = str(p.estado, 20);
+    if (!ESTADOS_INCIDENTE.includes(estado)) fail('Estado no válido.');
+    const actual = ORDEN_INCIDENTE[i.estado ?? 'ABIERTO'] ?? 0;
+    if (!yo.superadmin && ORDEN_INCIDENTE[estado] <= actual) fail('Elige una etapa posterior a la actual.');
+    const respuesta = str(p.respuesta, 2000) || null;
+    const fotoPath = str(p.fotoPath, 400) || null;
+    if (!respuesta) fail('Escribe la descripción de la etapa.');
+    if (CON_EVIDENCIA.includes(estado) && !fotoPath) fail('Sube la foto de evidencia.');
+    if (fotoPath) {
+      if (!fotoPath.startsWith(`condominios/${i.condominioId}/incidentes/${i.id}/`)) fail('Foto no válida.');
+      const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: fotoPath })).catch(() => undefined);
+      if (!h) fail('No encontramos la foto. Vuelve a subirla.');
+    }
+    const yoPerfil = await get('Perfil', { userId: yo.sub });
+    const paso: Paso = {
+      estado,
+      respuesta,
+      fotoPath,
+      por: yo.email,
+      porNombre: yoPerfil?.nombre ?? null,
+      en: now(),
+      ...(i.estado === 'CERRADO' ? { reabierto: true } : {}),
+    };
+    const r = await update('Incidente', { id: i.id }, {
+      estado,
+      respuesta,
+      ...(fotoPath ? { evidenciaPath: fotoPath } : {}),
+      historial: JSON.stringify([...historialDe(i), paso]),
+    });
+    const texto = { ABIERTO: 'abierto', EN_SEGUIMIENTO: 'en seguimiento', EN_PROCESO: 'en proceso', CERRADO: 'cerrado' }[estado];
+    await put('Aviso', {
+      condominioId: i.condominioId,
+      unidadId: i.unidadId,
+      tipo: 'INCIDENTE',
+      titulo: `Tu reporte "${i.titulo}" está ${texto}`,
+      texto: respuesta,
+      leido: false,
+    });
+    return r;
+  },
+
+  // URL firmada de una foto de evidencia del incidente (15 minutos).
+  async 'incidentes.evidencia'(p, yo) {
+    const i = await incidenteDe(p, yo, 'ver');
+    const path = str(p.path, 400);
+    if (!historialDe(i).some((h) => h.fotoPath === path)) fail('Foto no disponible.');
+    return { url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path }), { expiresIn: 900 }) };
+  },
+};
 
 // ---------- usuarios ----------
 async function asignarGrupo(username: string, rol: Rol) {
@@ -434,6 +661,91 @@ async function perfilDe(userId: string) {
   return perfil!;
 }
 
+// Alta directa por la administración: Cognito envía la invitación con contraseña temporal.
+async function altaUsuario(p: Item, yo: Yo) {
+  const email = str(p.email, 200).toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('Correo no válido.');
+  const nombre = str(p.nombre, 120);
+  const asignacion = await validarAsignacion(p, yo);
+  let sub: string | undefined;
+  try {
+    const r = await cognito.send(
+      new AdminCreateUserCommand({
+        UserPoolId,
+        Username: email,
+        UserAttributes: [
+          { Name: 'email', Value: email },
+          { Name: 'email_verified', Value: 'true' },
+          ...(nombre ? [{ Name: 'name', Value: nombre }] : []),
+        ],
+        DesiredDeliveryMediums: ['EMAIL'],
+      }),
+    );
+    sub = r.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
+  } catch (err: any) {
+    if (err?.name === 'UsernameExistsException') fail('Ya existe un usuario con ese correo.');
+    throw err;
+  }
+  if (!sub) fail('No se pudo crear el usuario.');
+  await asignarGrupo(sub!, asignacion.rol);
+  return put('Perfil', {
+    userId: sub,
+    email,
+    nombre,
+    telefono: str(p.telefono, 20),
+    estado: 'APROBADO',
+    ...asignacion,
+  });
+}
+
+/** Envía por correo una contraseña temporal nueva (la actual deja de funcionar si ya la había creado). */
+async function enviarAccesos(userId: string) {
+  const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: userId }));
+  if (u.UserStatus !== 'FORCE_CHANGE_PASSWORD') {
+    await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: userId, Password: temporal(), Permanent: false }));
+  }
+  await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: userId, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
+}
+
+/**
+ * Cambia nombre, teléfono o correo de un residente o vigilante. Los campos vacíos no se tocan.
+ * Si cambia el correo, el nuevo correo pasa a ser su usuario y recibe accesos nuevos.
+ */
+async function editarPersona(perfil: Item, p: Item, yo: Yo) {
+  exigirGestionable(yo, perfil);
+  exigir(yo, 'usuarios', 'editar');
+  const cambios: Item = {};
+  const nombre = str(p.nombre, 120);
+  const telefono = str(p.telefono, 20);
+  const email = str(p.email, 200).toLowerCase();
+  if (nombre && nombre !== perfil.nombre) cambios.nombre = nombre;
+  if (telefono && telefono !== perfil.telefono) cambios.telefono = telefono;
+  if (email && email !== perfil.email) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('Correo no válido.');
+    if (perfil.estado !== 'APROBADO' && perfil.estado !== 'SUSPENDIDO') fail('Autoriza la cuenta antes de cambiar su correo.');
+    cambios.email = email;
+  }
+  if (!Object.keys(cambios).length) return { cambios: [] as string[] };
+  const atributos = [
+    ...(cambios.email ? [{ Name: 'email', Value: email }, { Name: 'email_verified', Value: 'true' }] : []),
+    ...(cambios.nombre ? [{ Name: 'name', Value: nombre }] : []),
+  ];
+  if (atributos.length) {
+    try {
+      await cognito.send(new AdminUpdateUserAttributesCommand({ UserPoolId, Username: perfil.userId, UserAttributes: atributos }));
+    } catch (err: any) {
+      if (err?.name === 'AliasExistsException' || err?.name === 'UsernameExistsException') fail('Ya existe un usuario con ese correo.');
+      throw err;
+    }
+  }
+  await update('Perfil', { userId: perfil.userId }, cambios);
+  if (cambios.email && perfil.estado === 'APROBADO') {
+    await enviarAccesos(perfil.userId);
+    await cerrarSesiones(perfil.userId);
+  }
+  return { cambios: Object.keys(cambios) };
+}
+
 const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Permisos efectivos de quien llama (el panel muestra solo lo permitido).
   async yo(_p, yo) {
@@ -448,6 +760,8 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
 
   db,
   archivo,
+  ...accionesDocumentos,
+  ...accionesIncidentes,
 
   // ----- app y notificaciones push (solo categorías que su rol permite) -----
   ...Object.fromEntries(
@@ -516,41 +830,12 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   },
 
   // ----- usuarios -----
-  // Alta directa por la administración: Cognito envía la invitación con contraseña temporal.
   async crearUsuario(p, yo) {
-    const email = str(p.email, 200).toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('Correo no válido.');
-    const nombre = str(p.nombre, 120);
-    const asignacion = await validarAsignacion(p, yo);
-    let sub: string | undefined;
-    try {
-      const r = await cognito.send(
-        new AdminCreateUserCommand({
-          UserPoolId,
-          Username: email,
-          UserAttributes: [
-            { Name: 'email', Value: email },
-            { Name: 'email_verified', Value: 'true' },
-            ...(nombre ? [{ Name: 'name', Value: nombre }] : []),
-          ],
-          DesiredDeliveryMediums: ['EMAIL'],
-        }),
-      );
-      sub = r.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
-    } catch (err: any) {
-      if (err?.name === 'UsernameExistsException') fail('Ya existe un usuario con ese correo.');
-      throw err;
-    }
-    if (!sub) fail('No se pudo crear el usuario.');
-    await asignarGrupo(sub!, asignacion.rol);
-    return put('Perfil', {
-      userId: sub,
-      email,
-      nombre,
-      telefono: str(p.telefono, 20),
-      estado: 'APROBADO',
-      ...asignacion,
-    });
+    return altaUsuario(p, yo);
+  },
+
+  async 'residentes.editar'(p, yo) {
+    return editarPersona(await perfilDe(str(p.userId, 64)), p, yo);
   },
 
   // Aprueba una solicitud (o cambia rol / condominio / unidad / permisos de un usuario existente).
@@ -573,13 +858,28 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     exigirGestionable(yo, perfil);
     exigir(yo, 'usuarios', 'editar');
     if (perfil.estado !== 'APROBADO') fail('Solo se reenvía el acceso a usuarios autorizados.');
-    const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: perfil.userId }));
-    if (u.UserStatus !== 'FORCE_CHANGE_PASSWORD') {
-      await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: perfil.userId, Password: temporal(), Permanent: false }));
+    await enviarAccesos(perfil.userId);
+    return { ok: true, email: perfil.email };
+  },
+
+  // Contraseña definitiva que escribe la administración para compartirla (residentes que no revisan o no
+  // tienen correo). La anterior deja de funcionar y se cierran sus sesiones abiertas.
+  async generarContrasena(p, yo) {
+    const perfil = await perfilDe(str(p.userId, 64));
+    exigirGestionable(yo, perfil);
+    exigir(yo, 'usuarios', 'editar');
+    if (perfil.estado !== 'APROBADO') fail('Solo se asigna contraseña a usuarios autorizados.');
+    const password = typeof p.password === 'string' ? p.password : '';
+    if (password.length < 8 || password.length > 64 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password) || /\s/.test(password)) {
+      fail('La contraseña debe tener al menos 8 caracteres, sin espacios, con mayúscula, minúscula, número y símbolo.');
     }
-    await cognito.send(
-      new AdminCreateUserCommand({ UserPoolId, Username: perfil.userId, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }),
-    );
+    try {
+      await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: perfil.userId, Password: password, Permanent: true }));
+    } catch (err: any) {
+      if (err?.name === 'InvalidPasswordException') fail('La contraseña no cumple las reglas de seguridad.');
+      throw err;
+    }
+    await cerrarSesiones(perfil.userId);
     return { ok: true, email: perfil.email };
   },
 
@@ -670,6 +970,22 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       });
       return r;
     }
+    // Reservas de amenidades que se pagan con este comprobante: se aprueban al validar (bloquean el horario).
+    const reservas = (
+      await Promise.all(
+        (pago!.cargoIds ?? [])
+          .filter((id: string) => id.startsWith('reserva#'))
+          .map((id: string) => get('Reserva', { id: id.slice('reserva#'.length) })),
+      )
+    ).filter((r): r is Item => !!r && r.estado === 'PENDIENTE_PAGO');
+    for (const r of reservas) {
+      const choque = await choqueAprobado(r);
+      if (choque) {
+        fail(
+          `El ${r.fecha} de ${r.horaInicio} a ${r.horaFin} ya fue apartado por otra unidad (${choque.nombre}). Rechaza este pago o comunícate con el residente.`,
+        );
+      }
+    }
     await marcar({ estado: 'VALIDADO', nota, validadoPor: yo.email, validadoEn: now() });
     const seq = await ddb.send(
       new UpdateCommand({
@@ -683,6 +999,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const folio = `R-${String(seq.Attributes?.folioSeq ?? 1).padStart(5, '0')}`;
     await Promise.all((pago!.cargoIds ?? []).map((id: string) => update('Cargo', { id }, { estado: 'PAGADO' }).catch(() => undefined)));
     const r = await update('Pago', { id: pago!.id }, { folio });
+    for (const x of reservas) await confirmarReserva(x, 'Tu reserva quedó confirmada');
     await put('Aviso', {
       condominioId: pago!.condominioId,
       unidadId: pago!.unidadId,
@@ -702,20 +1019,24 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     exigirCondo(yo, c!.id);
     const periodo = str(p.periodo, 7);
     if (!/^\d{4}-\d{2}$/.test(periodo)) fail('Periodo no válido (AAAA-MM).');
-    const vence = /^\d{4}-\d{2}-\d{2}$/.test(p.vence) ? p.vence : `${periodo}-10`;
+    const dia = String(Math.min(Math.max(Number(c!.diaVencimiento) || 10, 1), 28)).padStart(2, '0');
+    const vence = /^\d{4}-\d{2}-\d{2}$/.test(p.vence) ? p.vence : `${periodo}-${dia}`;
+    // Cuota única del condominio; las unidades anteriores a esa configuración conservan su cuota propia.
+    const cuotaCondo = Number(c!.cuotaMensual) > 0 ? Number(c!.cuotaMensual) : 0;
     const concepto = str(p.concepto, 120) || `Cuota de mantenimiento ${periodo}`;
     const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id);
     let creados = 0;
     let omitidos = 0;
     for (const u of unidades) {
-      if (!(u.cuota > 0)) {
+      const monto = cuotaCondo || u.cuota;
+      if (!(monto > 0)) {
         omitidos++;
         continue;
       }
       try {
         await put(
           'Cargo',
-          { id: `${u.id}#${periodo}#cuota`, condominioId: c!.id, unidadId: u.id, concepto, periodo, monto: u.cuota, vence, estado: 'PENDIENTE' },
+          { id: `${u.id}#${periodo}#cuota`, condominioId: c!.id, unidadId: u.id, concepto, periodo, monto, vence, estado: 'PENDIENTE' },
           { ifNotExists: 'id' },
         );
         creados++;
@@ -725,6 +1046,96 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       }
     }
     return { creados, omitidos };
+  },
+
+  // Cuota extraordinaria: un cargo por unidad (todas o las indicadas), agrupados por el id «extra#<grupo>#<unidad>».
+  async cargoExtraordinario(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const c = await get('Condominio', { id: str(p.condominioId, 64) });
+    if (!c) fail('Selecciona el condominio.');
+    exigirCondo(yo, c!.id);
+    const concepto = str(p.concepto, 120);
+    const monto = Math.round(Number(p.monto) * 100) / 100;
+    if (!concepto) fail('Escribe el concepto.');
+    if (!(monto > 0) || monto > 10_000_000) fail('Indica un monto válido.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.vence)) fail('Indica la fecha límite de pago.');
+    const todas = await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id);
+    const ids: string[] | null = Array.isArray(p.unidadIds) ? p.unidadIds.map((x: unknown) => str(x, 64)) : null;
+    const destino = ids ? todas.filter((u) => ids.includes(u.id)) : todas;
+    if (!destino.length) fail('El condominio no tiene unidades.');
+    const grupo = randomUUID().slice(0, 8);
+    for (let i = 0; i < destino.length; i += 25) {
+      await Promise.all(
+        destino.slice(i, i + 25).map((u) =>
+          put('Cargo', {
+            id: `extra#${grupo}#${u.id}`,
+            condominioId: c!.id,
+            unidadId: u.id,
+            concepto,
+            periodo: p.vence.slice(0, 7),
+            monto,
+            vence: p.vence,
+            estado: 'PENDIENTE',
+          }),
+        ),
+      );
+    }
+    return { creados: destino.length };
+  },
+
+  // Alta masiva desde el machote de Excel: una fila por casa o departamento (número, residente, teléfono, correo,
+  // fecha de entrega). Crea la unidad si no existe, guarda los cambios de la existente y, si trae correo, da de alta
+  // al residente (con accesos por correo) o actualiza sus datos. Las celdas vacías no borran datos.
+  async 'residentes.importar'(p, yo) {
+    exigir(yo, 'condominios', 'editar');
+    const c = await get('Condominio', { id: str(p.condominioId, 64) });
+    if (!c) fail('Selecciona el condominio.');
+    exigirCondo(yo, c!.id);
+    const filas: Item[] = Array.isArray(p.filas) ? p.filas.slice(0, 25) : [];
+    const porClave = new Map((await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id)).map((u) => [claveUnidad(u.etiqueta), u]));
+    const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', c!.id);
+    const out: { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; cambios: string[]; error?: string }[] = [];
+    for (const f of filas) {
+      const etiqueta = etiquetaUnidad(f?.numero, c!.tipoUnidad);
+      const r: (typeof out)[number] = { etiqueta, cambios: [] };
+      out.push(r);
+      try {
+        if (!etiqueta) fail('Falta el número de casa o departamento.');
+        const email = str(f.correo, 200).toLowerCase();
+        if (email) exigir(yo, 'usuarios', 'editar');
+        const fechaEntrega = /^\d{4}-\d{2}-\d{2}$/.test(f.fechaEntrega) ? f.fechaEntrega : null;
+        let u = porClave.get(claveUnidad(etiqueta));
+        if (!u) {
+          u = await put('Unidad', { condominioId: c!.id, etiqueta, fechaEntrega });
+          porClave.set(claveUnidad(etiqueta), u);
+          r.unidad = 'creada';
+        } else {
+          r.unidad = 'existente';
+          if (fechaEntrega && u.fechaEntrega !== fechaEntrega) {
+            await update('Unidad', { id: u.id }, { fechaEntrega });
+            r.cambios.push('fechaEntrega');
+          }
+        }
+        if (email) {
+          // Mismo correo → actualiza sus datos; unidad sin residente → alta; un solo residente con otro correo → cambia su correo.
+          const suyos = perfiles.filter((x) => x.rol === 'RESIDENTE' && x.unidadId === u!.id && x.estado !== 'RECHAZADO');
+          const mismo = suyos.find((x) => x.email === email) ?? (suyos.length === 1 ? suyos[0] : undefined);
+          if (mismo) {
+            const e = await editarPersona(mismo, { nombre: f.nombre, telefono: f.telefono, email }, yo);
+            r.cambios.push(...e.cambios);
+          } else if (suyos.length) {
+            fail('La unidad tiene varios residentes; cambia sus datos desde la lista.');
+          } else {
+            perfiles.push(await altaUsuario({ email, nombre: f.nombre, telefono: f.telefono, rol: 'RESIDENTE', condominioId: c!.id, unidadId: u!.id }, yo));
+            r.acceso = true;
+          }
+        }
+      } catch (err) {
+        if (!(err instanceof ApiError)) console.error('importar', err);
+        r.error = err instanceof ApiError ? err.message : 'No se pudo guardar.';
+      }
+    }
+    return out;
   },
 
   // Aviso a una unidad (al atender un incidente, reserva, mascota…) o a todas las unidades del condominio.

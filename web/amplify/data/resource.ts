@@ -34,7 +34,25 @@ const schema = a
         // encuestas, chat, incidentes, mantenimientos, amenidades, mascotas
         modulos: a.string().array(),
         activo: a.boolean().default(true),
-        datosPago: a.string(), // banco, CLABE, beneficiario, referencia (texto libre)
+        datosPago: a.string(), // texto que ve el residente en Finanzas (se arma con los campos bancarios + notas)
+        // Datos bancarios para el pago de cuotas
+        banco: a.string(),
+        beneficiario: a.string(),
+        clabe: a.string(),
+        cuentaBancaria: a.string(),
+        referenciaPago: a.string(),
+        notasPago: a.string(),
+        // Unidades: CASA o DEPARTAMENTO (prefijo de la etiqueta: «Casa 12», «Depto A-101»)
+        tipoUnidad: a.string(),
+        // Cuota de mantenimiento única para todas las unidades y día del mes en que vence
+        cuotaMensual: a.float(),
+        diaVencimiento: a.integer(),
+        // Recargo por pago tardío: monto fijo que se carga al día siguiente del vencimiento si la cuota sigue sin pagar
+        recargoActivo: a.boolean(),
+        recargoMonto: a.float(),
+        recargoDesde: a.date(), // solo cuotas que vencen a partir de esta fecha (cuando se activó)
+        // Archivos importantes: [{ slot: 'reglamento' | 'doc1' | 'doc2', titulo, path, nombre, tamano, subido }]
+        documentos: a.json(),
         telefonoCaseta: a.string(),
         folioSeq: a.integer(),
       })
@@ -44,8 +62,9 @@ const schema = a
       .model({
         condominioId: a.id().required(),
         etiqueta: a.string().required(), // Casa 12, Depto 3B…
-        cuota: a.float(),
+        cuota: a.float(), // histórico: la cuota vigente es Condominio.cuotaMensual
         propietario: a.string(),
+        fechaEntrega: a.date(),
         notas: a.string(),
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('unidadesPorCondominio')])
@@ -179,8 +198,13 @@ const schema = a
         descripcion: a.string(),
         ubicacion: a.string(),
         fotoPath: a.string(),
-        estado: a.enum(['ABIERTO', 'EN_PROCESO', 'RESUELTO', 'CERRADO']),
+        // Etapas: Abierto → En seguimiento → En proceso → Cerrado (RESUELTO queda solo para registros anteriores)
+        estado: a.enum(['ABIERTO', 'EN_SEGUIMIENTO', 'EN_PROCESO', 'RESUELTO', 'CERRADO']),
         respuesta: a.string(),
+        // Seguimiento: cada cambio de estado con su foto de evidencia y quién lo hizo
+        // [{ estado, respuesta, fotoPath, por, porNombre, en }]. Cerrado = ya no se puede atender.
+        evidenciaPath: a.string(), // última foto de evidencia
+        historial: a.json(),
       })
       .secondaryIndexes((i) => [
         i('condominioId').name('byCondominio').queryField('incidentesPorCondominio'),
@@ -215,6 +239,9 @@ const schema = a
         requiereAprobacion: a.boolean(),
         activa: a.boolean(),
         reglas: a.string(),
+        // Sección de otra amenidad (p. ej. «Terraza» de «Casa club»): reservar la completa bloquea sus secciones
+        // en ese horario, y reservar una sección bloquea la completa (las demás secciones siguen libres).
+        parteDeId: a.id(),
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('amenidadesPorCondominio')])
       .authorization(admin),
@@ -229,8 +256,10 @@ const schema = a
         horaInicio: a.string().required(),
         horaFin: a.string().required(),
         invitados: a.integer(),
-        estado: a.enum(['SOLICITADA', 'APROBADA', 'RECHAZADA', 'CANCELADA']),
+        // PENDIENTE_PAGO: tiene cargo y se aprueba al validar el pago. Solo APROBADA bloquea el calendario.
+        estado: a.enum(['PENDIENTE_PAGO', 'SOLICITADA', 'APROBADA', 'RECHAZADA', 'CANCELADA']),
         nota: a.string(),
+        terminosAceptados: a.datetime(), // cuándo aceptó el reglamento y los términos de uso al reservar
       })
       .secondaryIndexes((i) => [
         i('condominioId').name('byCondominio').queryField('reservasPorCondominio'),

@@ -23,6 +23,8 @@ import { emailDe } from '../shared/cognito';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
 import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendientes';
+import { SLOTS_AMENIDADES, documentosDe } from '../shared/documentos';
+import { ACTIVAS, HORAS_APARTADO, apartadas, cancelarCargoReserva, cargoDeReserva, confirmarReserva, limitePago, relacionadas, vencerSiCorresponde } from '../shared/reservas';
 
 type Ctx = {
   sub: string;
@@ -80,6 +82,8 @@ const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const minutos = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
 
+
+
 function visitaVigente(v: Item, hoy = hoyMX()) {
   if (v.estado === 'CANCELADA' || v.estado === 'DENTRO') return false;
   const fin = v.fechaFin || v.fecha;
@@ -116,7 +120,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       avisosSinLeer: avisos.filter((a) => !a.leido).length,
       visitasHoy: visitas.filter((v) => visitaVigente(v, hoy) || v.estado === 'DENTRO').length,
       proximasReservas: reservas
-        .filter((r) => r.fecha >= hoy && ['SOLICITADA', 'APROBADA'].includes(r.estado))
+        .filter((r) => r.fecha >= hoy && ACTIVAS.includes(r.estado))
         .sort((a, b) => (a.fecha + a.horaInicio).localeCompare(b.fecha + b.horaInicio))
         .slice(0, 3)
         .map(sinPrivados),
@@ -151,7 +155,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         .map(sinPrivados),
       pagos: pagos.sort(newest).map(sinPrivados),
       datosPago: condominio.datosPago ?? null,
-      cuota: unidad!.cuota ?? null,
+      cuota: condominio.cuotaMensual ?? unidad!.cuota ?? null,
     };
   },
 
@@ -274,7 +278,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   // ----- Incidentes y mantenimientos -----
   async 'incidentes.lista'({ unidad }) {
     const items = await byIndex('Incidente', 'byUnidad', 'unidadId', unidad!.id);
-    return items.sort(newest).map(sinPrivados);
+    // La bitácora interna (quién atendió y sus fotos) no se comparte con el residente.
+    return items.sort(newest).map(({ historial, evidenciaPath, ...i }) => sinPrivados(i));
   },
 
   async 'incidentes.crear'({ condominio, unidad, sub, p }) {
@@ -308,65 +313,150 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     ]);
     return {
       amenidades: amenidades.filter((a) => a.activa !== false).map(sinPrivados),
+      // Reglamento y términos de uso que el residente acepta al reservar (se abren con amenidades.documento).
+      documentos: documentosDe(condominio.documentos)
+        .filter((d) => SLOTS_AMENIDADES.includes(d.slot))
+        .map(({ slot, titulo }) => ({ slot, titulo })),
       misReservas: reservas
         .sort((a, b) => (b.fecha + b.horaInicio).localeCompare(a.fecha + a.horaInicio))
-        .map(sinPrivados),
+        .map((r) => ({ ...sinPrivados(r), ...(r.estado === 'PENDIENTE_PAGO' ? { limitePago: limitePago(r).toISOString() } : {}) })),
     };
   },
 
+  async 'amenidades.documento'({ condominio, p }) {
+    const d = documentosDe(condominio.documentos).find((x) => x.slot === str(p.slot, 30) && SLOTS_AMENIDADES.includes(x.slot));
+    if (!d) fail('Documento no disponible.');
+    return { url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET, Key: d!.path }), { expiresIn: 900 }) };
+  },
+
+  // Horarios apartados de una amenidad en un día, incluidas las reservas de la amenidad completa o de sus
+  // secciones. Las pendientes de pago vencidas (48 h sin comprobante) se cancelan aquí y no aparecen.
   async 'amenidades.disponibilidad'({ condominio, p }) {
     const am = await get('Amenidad', { id: str(p.amenidadId, 64) });
     if (!am || am.condominioId !== condominio.id) fail('Amenidad no encontrada.');
     const fecha = FECHA.test(p.fecha) ? p.fecha : hoyMX();
-    const reservas = await byIndex('Reserva', 'byAmenidad', 'amenidadId', am!.id);
-    return reservas
-      .filter((r) => r.fecha === fecha && ['SOLICITADA', 'APROBADA'].includes(r.estado))
-      .map((r) => ({ horaInicio: r.horaInicio, horaFin: r.horaFin, estado: r.estado }))
+    const todas = await byIndex('Amenidad', 'byCondominio', 'condominioId', condominio.id);
+    const ids = relacionadas(am!, todas);
+    const reservas = (await Promise.all(ids.map((id) => byIndex('Reserva', 'byAmenidad', 'amenidadId', id)))).flat();
+    const nombre = (id: string) => todas.find((a) => a.id === id)?.nombre ?? '';
+    const delDia = reservas.filter((r) => r.fecha === fecha && ACTIVAS.includes(r.estado));
+    const vigentes = [];
+    for (const r of delDia) if (!(await vencerSiCorresponde(r))) vigentes.push(r);
+    return vigentes
+      .map((r) => ({ horaInicio: r.horaInicio, horaFin: r.horaFin, estado: r.estado, por: r.amenidadId === am!.id ? null : nombre(r.amenidadId) }))
       .sort((a, b) => a.horaInicio.localeCompare(b.horaInicio));
   },
 
+  // Reserva una amenidad, o una o varias secciones de la misma amenidad (una reserva por sección).
   async 'amenidades.reservar'({ condominio, unidad, sub, p }) {
-    const am = await get('Amenidad', { id: str(p.amenidadId, 64) });
-    if (!am || am.condominioId !== condominio.id || am.activa === false) fail('Amenidad no disponible.');
+    const pedidas: string[] = Array.isArray(p.amenidadIds) ? p.amenidadIds.map((x: unknown) => str(x, 64)) : [str(p.amenidadId, 64)];
+    const unicas = [...new Set(pedidas.filter(Boolean))];
+    if (!unicas.length || unicas.length > 10) fail('Elige qué quieres reservar.');
+    const todas = await byIndex('Amenidad', 'byCondominio', 'condominioId', condominio.id);
+    const ams = unicas.map((id) => todas.find((a) => a.id === id));
+    if (ams.some((a) => !a || a.activa === false)) fail('Amenidad no disponible.');
+    if (ams.length > 1 && ams.some((a) => !a!.parteDeId || a!.parteDeId !== ams[0]!.parteDeId)) fail('Solo puedes reservar juntas secciones de la misma amenidad.');
+    const documentos = documentosDe(condominio.documentos).filter((d) => SLOTS_AMENIDADES.includes(d.slot));
+    if (documentos.length && p.aceptaTerminos !== true) fail('Debes aceptar el reglamento y los términos de uso de las amenidades.');
+
     const fecha = String(p.fecha ?? '');
     const ini = String(p.horaInicio ?? '');
     const fin = String(p.horaFin ?? '');
     if (!FECHA.test(fecha) || fecha < hoyMX()) fail('Elige una fecha a partir de hoy.');
     if (!HORA.test(ini) || !HORA.test(fin) || minutos(ini) >= minutos(fin)) fail('Revisa el horario.');
-    if (am!.horaApertura && ini < am!.horaApertura) fail(`El horario inicia a las ${am!.horaApertura}.`);
-    if (am!.horaCierre && fin > am!.horaCierre) fail(`El horario termina a las ${am!.horaCierre}.`);
-    if (am!.maxHoras && minutos(fin) - minutos(ini) > am!.maxHoras * 60) fail(`Máximo ${am!.maxHoras} h por reserva.`);
     const invitados = Math.max(0, Math.floor(Number(p.invitados) || 0));
-    if (am!.capacidad && invitados > am!.capacidad) fail(`Capacidad máxima: ${am!.capacidad} personas.`);
-    const existentes = await byIndex('Reserva', 'byAmenidad', 'amenidadId', am!.id);
-    const choca = existentes.some(
-      (r) =>
-        r.fecha === fecha &&
-        ['SOLICITADA', 'APROBADA'].includes(r.estado) &&
-        minutos(ini) < minutos(r.horaFin) &&
-        minutos(r.horaInicio) < minutos(fin),
-    );
-    if (choca) fail('Ese horario ya está reservado.');
-    const r = await put('Reserva', {
-      condominioId: condominio.id,
-      amenidadId: am!.id,
-      unidadId: unidad!.id,
-      userId: sub,
-      fecha,
-      horaInicio: ini,
-      horaFin: fin,
-      invitados,
-      estado: am!.requiereAprobacion ? 'SOLICITADA' : 'APROBADA',
-      nota: str(p.nota, 500),
-    });
-    return sinPrivados(r);
+    for (const am of ams) {
+      const n = am!.nombre;
+      if (am!.horaApertura && ini < am!.horaApertura) fail(`${n}: el horario inicia a las ${am!.horaApertura}.`);
+      if (am!.horaCierre && fin > am!.horaCierre) fail(`${n}: el horario termina a las ${am!.horaCierre}.`);
+      if (am!.maxHoras && minutos(fin) - minutos(ini) > am!.maxHoras * 60) fail(`${n}: máximo ${am!.maxHoras} h por reserva.`);
+    }
+    const capacidad = ams.reduce((s, a) => s + (a!.capacidad || 0), 0);
+    if (capacidad && ams.every((a) => a!.capacidad) && invitados > capacidad) fail(`Capacidad máxima: ${capacidad} personas.`);
+
+    // Preferencia a quien pidió primero: cualquier reserva activa de la misma amenidad, de la amenidad completa
+    // o de sus secciones aparta el horario (las pendientes de pago, hasta 48 h sin comprobante).
+    const pedida = { fecha, horaInicio: ini, horaFin: fin };
+    for (const am of ams) {
+      const ids = relacionadas(am!, todas);
+      const existentes = (await Promise.all(ids.map((id) => byIndex('Reserva', 'byAmenidad', 'amenidadId', id)))).flat();
+      const [choca] = await apartadas(existentes, pedida);
+      if (choca) {
+        const otra = todas.find((a) => a.id === choca.amenidadId)?.nombre;
+        const espera = choca.estado === 'APROBADA' ? '' : ' (apartado por otra unidad, en espera de confirmación)';
+        fail(
+          choca.amenidadId === am!.id
+            ? `${am!.nombre} ya está reservada en ese horario${espera}.`
+            : `${am!.nombre} no está disponible en ese horario: hay una reserva de ${otra}${espera}.`,
+        );
+      }
+    }
+
+    const juntas = ams.length > 1 ? `Reservada junto con: ${ams.map((a) => a!.nombre).join(', ')}.` : '';
+    const nota = [str(p.nota, 500), juntas].filter(Boolean).join(' ');
+    // Con costo: se carga al estado de cuenta y el horario se aparta al validar el pago.
+    // Sin costo: se aprueba al momento, o queda solicitada si la amenidad requiere aprobación.
+    const padre = ams[0]!.parteDeId ? todas.find((a) => a.id === ams[0]!.parteDeId) : undefined;
+    const creadas = [];
+    for (const am of ams) {
+      const costo = Number(am!.costo) > 0 ? Math.round(Number(am!.costo) * 100) / 100 : 0;
+      const r = await put('Reserva', {
+        condominioId: condominio.id,
+        amenidadId: am!.id,
+        unidadId: unidad!.id,
+        userId: sub,
+        fecha,
+        horaInicio: ini,
+        horaFin: fin,
+        invitados,
+        // Las gratuitas sin aprobación se confirman enseguida (confirmarReserva); no avisan a la administración.
+        estado: !costo && am!.requiereAprobacion ? 'SOLICITADA' : 'PENDIENTE_PAGO',
+        nota,
+        terminosAceptados: documentos.length ? now() : null,
+      });
+      if (costo) {
+        await put('Cargo', {
+          id: cargoDeReserva(r.id),
+          condominioId: condominio.id,
+          unidadId: unidad!.id,
+          concepto: `Reserva ${am!.nombre}${padre ? ` · ${padre.nombre}` : ''} · ${fecha} ${ini}–${fin}`,
+          periodo: fecha.slice(0, 7),
+          monto: costo,
+          vence: fecha,
+          estado: 'PENDIENTE',
+        });
+      } else if (!am!.requiereAprobacion) {
+        const c = await confirmarReserva(r);
+        if (!c.ok) {
+          await update('Reserva', { id: r.id }, { estado: 'CANCELADA' });
+          fail(`${am!.nombre} no está disponible en ese horario: hay una reserva de ${c.nombre}.`);
+        }
+        r.estado = 'APROBADA';
+      }
+      creadas.push(r);
+    }
+    const total = creadas.filter((r) => r.estado === 'PENDIENTE_PAGO').length;
+    if (total) {
+      const monto = ams.reduce((s, a) => s + (Number(a!.costo) > 0 ? Number(a!.costo) : 0), 0);
+      await put('Aviso', {
+        condominioId: condominio.id,
+        unidadId: unidad!.id,
+        tipo: 'RESERVA',
+        titulo: `Reserva pendiente de pago: ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(monto)}`,
+        texto: `Ya está en tu estado de cuenta. El ${fecha} de ${ini} a ${fin} queda apartado para ti: sube tu comprobante en Finanzas antes de ${HORAS_APARTADO} horas o la reserva se cancelará automáticamente. Se confirma cuando la administración valide tu pago.`,
+        leido: false,
+      });
+    }
+    return creadas.map(sinPrivados);
   },
 
   async 'amenidades.cancelar'({ unidad, p }) {
     const r = await get('Reserva', { id: str(p.reservaId, 64) });
     if (!r || r.unidadId !== unidad!.id) fail('Reserva no encontrada.');
-    if (!['SOLICITADA', 'APROBADA'].includes(r!.estado)) fail('La reserva ya no está activa.');
-    return sinPrivados(await update('Reserva', { id: r!.id }, { estado: 'CANCELADA' }));
+    if (!ACTIVAS.includes(r!.estado)) fail('La reserva ya no está activa.');
+    const cancelada = await update('Reserva', { id: r!.id }, { estado: 'CANCELADA' });
+    await cancelarCargoReserva(r!.id);
+    return sinPrivados(cancelada);
   },
 
   // ----- Visitas -----
@@ -634,7 +724,7 @@ async function perfilActual(sub: string, email: string) {
     email,
     perfil: sinPrivados(perfil),
     condominio: condominio ? pub(condominio) : null,
-    unidad: unidad ? { id: unidad.id, etiqueta: unidad.etiqueta, cuota: unidad.cuota } : null,
+    unidad: unidad ? { id: unidad.id, etiqueta: unidad.etiqueta, cuota: condominio?.cuotaMensual ?? unidad.cuota } : null,
   };
 }
 

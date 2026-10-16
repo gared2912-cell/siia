@@ -1,348 +1,489 @@
+// Condominios: cada condominio tiene su ficha con todo lo suyo — datos generales, cuota y datos de pago,
+// cuotas extraordinarias, unidades y residentes (uno por uno o con el machote de Excel), amenidades y servicios.
 import { useState } from 'react';
-import { db, ok } from '../api';
-import { Badge, Empty, Field, Icon, MODULOS, Modal, PageHead, money, useAction } from '../ui';
-import { useAdmin, type Condominio, type Unidad } from './AdminApp';
+import { adminCall, all, db, ok, type Schema } from '../api';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, MODULOS, Modal, PageHead, Seg, fecha, hoy, money, useAction, useLoad } from '../ui';
+import { TIPOS_UNIDAD, prefijoUnidad, textoDatosPago } from '../../../amplify/functions/shared/unidades';
+import { useAdmin, type Condominio } from './AdminApp';
+import { Residentes } from './Residentes';
+import { Documentos } from './Documentos';
+import { CatalogoAmenidades } from './Operacion';
+
+type Cargo = Schema['Cargo']['type'];
+type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
 
 const TIPOS = ['Condominio horizontal', 'Condominio vertical (edificio)', 'Fraccionamiento cerrado', 'Uso mixto / otro'];
+const nombreTipoUnidad = (t?: string | null) => (t === 'DEPARTAMENTO' ? 'Departamentos' : t === 'CASA' ? 'Casas' : 'Sin definir');
 
 export function Condominios() {
-  const { condos, condo, setCondoId, reloadCondos, puede, tiene } = useAdmin();
-  const [editar, setEditar] = useState<Partial<Condominio> | null>(null);
-  const gestiona = puede('condominios', 'editar');
+  const { condos, condo, setCondoId, puede, tiene } = useAdmin();
+  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (condos.length === 1 ? 'ficha' : 'lista'));
+  const [tab, setTab] = useState<Tab>('general');
+  const alta = puede('condominios', 'editar') && tiene('condominios.alta');
+
+  if (vista === 'nuevo')
+    return (
+      <NuevoCondominio
+        onCancel={() => setVista('lista')}
+        onDone={(id) => {
+          setCondoId(id);
+          setTab('residentes');
+          setVista('ficha');
+        }}
+      />
+    );
+  if (vista === 'ficha') return condo ? <Ficha tab={tab} setTab={setTab} onBack={() => setVista('lista')} /> : <Loading />;
 
   return (
     <div className="stack">
-      <PageHead icon="building" title="Condominios" sub="Alta de condominios, servicios autorizados y unidades.">
-        {gestiona && tiene('condominios.alta') && (
-          <button className="btn-app" onClick={() => setEditar({ modulos: [], activo: true })}>
+      <PageHead icon="building" title="Condominios" sub="Cada condominio con sus datos, cuotas, residentes, amenidades y servicios.">
+        {alta && (
+          <button className="btn-app" onClick={() => setVista('nuevo')}>
             <Icon name="plus" />
             Nuevo condominio
           </button>
         )}
       </PageHead>
-
       {condos.length ? (
         <div className="grid-cards">
           {condos.map((c) => (
-            <article key={c.id} className="panel" style={{ marginTop: 0, borderColor: c.id === condo?.id ? 'var(--teal)' : undefined }}>
+            <article key={c.id} className="panel" style={{ marginTop: 0 }}>
               <div className="panel-head">
                 <h3>{c.nombre}</h3>
                 <Badge estado={c.activo === false ? 'SUSPENDIDO' : 'APROBADO'}>{c.activo === false ? 'Inactivo' : 'Activo'}</Badge>
               </div>
               <p className="small muted" style={{ margin: '0 0 8px' }}>
-                {c.tipo ?? 'Sin tipo'} {c.direccion && `· ${c.direccion}`}
+                {c.tipo ?? 'Sin tipo'} · {nombreTipoUnidad(c.tipoUnidad)}
+                {c.direccion && <> · {c.direccion}</>}
               </p>
               <p className="small" style={{ margin: '0 0 12px' }}>
-                <strong>{(c.modulos ?? []).length}</strong> de {MODULOS.length} servicios autorizados
+                Cuota: <strong>{c.cuotaMensual ? `${money(c.cuotaMensual)} al mes` : 'sin definir'}</strong> · {(c.modulos ?? []).length} de{' '}
+                {MODULOS.length} servicios
               </p>
-              <div className="row-actions">
-                {(gestiona || tiene('condominios.servicios') || tiene('condominios.datosPago')) && (
-                  <button className="btn-app sm secondary" onClick={() => setEditar(c)}>
-                    {tiene('condominios.servicios') ? 'Editar y servicios' : 'Editar'}
-                  </button>
-                )}
-                {c.id !== condo?.id && (
-                  <button className="btn-app sm secondary" onClick={() => setCondoId(c.id)}>
-                    Ver unidades
-                  </button>
-                )}
-              </div>
+              <button
+                className="btn-app sm"
+                onClick={() => {
+                  setCondoId(c.id);
+                  setTab('general');
+                  setVista('ficha');
+                }}
+              >
+                Abrir condominio
+                <Icon name="arrow" />
+              </button>
             </article>
           ))}
         </div>
       ) : (
         <section className="panel">
-          <Empty icon="building">{tiene('condominios.alta') ? 'Da de alta el primer condominio.' : 'No tienes condominios asignados.'}</Empty>
+          <Empty icon="building">{alta ? 'Da de alta el primer condominio.' : 'No tienes condominios asignados.'}</Empty>
         </section>
-      )}
-
-      {condo && <Unidades />}
-
-      {editar && (
-        <EditarCondominio
-          c={editar}
-          onClose={() => setEditar(null)}
-          onDone={(id) => {
-            setEditar(null);
-            reloadCondos();
-            if (id) setCondoId(id);
-          }}
-        />
       )}
     </div>
   );
 }
 
-function EditarCondominio({ c, onClose, onDone }: { c: Partial<Condominio>; onClose: () => void; onDone: (id?: string) => void }) {
-  const { tiene, puede } = useAdmin();
-  // Datos generales con «Gestionar»; servicios y datos bancarios con su permiso especial.
-  const generales = puede('condominios', 'editar');
-  const servicios = tiene('condominios.servicios');
-  const banco = tiene('condominios.datosPago');
+function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; onBack: () => void }) {
+  const { condo, condos, unidades, puede } = useAdmin();
+  const c = condo!;
+  const tabs: [Tab, string][] = [
+    ...(puede('condominios') ? [['general', 'Datos generales'] as [Tab, string]] : []),
+    ...(puede('condominios') || puede('finanzas') ? [['cuotas', 'Cuotas y pagos'] as [Tab, string]] : []),
+    ...(puede('condominios') || puede('usuarios') ? [['residentes', `Residentes (${unidades.length})`] as [Tab, string]] : []),
+    ...(puede('amenidades') ? [['amenidades', 'Amenidades'] as [Tab, string]] : []),
+    ...(puede('condominios') ? [['servicios', 'Servicios del portal'] as [Tab, string]] : []),
+  ];
+  const actual = tabs.some(([k]) => k === tab) ? tab : tabs[0]?.[0];
+
+  return (
+    <div className="stack">
+      {condos.length > 1 && (
+        <div>
+          <button className="linklike" onClick={onBack}>
+            <Icon name="back" /> Todos los condominios
+          </button>
+        </div>
+      )}
+      <PageHead
+        icon="building"
+        title={c.nombre}
+        sub={`${c.tipo ?? 'Sin tipo'} · ${nombreTipoUnidad(c.tipoUnidad)} · ${unidades.length} unidades${c.activo === false ? ' · portal inactivo' : ''}`}
+      />
+      <Seg value={actual} onChange={setTab} options={tabs} />
+      {actual === 'general' && (
+        <>
+          <DatosCondominio key={`g${c.id}`} c={c} seccion="general" />
+          <Documentos />
+        </>
+      )}
+      {actual === 'cuotas' && (
+        <>
+          {puede('condominios') && <DatosCondominio key={`c${c.id}`} c={c} seccion="cuotas" />}
+          {puede('finanzas') && <Extraordinarias key={`e${c.id}`} />}
+        </>
+      )}
+      {actual === 'residentes' && <Residentes key={c.id} irAGenerales={() => setTab('general')} />}
+      {actual === 'amenidades' && <CatalogoAmenidades key={c.id} />}
+      {actual === 'servicios' && <DatosCondominio key={`s${c.id}`} c={c} seccion="servicios" />}
+    </div>
+  );
+}
+
+function NuevoCondominio({ onCancel, onDone }: { onCancel: () => void; onDone: (id: string) => void }) {
+  return (
+    <div className="stack">
+      <div>
+        <button className="linklike" onClick={onCancel}>
+          <Icon name="back" /> Todos los condominios
+        </button>
+      </div>
+      <PageHead
+        icon="building"
+        title="Nuevo condominio"
+        sub="Captura los datos, la cuota y los servicios. Al guardar podrás dar de alta las casas o departamentos y sus residentes."
+      />
+      <DatosCondominio c={{ activo: true, modulos: MODULOS.map((m) => m.key), diaVencimiento: 10 }} seccion="todo" onCreado={onDone} />
+    </div>
+  );
+}
+
+type Seccion = 'general' | 'cuotas' | 'servicios' | 'todo';
+
+/** Formulario del condominio. En la ficha se guarda por sección; al crear, todo junto. */
+function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; seccion: Seccion; onCreado?: (id: string) => void }) {
+  const { tiene, puede, reloadCondos } = useAdmin();
+  const estructurado = !!(c.banco || c.beneficiario || c.clabe || c.cuentaBancaria || c.referenciaPago || c.notasPago);
   const [f, setF] = useState({
     nombre: c.nombre ?? '',
     tipo: c.tipo ?? TIPOS[0],
+    tipoUnidad: c.tipoUnidad ?? '',
     direccion: c.direccion ?? '',
-    datosPago: c.datosPago ?? '',
     telefonoCaseta: c.telefonoCaseta ?? '',
+    cuotaMensual: c.cuotaMensual != null ? String(c.cuotaMensual) : '',
+    diaVencimiento: String(c.diaVencimiento ?? 10),
+    recargoActivo: !!c.recargoActivo,
+    recargoMonto: c.recargoMonto != null ? String(c.recargoMonto) : '',
+    banco: c.banco ?? '',
+    beneficiario: c.beneficiario ?? '',
+    clabe: c.clabe ?? '',
+    cuentaBancaria: c.cuentaBancaria ?? '',
+    referenciaPago: c.referenciaPago ?? '',
+    // Condominios anteriores: el texto libre de datos de pago pasa a «Instrucciones adicionales».
+    notasPago: c.notasPago ?? (estructurado ? '' : (c.datosPago ?? '')),
     activo: c.activo !== false,
     modulos: (c.modulos ?? []).filter(Boolean) as string[],
   });
   const { run, busy } = useAction();
-  const set =
-    (k: 'nombre' | 'tipo' | 'direccion' | 'datosPago' | 'telefonoCaseta') =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-      setF({ ...f, [k]: e.target.value });
+  const ver = (s: Exclude<Seccion, 'todo'>) => seccion === 'todo' || seccion === s;
+  const puedeGeneral = puede('condominios', 'editar');
+  const puedePago = tiene('condominios.datosPago');
+  const puedeServicios = tiene('condominios.servicios');
+  const editable = (seccion === 'general' && puedeGeneral) || (seccion === 'cuotas' && puedePago) || (seccion === 'servicios' && puedeServicios) || seccion === 'todo';
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const toggle = (m: string) => setF({ ...f, modulos: f.modulos.includes(m) ? f.modulos.filter((x) => x !== m) : [...f.modulos, m] });
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    let id: string | undefined;
+    const general = { nombre: f.nombre.trim(), tipo: f.tipo, tipoUnidad: f.tipoUnidad, direccion: f.direccion, telefonoCaseta: f.telefonoCaseta };
+    const pago = {
+      cuotaMensual: f.cuotaMensual === '' ? null : Number(f.cuotaMensual),
+      diaVencimiento: Number(f.diaVencimiento) || 10,
+      banco: f.banco.trim(),
+      beneficiario: f.beneficiario.trim(),
+      clabe: f.clabe.replace(/\s/g, ''),
+      cuentaBancaria: f.cuentaBancaria.trim(),
+      referenciaPago: f.referenciaPago.trim(),
+      notasPago: f.notasPago.trim(),
+      recargoActivo: f.recargoActivo,
+      recargoMonto: f.recargoMonto === '' ? null : Number(f.recargoMonto),
+      // Al activarlo, solo cuentan las cuotas que venzan desde hoy (no se cobran recargos de meses anteriores).
+      recargoDesde: f.recargoActivo ? (c.recargoActivo && c.recargoDesde ? c.recargoDesde : hoy()) : null,
+    };
+    const pagoTodo = { ...pago, datosPago: textoDatosPago(pago) };
+    const servicios = { modulos: f.modulos, activo: f.activo };
+    const datos =
+      seccion === 'general'
+        ? general
+        : seccion === 'cuotas'
+          ? pagoTodo
+          : seccion === 'servicios'
+            ? servicios
+            : { ...general, ...(puedePago ? pagoTodo : {}), ...(puedeServicios ? servicios : {}) };
+    let id = c.id;
     const okk = await run(
       async () => {
-        const r = c.id ? ok(await db.models.Condominio.update({ id: c.id, ...f })) : ok(await db.models.Condominio.create(f));
-        id = r?.id;
+        if (!f.tipoUnidad && ver('general')) throw new Error('Indica si el condominio es de casas o de departamentos.');
+        if (ver('cuotas') && f.recargoActivo && !(Number(f.recargoMonto) > 0)) throw new Error('Indica el monto del recargo por pago tardío.');
+        const r = c.id ? ok(await db.models.Condominio.update({ id: c.id, ...datos })) : ok(await db.models.Condominio.create(datos as never));
+        id = r?.id ?? id;
       },
-      c.id ? 'Condominio actualizado' : 'Condominio creado',
+      c.id ? 'Cambios guardados' : 'Condominio creado. Ahora da de alta sus casas o departamentos y residentes.',
     );
-    if (okk) onDone(id);
+    if (okk) {
+      reloadCondos();
+      if (!c.id && id) onCreado?.(id);
+    }
   }
 
   return (
-    <Modal title={c.id ? `Editar ${c.nombre}` : 'Nuevo condominio'} onClose={onClose} wide>
-      <form className="form" onSubmit={guardar}>
-        <div className="form-2">
-          <Field label="Nombre">
-            <input required maxLength={120} value={f.nombre} onChange={set('nombre')} disabled={!generales} />
-          </Field>
-          <Field label="Tipo">
-            <select value={f.tipo} onChange={set('tipo')} disabled={!generales}>
-              {TIPOS.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Dirección">
-            <input maxLength={200} value={f.direccion} onChange={set('direccion')} disabled={!generales} />
-          </Field>
-          <Field label="Teléfono de caseta">
-            <input type="tel" maxLength={20} value={f.telefonoCaseta} onChange={set('telefonoCaseta')} disabled={!generales} />
-          </Field>
-        </div>
-        <Field
-          label="Datos para pago de cuotas"
-          hint={
-            banco
-              ? 'Se muestran a los residentes en Finanzas (banco, CLABE, beneficiario, referencia).'
-              : 'Tu rol no permite editar los datos bancarios.'
-          }
-        >
-          <textarea maxLength={1000} value={f.datosPago} onChange={set('datosPago')} disabled={!banco} />
-        </Field>
-        <fieldset className="fld" style={{ border: 0, padding: 0, margin: 0 }}>
-          <span>Servicios autorizados para los residentes</span>
-          <small>
-            {servicios ? 'Solo los servicios marcados aparecen en el portal de este condominio.' : 'Tu rol no permite cambiar los servicios.'}
-          </small>
-          <div className="checks" style={{ marginTop: 6 }}>
+    <form className="stack" onSubmit={guardar}>
+      {ver('general') && (
+        <section className="panel">
+          {seccion === 'todo' && <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Datos generales</h2>}
+          <div className="form">
+            <div className="form-2">
+              <Field label="Nombre del condominio">
+                <input required maxLength={120} value={f.nombre} onChange={set('nombre')} disabled={!puedeGeneral} />
+              </Field>
+              <Field label="Tipo de condominio">
+                <select value={f.tipo} onChange={set('tipo')} disabled={!puedeGeneral}>
+                  {TIPOS.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Las unidades son" hint={f.tipoUnidad ? `Se identifican como «${prefijoUnidad(f.tipoUnidad)} 12», «${prefijoUnidad(f.tipoUnidad)} A-101»…` : undefined}>
+                <select required value={f.tipoUnidad} onChange={set('tipoUnidad')} disabled={!puedeGeneral}>
+                  <option value="">Selecciona…</option>
+                  {TIPOS_UNIDAD.map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Teléfono de caseta">
+                <input type="tel" maxLength={20} value={f.telefonoCaseta} onChange={set('telefonoCaseta')} disabled={!puedeGeneral} />
+              </Field>
+            </div>
+            <Field label="Dirección">
+              <textarea rows={2} maxLength={300} value={f.direccion} onChange={set('direccion')} disabled={!puedeGeneral} placeholder="Calle, número, colonia, municipio, estado, C.P." />
+            </Field>
+          </div>
+        </section>
+      )}
+
+      {ver('cuotas') && (
+        <section className="panel">
+          <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Cuota de mantenimiento</h2>
+          {!puedePago && <p className="small muted">Tu rol no permite cambiar la cuota ni los datos bancarios.</p>}
+          <div className="form">
+            <div className="form-2">
+              <Field label="Cuota mensual (MXN)" hint="La misma para todas las casas o departamentos.">
+                <input type="number" min="0" step="0.01" value={f.cuotaMensual} onChange={set('cuotaMensual')} disabled={!puedePago} placeholder="1500.00" />
+              </Field>
+              <Field label="Día de vencimiento" hint="Día del mes en que vence la cuota (1 a 28).">
+                <input type="number" min="1" max="28" value={f.diaVencimiento} onChange={set('diaVencimiento')} disabled={!puedePago} />
+              </Field>
+            </div>
+            <div className="recargo">
+              <label className="check" style={{ fontWeight: 700 }}>
+                <input type="checkbox" checked={f.recargoActivo} disabled={!puedePago} onChange={(e) => setF({ ...f, recargoActivo: e.target.checked })} />
+                Cobrar recargo por pago tardío
+              </label>
+              <p className="small muted" style={{ margin: '4px 0 10px' }}>
+                Al día siguiente del vencimiento (día {Math.min(Math.max(Number(f.diaVencimiento) || 10, 1), 28) + 1}) se carga el recargo a cada residente que no
+                haya pagado ni subido su comprobante. Se aplica una sola vez por cuota y el residente recibe un aviso.
+                {c.recargoActivo && c.recargoDesde ? ` Activo desde el ${fecha(c.recargoDesde)}.` : ' Al activarlo, aplica a las cuotas que venzan a partir de hoy.'}
+              </p>
+              {f.recargoActivo && (
+                <Field label="Monto del recargo (MXN)">
+                  <input type="number" min="0.01" step="0.01" required value={f.recargoMonto} onChange={set('recargoMonto')} disabled={!puedePago} placeholder="150.00" style={{ maxWidth: 220 }} />
+                </Field>
+              )}
+            </div>
+            <h3 style={{ fontSize: '1rem', margin: '8px 0 0' }}>¿Dónde se pagan las cuotas?</h3>
+            <p className="small muted" style={{ margin: 0 }}>
+              Los residentes ven estos datos en Finanzas para hacer su transferencia o depósito.
+            </p>
+            <div className="form-2">
+              <Field label="Banco">
+                <input maxLength={60} value={f.banco} onChange={set('banco')} disabled={!puedePago} placeholder="BBVA" />
+              </Field>
+              <Field label="Beneficiario">
+                <input maxLength={120} value={f.beneficiario} onChange={set('beneficiario')} disabled={!puedePago} placeholder="Condominio … A.C." />
+              </Field>
+              <Field label="CLABE interbancaria">
+                <input inputMode="numeric" pattern="\d{18}" title="La CLABE tiene 18 dígitos" maxLength={22} value={f.clabe} onChange={set('clabe')} disabled={!puedePago} />
+              </Field>
+              <Field label="Número de cuenta">
+                <input inputMode="numeric" maxLength={20} value={f.cuentaBancaria} onChange={set('cuentaBancaria')} disabled={!puedePago} />
+              </Field>
+            </div>
+            <Field label="Referencia" hint="Qué deben escribir en el concepto de la transferencia.">
+              <input maxLength={120} value={f.referenciaPago} onChange={set('referenciaPago')} disabled={!puedePago} placeholder="Número de casa o departamento" />
+            </Field>
+            <Field label="Instrucciones adicionales">
+              <textarea maxLength={1000} value={f.notasPago} onChange={set('notasPago')} disabled={!puedePago} placeholder="Pagos en efectivo en la oficina de administración de lunes a viernes…" />
+            </Field>
+          </div>
+        </section>
+      )}
+
+      {ver('servicios') && (
+        <section className="panel">
+          <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Servicios del portal</h2>
+          <p className="small muted">
+            {puedeServicios ? 'Solo los servicios marcados aparecen en el portal de este condominio.' : 'Tu rol no permite cambiar los servicios.'}
+          </p>
+          <div className="checks">
             {MODULOS.map((m) => (
               <label key={m.key} className="check">
-                <input type="checkbox" disabled={!servicios} checked={f.modulos.includes(m.key)} onChange={() => toggle(m.key)} />
+                <input type="checkbox" disabled={!puedeServicios} checked={f.modulos.includes(m.key)} onChange={() => toggle(m.key)} />
                 {m.label}
               </label>
             ))}
           </div>
-        </fieldset>
-        <label className="check">
-          <input type="checkbox" disabled={!servicios} checked={f.activo} onChange={(e) => setF({ ...f, activo: e.target.checked })} />
-          Portal activo (si se desactiva, ningún residente ni vigilante de este condominio puede entrar)
-        </label>
-        <button className="btn-app" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar'}
-        </button>
-      </form>
-    </Modal>
+          <label className="check" style={{ marginTop: 12 }}>
+            <input type="checkbox" disabled={!puedeServicios} checked={f.activo} onChange={(e) => setF({ ...f, activo: e.target.checked })} />
+            Portal activo (si se desactiva, ningún residente ni vigilante de este condominio puede entrar)
+          </label>
+        </section>
+      )}
+
+      {editable && (
+        <div>
+          <button className="btn-app" disabled={busy}>
+            {busy ? 'Guardando…' : c.id ? 'Guardar cambios' : 'Crear condominio'}
+          </button>
+        </div>
+      )}
+    </form>
   );
 }
 
-function Unidades() {
-  const { condo, unidades, reloadUnidades, puede } = useAdmin();
-  const gestiona = puede('condominios', 'editar');
-  const [editar, setEditar] = useState<Partial<Unidad> | null>(null);
-  const [lote, setLote] = useState(false);
-  const { run } = useAction();
+// ---------- Cuotas extraordinarias ----------
+// Cada cuota extraordinaria es un cargo por unidad con id «extra#<grupo>#<unidad>».
+function Extraordinarias() {
+  const { condoId, unidades, puede } = useAdmin();
+  const gestiona = puede('finanzas', 'editar');
+  const { data, error, loading, reload } = useLoad(() => all<Cargo>((o) => db.models.Cargo.cargosPorCondominio({ condominioId: condoId }, o)), [condoId]);
+  const [nueva, setNueva] = useState(false);
+  const { run, busy } = useAction();
 
-  const borrar = (u: Unidad) =>
-    confirm(`¿Eliminar ${u.etiqueta}? Sus cargos e historial se conservan pero quedarán sin unidad.`) &&
+  const grupos = Object.values(
+    (data ?? [])
+      .filter((x) => x.id.startsWith('extra#'))
+      .reduce<Record<string, Cargo[]>>((acc, x) => ((acc[x.id.split('#')[1]] ??= []).push(x), acc), {}),
+  ).sort((a, b) => String(b[0].vence).localeCompare(String(a[0].vence)));
+
+  const cancelar = (g: Cargo[]) => {
+    const pendientes = g.filter((x) => x.estado === 'PENDIENTE');
+    if (!confirm(`¿Cancelar «${g[0].concepto}»? Se cancelan ${pendientes.length} cargo(s) sin pagar; los ya pagados se conservan.`)) return;
     run(async () => {
-      ok(await db.models.Unidad.delete({ id: u.id }));
-      reloadUnidades();
-    }, 'Unidad eliminada');
+      for (let i = 0; i < pendientes.length; i += 10) {
+        await Promise.all(pendientes.slice(i, i + 10).map(async (x) => ok(await db.models.Cargo.update({ id: x.id, estado: 'CANCELADO' }))));
+      }
+      reload(true);
+    }, 'Cuota extraordinaria cancelada');
+  };
 
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>Unidades de {condo!.nombre}</h2>
+        <h2 style={{ fontSize: '1.1rem' }}>Cuotas extraordinarias</h2>
         {gestiona && (
-          <div className="row-actions">
-            <button className="btn-app sm secondary" onClick={() => setLote(true)}>
-              Alta masiva
-            </button>
-            <button className="btn-app sm" onClick={() => setEditar({})}>
-              <Icon name="plus" />
-              Unidad
-            </button>
-          </div>
+          <button type="button" className="btn-app sm" onClick={() => setNueva(true)} disabled={!unidades.length}>
+            <Icon name="plus" />
+            Agregar cuota extraordinaria
+          </button>
         )}
       </div>
-      {unidades.length ? (
-        <div className="table-wrap">
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>Unidad</th>
-                <th>Propietario</th>
-                <th className="num">Cuota mensual</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {unidades.map((u) => (
-                <tr key={u.id}>
-                  <td>
-                    <strong>{u.etiqueta}</strong>
-                  </td>
-                  <td>{u.propietario ?? '—'}</td>
-                  <td className="num">{u.cuota != null ? money(u.cuota) : '—'}</td>
-                  <td>
-                    {gestiona && (
-                      <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                        <button className="linklike" onClick={() => setEditar(u)}>
-                          Editar
-                        </button>
-                        <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(u)}>
-                          Eliminar
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <p className="small muted" style={{ marginTop: 0 }}>
+        Se cargan al estado de cuenta de cada residente en cuanto las agregas. Las cuotas mensuales se generan en Finanzas › Generar cuotas del mes.
+      </p>
+      {loading && !data ? (
+        <Loading />
+      ) : error ? (
+        <ErrorBox error={error} retry={reload} />
+      ) : grupos.length ? (
+        <ul className="list">
+          {grupos.map((g) => {
+            const pagados = g.filter((x) => x.estado === 'PAGADO').length;
+            const vigentes = g.filter((x) => x.estado !== 'CANCELADO').length;
+            return (
+              <li key={g[0].id}>
+                <div className="list-main">
+                  <strong>{g[0].concepto}</strong> {!vigentes && <Badge estado="CANCELADO">Cancelada</Badge>}
+                  <div className="list-sub">
+                    {money(g[0].monto)} por unidad · vence {fecha(g[0].vence)} · {vigentes} unidad(es) · {pagados} pagada(s)
+                  </div>
+                </div>
+                {gestiona && g.some((x) => x.estado === 'PENDIENTE') && (
+                  <button type="button" className="btn-app sm danger" disabled={busy} onClick={() => cancelar(g)}>
+                    Cancelar
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       ) : (
-        <Empty icon="building">Da de alta las casas o departamentos del condominio.</Empty>
+        <Empty icon="money">Sin cuotas extraordinarias.</Empty>
       )}
-      {editar && <EditarUnidad u={editar} onClose={() => setEditar(null)} onDone={() => (setEditar(null), reloadUnidades())} />}
-      {lote && <AltaMasiva onClose={() => setLote(false)} onDone={() => (setLote(false), reloadUnidades())} />}
+      {nueva && <NuevaExtraordinaria onClose={() => setNueva(false)} onDone={() => (setNueva(false), reload(true))} />}
     </section>
   );
 }
 
-function EditarUnidad({ u, onClose, onDone }: { u: Partial<Unidad>; onClose: () => void; onDone: () => void }) {
-  const { condoId } = useAdmin();
-  const [f, setF] = useState({
-    etiqueta: u.etiqueta ?? '',
-    propietario: u.propietario ?? '',
-    cuota: u.cuota != null ? String(u.cuota) : '',
-    notas: u.notas ?? '',
-  });
-  const { run, busy } = useAction();
-  async function guardar(e: React.FormEvent) {
-    e.preventDefault();
-    const datos = {
-      etiqueta: f.etiqueta.trim(),
-      propietario: f.propietario || null,
-      cuota: f.cuota === '' ? null : Number(f.cuota),
-      notas: f.notas || null,
-    };
-    const okk = await run(async () => {
-      if (u.id) ok(await db.models.Unidad.update({ id: u.id, ...datos }));
-      else ok(await db.models.Unidad.create({ condominioId: condoId, ...datos }));
-    }, 'Unidad guardada');
-    if (okk) onDone();
-  }
-  return (
-    <Modal title={u.id ? `Editar ${u.etiqueta}` : 'Nueva unidad'} onClose={onClose}>
-      <form className="form" onSubmit={guardar}>
-        <div className="form-2">
-          <Field label="Identificador">
-            <input
-              required
-              maxLength={60}
-              value={f.etiqueta}
-              onChange={(e) => setF({ ...f, etiqueta: e.target.value })}
-              placeholder="Casa 12 / Depto 3B"
-            />
-          </Field>
-          <Field label="Cuota mensual (MXN)">
-            <input type="number" min="0" step="0.01" value={f.cuota} onChange={(e) => setF({ ...f, cuota: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Propietario">
-          <input maxLength={120} value={f.propietario} onChange={(e) => setF({ ...f, propietario: e.target.value })} />
-        </Field>
-        <Field label="Notas">
-          <textarea maxLength={500} value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} />
-        </Field>
-        <button className="btn-app" disabled={busy}>
-          Guardar
-        </button>
-      </form>
-    </Modal>
-  );
-}
-
-function AltaMasiva({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function NuevaExtraordinaria({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { condoId, unidades } = useAdmin();
-  const [f, setF] = useState({ prefijo: 'Casa ', desde: '1', hasta: '20', cuota: '' });
+  const [f, setF] = useState({ concepto: '', monto: '', vence: hoy(), todas: true });
+  const [elegidas, setElegidas] = useState<string[]>([]);
   const { run, busy } = useAction();
+  const n = f.todas ? unidades.length : elegidas.length;
   async function crear(e: React.FormEvent) {
     e.preventDefault();
-    const desde = Number(f.desde);
-    const hasta = Number(f.hasta);
-    const existentes = new Set(unidades.map((u) => u.etiqueta));
-    const nuevas: string[] = [];
-    for (let i = desde; i <= hasta && nuevas.length < 500; i++) {
-      const etiqueta = `${f.prefijo}${i}`.trim();
-      if (!existentes.has(etiqueta)) nuevas.push(etiqueta);
-    }
     const okk = await run(async () => {
-      if (!nuevas.length) throw new Error('Todas esas unidades ya existen.');
-      const cuota = f.cuota === '' ? null : Number(f.cuota);
-      for (let i = 0; i < nuevas.length; i += 10) {
-        await Promise.all(
-          nuevas.slice(i, i + 10).map(async (etiqueta) => ok(await db.models.Unidad.create({ condominioId: condoId, etiqueta, cuota }))),
-        );
-      }
-    }, `${nuevas.length} unidades creadas`);
+      if (!n) throw new Error('Elige al menos una unidad.');
+      await adminCall('cargoExtraordinario', {
+        condominioId: condoId,
+        concepto: f.concepto,
+        monto: Number(f.monto),
+        vence: f.vence,
+        ...(f.todas ? {} : { unidadIds: elegidas }),
+      });
+    }, `Cuota extraordinaria cargada a ${n} unidad(es)`);
     if (okk) onDone();
   }
   return (
-    <Modal title="Alta masiva de unidades" onClose={onClose}>
+    <Modal title="Cuota extraordinaria" onClose={onClose}>
       <form className="form" onSubmit={crear}>
+        <Field label="Concepto">
+          <input required maxLength={120} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} placeholder="Impermeabilización 2026" />
+        </Field>
         <div className="form-2">
-          <Field label="Prefijo">
-            <input value={f.prefijo} onChange={(e) => setF({ ...f, prefijo: e.target.value })} />
+          <Field label="Monto por unidad (MXN)">
+            <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />
           </Field>
-          <Field label="Cuota mensual (MXN)">
-            <input type="number" min="0" step="0.01" value={f.cuota} onChange={(e) => setF({ ...f, cuota: e.target.value })} />
-          </Field>
-          <Field label="Desde el número">
-            <input required type="number" min="0" value={f.desde} onChange={(e) => setF({ ...f, desde: e.target.value })} />
-          </Field>
-          <Field label="Hasta el número">
-            <input required type="number" min="0" value={f.hasta} onChange={(e) => setF({ ...f, hasta: e.target.value })} />
+          <Field label="Fecha límite de pago">
+            <input required type="date" value={f.vence} onChange={(e) => setF({ ...f, vence: e.target.value })} />
           </Field>
         </div>
-        <p className="small muted">
-          Se crearán: {f.prefijo}
-          {f.desde} … {f.prefijo}
-          {f.hasta}. Las que ya existan se omiten.
-        </p>
+        <Seg
+          value={f.todas ? 'todas' : 'algunas'}
+          onChange={(v) => setF({ ...f, todas: v === 'todas' })}
+          options={[
+            ['todas', `Todas las unidades (${unidades.length})`],
+            ['algunas', 'Solo algunas'],
+          ]}
+        />
+        {!f.todas && (
+          <div className="checks" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {unidades.map((u) => (
+              <label key={u.id} className="check">
+                <input
+                  type="checkbox"
+                  checked={elegidas.includes(u.id)}
+                  onChange={() => setElegidas(elegidas.includes(u.id) ? elegidas.filter((x) => x !== u.id) : [...elegidas, u.id])}
+                />
+                {u.etiqueta}
+              </label>
+            ))}
+          </div>
+        )}
         <button className="btn-app" disabled={busy}>
-          {busy ? 'Creando…' : 'Crear unidades'}
+          {busy ? 'Guardando…' : `Cargar a ${n} unidad(es)`}
         </button>
       </form>
     </Modal>

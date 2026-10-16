@@ -27,7 +27,7 @@ export function Panel({ go }: { go: (k: string) => void }) {
       porCobrar: pendientes.reduce((s, c) => s + c.monto, 0),
       vencido: pendientes.filter((c) => c.vence && c.vence < h).reduce((s, c) => s + c.monto, 0),
       cobradoMes: pagos.filter((p) => p.estado === 'VALIDADO' && (p.validadoEn ?? '').slice(0, 7) === h.slice(0, 7)).reduce((s, p) => s + p.monto, 0),
-      incidentes: incidentes.filter((i) => i.estado === 'ABIERTO' || i.estado === 'EN_PROCESO').length,
+      incidentes: incidentes.filter((i) => i.estado !== 'CERRADO' && i.estado !== 'RESUELTO').length,
       reservas: reservas.filter((r) => r.estado === 'SOLICITADA').length,
       mascotas: mascotas.filter((m) => m.estado === 'PENDIENTE').length,
       dentro: visitas.filter((v) => v.estado === 'DENTRO').length,
@@ -38,9 +38,10 @@ export function Panel({ go }: { go: (k: string) => void }) {
   if (error) return <ErrorBox error={error} retry={reload} />;
   const d = data!;
 
+  // Las solicitudes de acceso (permiso «usuarios») se atienden en Condominios › Residentes.
   const tarjeta = (label: string, valor: string | number, sub: string, destino: string, alerta = false) =>
     puede(destino) && (
-    <button className="tile" style={{ display: 'block' }} onClick={() => go(destino)}>
+    <button className="tile" style={{ display: 'block' }} onClick={() => go(destino === 'usuarios' ? 'condominios' : destino)}>
       <div className="stat-label">{label}</div>
       <div className={`stat-value ${alerta ? 'is-alert' : ''}`}>{valor}</div>
       <span>{sub}</span>

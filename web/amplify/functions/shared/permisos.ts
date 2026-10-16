@@ -14,9 +14,9 @@ export const NIVELES: [Nivel, string][] = [
 
 /** Secciones del panel y qué significa «Gestionar» en cada una. */
 export const SECCIONES_PERMISO: { key: string; label: string; editar: string; soloVer?: boolean }[] = [
-  { key: 'condominios', label: 'Condominios y unidades', editar: 'Editar datos del condominio y dar de alta, editar o eliminar unidades' },
-  { key: 'usuarios', label: 'Usuarios (residentes y vigilantes)', editar: 'Dar de alta, autorizar, reenviar acceso, suspender y reactivar' },
-  { key: 'finanzas', label: 'Finanzas', editar: 'Crear cargos extraordinarios y cancelar cargos' },
+  { key: 'condominios', label: 'Condominios y unidades', editar: 'Editar datos del condominio y dar de alta (también con Excel), editar o eliminar casas y departamentos' },
+  { key: 'usuarios', label: 'Residentes y vigilantes (dentro de Condominios)', editar: 'Dar de alta, autorizar, reenviar acceso, suspender y reactivar' },
+  { key: 'finanzas', label: 'Finanzas', editar: 'Crear cuotas extraordinarias y cargos, y cancelar cargos' },
   { key: 'comunicados', label: 'Comunicados', editar: 'Publicar, editar y eliminar comunicados; avisos a todas las unidades' },
   { key: 'encuestas', label: 'Encuestas', editar: 'Crear, cerrar y eliminar encuestas' },
   { key: 'chat', label: 'Chat con residentes', editar: 'Responder mensajes' },
@@ -31,7 +31,7 @@ export const SECCIONES_PERMISO: { key: string; label: string; editar: string; so
 export const EXTRAS: { key: string; seccion: string; label: string }[] = [
   { key: 'condominios.alta', seccion: 'condominios', label: 'Dar de alta condominios nuevos' },
   { key: 'condominios.servicios', seccion: 'condominios', label: 'Activar o desactivar servicios del portal y el portal completo' },
-  { key: 'condominios.datosPago', seccion: 'condominios', label: 'Editar datos bancarios para pago de cuotas' },
+  { key: 'condominios.datosPago', seccion: 'condominios', label: 'Editar la cuota de mantenimiento y los datos bancarios' },
   { key: 'usuarios.eliminar', seccion: 'usuarios', label: 'Eliminar cuentas definitivamente' },
   { key: 'finanzas.validarPagos', seccion: 'finanzas', label: 'Aprobar o rechazar comprobantes de pago (emite recibos)' },
   { key: 'finanzas.generarCuotas', seccion: 'finanzas', label: 'Generar las cuotas de mantenimiento del mes' },

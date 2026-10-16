@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { adminCall, all, db, ok, type Schema } from '../api';
+import { adminCall, all, db, ok, urlArchivoAdmin, type Schema } from '../api';
 import {
   Archivo,
   Badge,
@@ -20,6 +20,8 @@ import {
   useLoad,
 } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
+import { Documentos } from './Documentos';
+import { SLOTS_AMENIDADES } from '../../../amplify/functions/shared/documentos';
 
 type Incidente = Schema['Incidente']['type'];
 type Mantenimiento = Schema['Mantenimiento']['type'];
@@ -34,25 +36,59 @@ const avisar = (condominioId: string, unidadId: string, titulo: string, texto?: 
 const porFecha = <T extends { createdAt: string }>(a: T, b: T) => String(b.createdAt).localeCompare(String(a.createdAt));
 
 // ---------- Incidentes ----------
+// Lista compacta; al abrir un incidente se ve su tarjeta de seguimiento: el reporte del residente, cada etapa con
+// su descripción y foto de evidencia, y el formulario de la siguiente etapa (En seguimiento → En proceso → Cerrado).
+// Lo guardado queda fijo. Cerrado ya no se modifica, salvo por el superadministrador.
+type Paso = { estado: string; respuesta?: string | null; fotoPath?: string | null; por?: string; porNombre?: string | null; en: string; reabierto?: boolean };
+// Etapas que elige el administrador, en orden (RESUELTO solo existe en registros anteriores).
+const ETAPAS = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
+const ORDEN: Record<string, number> = { ABIERTO: 0, EN_SEGUIMIENTO: 1, EN_PROCESO: 2, RESUELTO: 2, CERRADO: 3 };
+
+function historialDe(i: Incidente): Paso[] {
+  let h: unknown = i.historial;
+  for (let k = 0; k < 2 && typeof h === 'string'; k++) {
+    try {
+      h = JSON.parse(h);
+    } catch {
+      h = [];
+    }
+  }
+  return Array.isArray(h) ? (h as Paso[]) : [];
+}
+
+/** Foto de evidencia en miniatura; al tocarla se abre completa (admin-api firma la URL). */
+function FotoEvidencia({ incidenteId, path }: { incidenteId: string; path: string }) {
+  const url = useLoad(() => adminCall<{ url: string }>('incidentes.evidencia', { incidenteId, path }).then((r) => r.url), [path]);
+  if (!url.data) return <span className="photo-thumb" />;
+  return (
+    <a href={url.data} target="_blank" rel="noopener" title="Ver foto completa">
+      <img src={url.data} alt="Evidencia" style={{ width: 160, maxWidth: '100%', height: 120, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
+    </a>
+  );
+}
+
 export function IncidentesAdmin() {
-  const { condo, etiqueta, puede } = useAdmin();
+  const { condo, etiqueta } = useAdmin();
   const { data, error, loading, reload } = useLoad(
     () => all<Incidente>((o) => db.models.Incidente.incidentesPorCondominio({ condominioId: condo!.id }, o)),
     [condo!.id],
   );
   const [filtro, setFiltro] = useState<'abiertos' | 'todos'>('abiertos');
-  const [atender, setAtender] = useState<Incidente | null>(null);
+  const [abierto, setAbierto] = useState<string | null>(null);
 
-  const lista = (data ?? []).filter((i) => filtro === 'todos' || i.estado === 'ABIERTO' || i.estado === 'EN_PROCESO').sort(porFecha);
+  const actual = (data ?? []).find((i) => i.id === abierto);
+  if (actual) return <Seguimiento i={actual} onBack={() => setAbierto(null)} onCambio={() => reload(true)} />;
+
+  const lista = (data ?? []).filter((i) => filtro === 'todos' || i.estado !== 'CERRADO').sort(porFecha);
   return (
     <div className="stack">
       <ModuloInactivo modulo="incidentes" />
-      <PageHead icon="alert" title="Incidentes" sub="Reportes de los residentes." />
+      <PageHead icon="alert" title="Incidentes" sub="Toca un reporte para ver su seguimiento y atenderlo." />
       <Seg
         value={filtro}
         onChange={setFiltro}
         options={[
-          ['abiertos', 'Abiertos'],
+          ['abiertos', 'Sin cerrar'],
           ['todos', 'Todos'],
         ]}
       />
@@ -65,67 +101,187 @@ export function IncidentesAdmin() {
           {lista.length ? (
             <ul className="list">
               {lista.map((i) => (
-                <li key={i.id}>
-                  <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} thumb />
-                  <div className="list-main">
-                    <strong>{i.titulo}</strong> <Badge estado={i.estado} />
-                    <div className="list-sub">
-                      {etiqueta(i.unidadId)} · {i.categoria} · {fechaHora(i.createdAt)} {i.ubicacion && `· ${i.ubicacion}`}
-                    </div>
-                    {i.descripcion && <div className="small pre">{i.descripcion}</div>}
-                    {i.respuesta && <div className="small muted">Respuesta: {i.respuesta}</div>}
-                    <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} label="Ver foto" />
-                  </div>
-                  {puede('incidentes', 'editar') && (
-                    <button className="btn-app sm secondary" onClick={() => setAtender(i)}>
-                      Atender
-                    </button>
-                  )}
+                <li key={i.id} style={{ padding: 0 }}>
+                  <button type="button" className="fila-click" onClick={() => setAbierto(i.id)}>
+                    <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} thumb />
+                    <span className="list-main">
+                      <strong>{i.titulo}</strong> <Badge estado={i.estado} />
+                      <span className="list-sub" style={{ display: 'block' }}>
+                        {etiqueta(i.unidadId)} · {i.categoria} · {fechaHora(i.createdAt)}
+                      </span>
+                      {i.descripcion && (
+                        <span className="small muted" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {i.descripcion}
+                        </span>
+                      )}
+                    </span>
+                    <Icon name="arrow" />
+                  </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <Empty icon="alert">Sin incidentes {filtro === 'abiertos' ? 'abiertos' : ''}.</Empty>
+            <Empty icon="alert">Sin incidentes {filtro === 'abiertos' ? 'por cerrar' : ''}.</Empty>
           )}
         </section>
       )}
-      {atender && <Atender i={atender} onClose={() => setAtender(null)} onDone={() => (setAtender(null), reload(true))} />}
     </div>
   );
 }
 
-function Atender({ i, onClose, onDone }: { i: Incidente; onClose: () => void; onDone: () => void }) {
-  const [estado, setEstado] = useState(i.estado ?? 'ABIERTO');
-  const [respuesta, setRespuesta] = useState(i.respuesta ?? '');
+function Seguimiento({ i, onBack, onCambio }: { i: Incidente; onBack: () => void; onCambio: () => void }) {
+  const { etiqueta, puede, superadmin } = useAdmin();
+  const pasos = historialDe(i);
+  const cerrado = i.estado === 'CERRADO';
+  const [modificar, setModificar] = useState(false);
+  const gestiona = puede('incidentes', 'editar');
+
+  return (
+    <div className="stack">
+      <div>
+        <button className="linklike" onClick={onBack}>
+          <Icon name="back" /> Todos los incidentes
+        </button>
+      </div>
+
+      <section className="panel">
+        <div className="panel-head">
+          <h2 style={{ fontSize: '1.2rem' }}>{i.titulo}</h2>
+          <Badge estado={i.estado} />
+        </div>
+        <p className="list-sub" style={{ marginTop: 0 }}>
+          Reporte de {etiqueta(i.unidadId)} · {i.categoria} · {fechaHora(i.createdAt)}
+          {i.ubicacion && ` · ${i.ubicacion}`}
+        </p>
+        {i.descripcion && <p className="pre" style={{ margin: '0 0 12px' }}>{i.descripcion}</p>}
+        {i.fotoPath && <FotoReporte i={i} />}
+      </section>
+
+      <section className="panel">
+        <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Seguimiento</h2>
+        <ol className="etapas">
+          <li className="etapa hecha">
+            <strong>Reportado</strong> <span className="list-sub">· {fechaHora(i.createdAt)}</span>
+          </li>
+          {pasos.map((h, k) => (
+            <li key={k} className="etapa hecha">
+              <strong>{etiquetaEstado(h.estado)}</strong>
+              {h.reabierto && <Badge estado="PENDIENTE">Modificado después del cierre</Badge>}{' '}
+              <span className="list-sub">
+                · {fechaHora(h.en)}
+                {superadmin && h.por && ` · ${h.porNombre ? `${h.porNombre} (${h.por})` : h.por}`}
+              </span>
+              {h.respuesta && <div className="small pre" style={{ margin: '4px 0' }}>{h.respuesta}</div>}
+              {h.fotoPath && <FotoEvidencia incidenteId={i.id} path={h.fotoPath} />}
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {gestiona &&
+        (!cerrado ? (
+          <SiguienteEtapa key={`${i.estado}-${pasos.length}`} i={i} onDone={onCambio} />
+        ) : superadmin ? (
+          modificar ? (
+            <SiguienteEtapa key="modificar" i={i} superadmin onDone={() => (setModificar(false), onCambio())} onCancel={() => setModificar(false)} />
+          ) : (
+            <div className="row-actions">
+              <span className="small muted">Incidente cerrado. Solo el superadministrador puede modificarlo.</span>
+              <button
+                className="btn-app sm secondary"
+                onClick={() => confirm('Este incidente ya está cerrado. ¿Seguro que quieres modificarlo?') && setModificar(true)}
+              >
+                Modificar
+              </button>
+            </div>
+          )
+        ) : (
+          <div className="alert small">Incidente cerrado. Ya no se puede modificar.</div>
+        ))}
+    </div>
+  );
+}
+
+function FotoReporte({ i }: { i: Incidente }) {
+  const url = useLoad(() => urlArchivoAdmin('Incidente', i.id), [i.id]);
+  if (!url.data) return <span className="photo-thumb" />;
+  return (
+    <a href={url.data} target="_blank" rel="noopener" title="Ver foto completa">
+      <img src={url.data} alt="Foto del reporte" style={{ width: 280, maxWidth: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 12, display: 'block' }} />
+    </a>
+  );
+}
+
+/** Formulario de la siguiente etapa: el administrador elige cualquiera de las que siguen; lo guardado queda fijo. */
+function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; superadmin?: boolean; onDone: () => void; onCancel?: () => void }) {
+  const actual = ORDEN[i.estado ?? 'ABIERTO'] ?? 0;
+  const opciones = superadmin ? ETAPAS : ETAPAS.filter((x) => ORDEN[x] > actual);
+  const [estado, setEstado] = useState(opciones[0]);
+  const [respuesta, setRespuesta] = useState('');
+  const [foto, setFoto] = useState<File | null>(null);
+  const [vista, setVista] = useState('');
   const { run, busy } = useAction();
+
+  const elegir = (f?: File) => {
+    if (vista) URL.revokeObjectURL(vista);
+    setFoto(f ?? null);
+    setVista(f ? URL.createObjectURL(f) : '');
+  };
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
+    const aviso =
+      estado === 'CERRADO' && !superadmin
+        ? 'Al cerrar el incidente ya no se podrá escribir nada más. ¿Continuar?'
+        : 'Una vez guardada, esta etapa ya no se podrá modificar. ¿Continuar?';
+    if (!confirm(aviso)) return;
     const okk = await run(async () => {
-      ok(await db.models.Incidente.update({ id: i.id, estado, respuesta: respuesta || null }));
-      await avisar(i.condominioId, i.unidadId, `Tu reporte "${i.titulo}" está ${etiquetaEstado(estado).toLowerCase()}`, respuesta, 'INCIDENTE');
-    }, 'Incidente actualizado; se avisó al residente.');
+      if (!foto) throw new Error('Sube la foto de evidencia.');
+      const nombre = foto.name || 'evidencia.jpg';
+      const r = await adminCall<{ url: string; path: string; contentType: string }>('incidentes.subirEvidencia', {
+        incidenteId: i.id,
+        nombre: /\.[a-z0-9]+$/i.test(nombre) ? nombre : `${nombre}.jpg`,
+        tamano: foto.size,
+      });
+      const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: foto });
+      if (!put.ok) throw new Error('No se pudo subir la foto. Intenta de nuevo.');
+      await adminCall('incidentes.atender', { incidenteId: i.id, estado, respuesta, fotoPath: r.path });
+    }, estado === 'CERRADO' ? 'Incidente cerrado; se avisó al residente.' : 'Etapa guardada; se avisó al residente.');
     if (okk) onDone();
   }
+
   return (
-    <Modal title={i.titulo} onClose={onClose}>
+    <section className="panel">
+      <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>{superadmin ? 'Modificar incidente cerrado' : 'Siguiente etapa'}</h2>
       <form className="form" onSubmit={guardar}>
-        <Field label="Estado">
-          <select value={estado} onChange={(e) => setEstado(e.target.value as typeof estado)}>
-            {['ABIERTO', 'EN_PROCESO', 'RESUELTO', 'CERRADO'].map((s) => (
-              <option key={s} value={s}>
-                {etiquetaEstado(s)}
-              </option>
-            ))}
-          </select>
+        <Field label="Etapa">
+          <Seg value={estado} onChange={setEstado} options={opciones.map((x) => [x, etiquetaEstado(x)] as [string, string])} />
         </Field>
-        <Field label="Respuesta para el residente">
-          <textarea maxLength={2000} value={respuesta} onChange={(e) => setRespuesta(e.target.value)} />
+        <Field label="Descripción" hint="Qué se está haciendo o por qué se cierra. El residente recibe un aviso.">
+          <textarea required maxLength={2000} value={respuesta} onChange={(e) => setRespuesta(e.target.value)} />
         </Field>
-        <button className="btn-app" disabled={busy}>
-          Guardar y avisar
-        </button>
+        <Field
+          label="Foto de evidencia (obligatoria)"
+          hint={estado === 'CERRADO' ? 'Foto que muestre por qué se cierra el incidente.' : 'Foto que muestre el avance. Puedes tomarla con la cámara.'}
+        >
+          <input type="file" accept="image/*" capture="environment" onChange={(e) => elegir(e.target.files?.[0])} />
+        </Field>
+        {vista && <img src={vista} alt="Vista previa de la evidencia" style={{ width: 200, maxWidth: '100%', maxHeight: 160, borderRadius: 10, objectFit: 'cover' }} />}
+        <p className="small muted" style={{ margin: 0 }}>
+          Al guardar, la etapa queda registrada y ya no se puede modificar.
+        </p>
+        <div className="row-actions">
+          <button className="btn-app" disabled={busy || !foto || !respuesta.trim()}>
+            {busy ? 'Guardando…' : estado === 'CERRADO' && !superadmin ? 'Guardar y cerrar incidente' : 'Guardar etapa'}
+          </button>
+          {onCancel && (
+            <button type="button" className="btn-app secondary" disabled={busy} onClick={onCancel}>
+              Cancelar
+            </button>
+          )}
+        </div>
       </form>
-    </Modal>
+    </section>
   );
 }
 
@@ -282,6 +438,7 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
 }
 
 // ---------- Amenidades y reservas ----------
+// La configuración de amenidades (horarios, costos, reglas) vive en la ficha del condominio; aquí, las reservas.
 export function AmenidadesAdmin() {
   const { condo, etiqueta, puede } = useAdmin();
   const gestiona = puede('amenidades', 'editar');
@@ -293,14 +450,16 @@ export function AmenidadesAdmin() {
     ]);
     return { amenidades, reservas };
   }, [cid]);
-  const [editar, setEditar] = useState<Partial<Amenidad> | null>(null);
-  const [tab, setTab] = useState<'reservas' | 'amenidades'>('reservas');
   const { run, busy } = useAction();
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
   const { amenidades, reservas } = data!;
-  const nombre = (id: string) => amenidades.find((a) => a.id === id)?.nombre ?? '—';
+  const nombre = (id: string) => {
+    const a = amenidades.find((x) => x.id === id);
+    const padre = a?.parteDeId ? amenidades.find((x) => x.id === a.parteDeId) : undefined;
+    return a ? (padre ? `${a.nombre} · ${padre.nombre}` : a.nombre) : '—';
+  };
   const h = hoy();
   const proximas = reservas
     .filter((r) => r.fecha >= h && r.estado !== 'CANCELADA')
@@ -328,91 +487,159 @@ export function AmenidadesAdmin() {
   return (
     <div className="stack">
       <ModuloInactivo modulo="amenidades" />
-      <PageHead icon="calendar" title="Amenidades" sub="Solo las amenidades dadas de alta y activas pueden reservarse.">
-        {gestiona && (
-          <button className="btn-app" onClick={() => setEditar({ activa: true, requiereAprobacion: true })}>
-            <Icon name="plus" />
-            Nueva amenidad
-          </button>
-        )}
-      </PageHead>
-      <Seg
-        value={tab}
-        onChange={setTab}
-        options={[
-          ['reservas', `Próximas reservas (${proximas.length})`],
-          ['amenidades', `Amenidades (${amenidades.length})`],
-        ]}
+      <PageHead
+        icon="calendar"
+        title="Reservas de amenidades"
+        sub={`${amenidades.length} amenidad(es) configurada(s). Horarios, costos y reglas se configuran en Condominios › Amenidades.`}
       />
-      {tab === 'reservas' ? (
-        <section className="panel">
-          {proximas.length ? (
-            <ul className="list">
-              {proximas.map((r) => (
-                <li key={r.id}>
-                  <div className="list-main">
-                    <strong>{nombre(r.amenidadId)}</strong> <Badge estado={r.estado} />
-                    <div className="list-sub">
-                      {etiqueta(r.unidadId)} · {fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short' })} · {r.horaInicio}–{r.horaFin}
-                      {r.invitados ? ` · ${r.invitados} invitados` : ''}
-                    </div>
-                    {r.nota && <div className="small">{r.nota}</div>}
+      <section className="panel">
+        {proximas.length ? (
+          <ul className="list">
+            {proximas.map((r) => (
+              <li key={r.id}>
+                <div className="list-main">
+                  <strong>{nombre(r.amenidadId)}</strong> <Badge estado={r.estado} />
+                  <div className="list-sub">
+                    {etiqueta(r.unidadId)} · {fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short' })} · {r.horaInicio}–{r.horaFin}
+                    {r.invitados ? ` · ${r.invitados} invitados` : ''}
                   </div>
-                  {gestiona && r.estado === 'SOLICITADA' && (
-                    <div className="row-actions">
-                      <button className="btn-app sm" disabled={busy} onClick={() => resolver(r, 'APROBADA')}>
-                        Aprobar
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                        Rechazar
-                      </button>
-                    </div>
-                  )}
-                  {gestiona && r.estado === 'APROBADA' && (
-                    <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                      Cancelar
+                  {r.nota && <div className="small">{r.nota}</div>}
+                </div>
+                {gestiona && r.estado === 'SOLICITADA' && (
+                  <div className="row-actions">
+                    <button className="btn-app sm" disabled={busy} onClick={() => resolver(r, 'APROBADA')}>
+                      Aprobar
                     </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <Empty icon="calendar">Sin reservas próximas.</Empty>
-          )}
-        </section>
-      ) : (
-        <div className="grid-cards">
-          {amenidades.map((a) => (
-            <article key={a.id} className="panel" style={{ marginTop: 0 }}>
-              <div className="panel-head">
-                <h3>{a.nombre}</h3>
-                <Badge estado={a.activa === false ? 'CANCELADA' : 'APROBADA'}>{a.activa === false ? 'Inactiva' : 'Activa'}</Badge>
-              </div>
-              <p className="small muted">
-                {a.horaApertura ?? '—'}–{a.horaCierre ?? '—'} {a.maxHoras ? `· máx. ${a.maxHoras} h` : ''}{' '}
-                {a.capacidad ? `· ${a.capacidad} pers.` : ''} {a.costo ? `· ${money(a.costo)}` : ''}{' '}
-                {a.requiereAprobacion ? '· requiere aprobación' : '· confirmación automática'}
-              </p>
-              {gestiona && (
-                <button className="btn-app sm secondary" onClick={() => setEditar(a)}>
-                  Editar
-                </button>
-              )}
-            </article>
-          ))}
-          {!amenidades.length && (
-            <section className="panel">
-              <Empty icon="calendar">Da de alta salón de fiestas, asadores, alberca, etc.</Empty>
-            </section>
-          )}
-        </div>
-      )}
-      {editar && <EditarAmenidad a={editar} onClose={() => setEditar(null)} onDone={() => (setEditar(null), setTab('amenidades'), reload(true))} />}
+                    <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
+                      Rechazar
+                    </button>
+                  </div>
+                )}
+                {gestiona && r.estado === 'PENDIENTE_PAGO' && (
+                  <div className="row-actions">
+                    <span className="small muted">Se confirma al validar su pago en Finanzas</span>
+                    <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
+                      Rechazar
+                    </button>
+                  </div>
+                )}
+                {gestiona && r.estado === 'APROBADA' && (
+                  <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
+                    Cancelar
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty icon="calendar">Sin reservas próximas.</Empty>
+        )}
+      </section>
     </div>
   );
 }
 
-function EditarAmenidad({ a, onClose, onDone }: { a: Partial<Amenidad>; onClose: () => void; onDone: () => void }) {
+/**
+ * Amenidades del condominio seleccionado: horarios, capacidad, costo, reglas y si requieren aprobación.
+ * Una amenidad puede dividirse en secciones (p. ej. Casa club → Parrillas, Terraza, Salón de eventos):
+ * se reserva completa o por secciones, y una reserva bloquea a la otra en ese horario.
+ */
+export function CatalogoAmenidades() {
+  const { condo, puede } = useAdmin();
+  const gestiona = puede('amenidades', 'editar');
+  const cid = condo!.id;
+  const { data, error, loading, reload } = useLoad(() => all<Amenidad>((o) => db.models.Amenidad.amenidadesPorCondominio({ condominioId: cid }, o)), [cid]);
+  const [editar, setEditar] = useState<Partial<Amenidad> | null>(null);
+
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  const amenidades = [...(data ?? [])].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  const principales = amenidades.filter((a) => !a.parteDeId || !amenidades.some((x) => x.id === a.parteDeId));
+  const secciones = (id: string) => amenidades.filter((a) => a.parteDeId === id);
+  const datos = (a: Amenidad) => (
+    <>
+      <strong>{a.costo ? money(a.costo) : 'Sin costo'}</strong>
+      {a.costo ? ' por reserva' : ''} · {a.horaApertura ?? '—'}–{a.horaCierre ?? '—'} {a.maxHoras ? `· máx. ${a.maxHoras} h` : ''}{' '}
+      {a.capacidad ? `· ${a.capacidad} pers.` : ''} {a.requiereAprobacion ? '· requiere aprobación' : '· confirmación automática'}
+    </>
+  );
+
+  return (
+    <div className="stack">
+      <ModuloInactivo modulo="amenidades" />
+      <Documentos
+        titulo="Reglamento y términos de uso"
+        nota="El residente los puede consultar al reservar y, al presionar «Reservar», acepta el reglamento y los términos de uso."
+        slots={SLOTS_AMENIDADES}
+        seccion="amenidades"
+      />
+      <div className="row-actions" style={{ justifyContent: 'space-between' }}>
+        <p className="small muted" style={{ margin: 0 }}>
+          Solo las amenidades activas pueden reservarse. Para dividir una amenidad (por ejemplo, una casa club), crea cada sección y elige de cuál
+          forma parte.
+        </p>
+        {gestiona && (
+          <button className="btn-app sm" onClick={() => setEditar({ activa: true, requiereAprobacion: true })}>
+            <Icon name="plus" />
+            Nueva amenidad
+          </button>
+        )}
+      </div>
+      <div className="grid-cards">
+        {principales.map((a) => (
+          <article key={a.id} className="panel" style={{ marginTop: 0 }}>
+            <div className="panel-head">
+              <h3>{a.nombre}</h3>
+              <Badge estado={a.activa === false ? 'CANCELADA' : 'APROBADA'}>{a.activa === false ? 'Inactiva' : 'Activa'}</Badge>
+            </div>
+            <p className="small muted" style={{ margin: '0 0 8px' }}>
+              {secciones(a.id).length ? 'Completa: ' : ''}
+              {datos(a)}
+            </p>
+            {secciones(a.id).length > 0 && (
+              <ul className="list" style={{ marginBottom: 8 }}>
+                {secciones(a.id).map((x) => (
+                  <li key={x.id} style={{ padding: '8px 0' }}>
+                    <div className="list-main">
+                      <span style={{ fontWeight: 700 }}>{x.nombre}</span> {x.activa === false && <Badge estado="CANCELADA">Inactiva</Badge>}
+                      <div className="list-sub">{datos(x)}</div>
+                    </div>
+                    {gestiona && (
+                      <button className="linklike" onClick={() => setEditar(x)}>
+                        Editar
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {gestiona && (
+              <div className="row-actions">
+                <button className="btn-app sm secondary" onClick={() => setEditar(a)}>
+                  Editar
+                </button>
+                {!a.parteDeId && (
+                  <button className="btn-app sm secondary" onClick={() => setEditar({ activa: true, requiereAprobacion: true, parteDeId: a.id })}>
+                    <Icon name="plus" />
+                    Sección
+                  </button>
+                )}
+              </div>
+            )}
+          </article>
+        ))}
+        {!amenidades.length && (
+          <section className="panel">
+            <Empty icon="calendar">Da de alta salón de fiestas, asadores, alberca, gimnasio, casa club, etc.</Empty>
+          </section>
+        )}
+      </div>
+      {editar && <EditarAmenidad a={editar} amenidades={amenidades} onClose={() => setEditar(null)} onDone={() => (setEditar(null), reload(true))} />}
+    </div>
+  );
+}
+
+function EditarAmenidad({ a, amenidades, onClose, onDone }: { a: Partial<Amenidad>; amenidades: Amenidad[]; onClose: () => void; onDone: () => void }) {
   const { condoId } = useAdmin();
   const [f, setF] = useState({
     nombre: a.nombre ?? '',
@@ -425,13 +652,16 @@ function EditarAmenidad({ a, onClose, onDone }: { a: Partial<Amenidad>; onClose:
     reglas: a.reglas ?? '',
     requiereAprobacion: a.requiereAprobacion !== false,
     activa: a.activa !== false,
+    parteDeId: a.parteDeId ?? '',
   });
+  const tieneSecciones = !!a.id && amenidades.some((x) => x.parteDeId === a.id);
+  const posibles = amenidades.filter((x) => !x.parteDeId && x.id !== a.id);
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const num = (v: string) => (v === '' ? null : Number(v));
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    const datos = { ...f, maxHoras: num(f.maxHoras), capacidad: num(f.capacidad), costo: num(f.costo) };
+    const datos = { ...f, maxHoras: num(f.maxHoras), capacidad: num(f.capacidad), costo: num(f.costo), parteDeId: f.parteDeId || null };
     const okk = await run(async () => {
       if (a.id) ok(await db.models.Amenidad.update({ id: a.id, ...datos }));
       else ok(await db.models.Amenidad.create({ condominioId: condoId, ...datos }));
@@ -446,6 +676,23 @@ function EditarAmenidad({ a, onClose, onDone }: { a: Partial<Amenidad>; onClose:
         </Field>
         <Field label="Descripción">
           <input maxLength={300} value={f.descripcion} onChange={set('descripcion')} />
+        </Field>
+        <Field
+          label="Forma parte de"
+          hint={
+            tieneSecciones
+              ? 'Esta amenidad tiene secciones, así que es una amenidad principal.'
+              : 'Si es una sección (p. ej. Terraza de la Casa club), elige la amenidad completa. Reservar la completa bloquea sus secciones en ese horario y reservar una sección bloquea la completa.'
+          }
+        >
+          <select value={f.parteDeId} disabled={tieneSecciones} onChange={(e) => setF({ ...f, parteDeId: e.target.value })}>
+            <option value="">Ninguna (amenidad principal)</option>
+            {posibles.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.nombre}
+              </option>
+            ))}
+          </select>
         </Field>
         <div className="form-2">
           <Field label="Abre">

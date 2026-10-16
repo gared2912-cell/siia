@@ -56,6 +56,9 @@ const P: Record<string, string> = {
   package: '<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
   phone: '<rect x="6.5" y="2" width="11" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  back: '<path d="M19 12H5M11 19l-7-7 7-7"/>',
 };
 export function Icon({ name, className }: { name: string; className?: string }) {
   return (
@@ -76,12 +79,12 @@ export function Icon({ name, className }: { name: string; className?: string }) 
 // ---------- Estados ----------
 const TONO: Record<string, string> = {
   APROBADO: 'ok', APROBADA: 'ok', VALIDADO: 'ok', PAGADO: 'ok', RESUELTO: 'ok', TERMINADO: 'ok', DENTRO: 'ok', ABIERTA: 'ok',
-  PENDIENTE: 'warn', EN_REVISION: 'warn', SOLICITADA: 'warn', ABIERTO: 'warn', EN_PROCESO: 'info', PROGRAMADO: 'info', PROGRAMADA: 'info',
+  PENDIENTE: 'warn', PENDIENTE_PAGO: 'warn', EN_REVISION: 'warn', SOLICITADA: 'warn', ABIERTO: 'warn', EN_SEGUIMIENTO: 'info', EN_PROCESO: 'info', PROGRAMADO: 'info', PROGRAMADA: 'info',
   RECHAZADO: 'bad', RECHAZADA: 'bad', SUSPENDIDO: 'bad', CANCELADO: '', CANCELADA: '', CERRADO: '', CERRADA: '', SALIO: '',
   VENCIDO: 'bad',
 };
 const TEXTO: Record<string, string> = {
-  EN_REVISION: 'En revisión', EN_PROCESO: 'En proceso', SALIO: 'Salió', PAQUETERIA: 'Paquetería',
+  EN_REVISION: 'En revisión', PENDIENTE_PAGO: 'Pendiente de pago', EN_SEGUIMIENTO: 'En seguimiento', EN_PROCESO: 'En proceso', SALIO: 'Salió', PAQUETERIA: 'Paquetería',
 };
 export const etiquetaEstado = (e?: string | null) =>
   e ? TEXTO[e] ?? e.charAt(0) + e.slice(1).toLowerCase() : '—';

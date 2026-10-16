@@ -9,14 +9,16 @@ import { storage } from './storage/resource';
 import { adminApi } from './functions/admin-api/resource';
 import { portalApi } from './functions/portal-api/resource';
 import { notificador } from './functions/notificador/resource';
+import { recargos } from './functions/recargos/resource';
+import { reservasVencidas } from './functions/reservas-vencidas/resource';
 
-const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador });
+const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas });
 
 const { userPool } = backend.auth.resources;
 const tables = backend.data.resources.tables;
 
 // Las Lambdas usan DynamoDB directo; reciben los nombres de tabla como variables de entorno (TABLE_<Modelo>).
-for (const fn of [backend.adminApi, backend.portalApi, backend.notificador]) {
+for (const fn of [backend.adminApi, backend.portalApi, backend.notificador, backend.recargos, backend.reservasVencidas]) {
   const lambda = fn.resources.lambda;
   for (const [model, table] of Object.entries(tables)) {
     table.grantReadWriteData(lambda);
@@ -51,10 +53,14 @@ new Policy(Stack.of(bucket), 'GruposCarpetaPropia', {
 
 // portal-api firma URLs temporales de fotos de mascotas extraviadas (visibles para vecinos y caseta).
 backend.storage.resources.bucket.grantRead(backend.portalApi.resources.lambda, 'residentes/*');
+// … y el reglamento y los términos de uso de las amenidades que el residente acepta al reservar.
+backend.storage.resources.bucket.grantRead(backend.portalApi.resources.lambda, 'condominios/*');
 backend.portalApi.addEnvironment('BUCKET', backend.storage.resources.bucket.bucketName);
 // admin-api firma URLs de comprobantes y fotos solo para registros de los condominios del administrador.
 backend.storage.resources.bucket.grantRead(backend.adminApi.resources.lambda, 'residentes/*');
 backend.adminApi.addEnvironment('BUCKET', backend.storage.resources.bucket.bucketName);
+// Documentos del condominio (reglamento y otros): admin-api firma la subida y la descarga.
+backend.storage.resources.bucket.grantReadWrite(backend.adminApi.resources.lambda, 'condominios/*');
 
 // portal-api solo lee el correo del usuario en Cognito (el access token no lo incluye).
 backend.portalApi.addEnvironment('USER_POOL_ID', userPool.userPoolId);
