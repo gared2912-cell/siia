@@ -24,17 +24,6 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
     <div class="container contact">
       <div class="contact__info">
         <div class="grid info-cards">
-          {
-            site.phones.map((p) => (
-              <a class="card info" href={`tel:${p.tel}`}>
-                <div class="icon-badge">
-                  <Icon name="phone" />
-                </div>
-                <span>Teléfono móvil</span>
-                <strong>{p.label}</strong>
-              </a>
-            ))
-          }
           <a class="card info" href={`mailto:${site.email}`}>
             <div class="icon-badge"><Icon name="mail" /></div>
             <span>Correo electrónico</span>
@@ -45,23 +34,6 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
             <span>WhatsApp</span>
             <strong>Escríbenos</strong>
           </a>
-        </div>
-
-        <div class="urgent">
-          <div class="urgent__icon"><Icon name="alert" /></div>
-          <div>
-            <h2>¿Urgencia operativa en tu condominio?</h2>
-            <p>Fugas, fallas eléctricas, accesos o bombas de agua: repórtalo de inmediato para canalizarlo.</p>
-            <div class="btn-row">
-              <a
-                class="btn btn--sm urgent__btn"
-                href={waLink('URGENCIA OPERATIVA · Condominio: ___ · Ubicación / área: ___ · Descripción: ___')}
-                target="_blank"
-                rel="noopener"><Icon name="whatsapp" />Reportar por WhatsApp</a
-              >
-              <a class="btn btn--sm btn--ghost urgent__call" href={`tel:${site.phones[0].tel}`}><Icon name="phone" />Llamar ahora</a>
-            </div>
-          </div>
         </div>
 
         {
@@ -180,41 +152,6 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
     font-size: 1.15rem;
     color: var(--slate);
     overflow-wrap: anywhere;
-  }
-  .urgent {
-    display: flex;
-    gap: 18px;
-    padding: 24px;
-    border-radius: var(--radius);
-    background: #fdf1f0;
-    border: 1px solid #f3c9c6;
-  }
-  .urgent__icon {
-    flex: none;
-    width: 48px;
-    height: 48px;
-    border-radius: 14px;
-    display: grid;
-    place-items: center;
-    background: var(--danger);
-    color: #fff;
-  }
-  .urgent__icon :global(svg) {
-    width: 26px;
-    height: 26px;
-  }
-  .urgent h2 {
-    font-size: 1.3rem;
-    margin-bottom: 6px;
-  }
-  .urgent__btn {
-    --btn-bg: var(--danger);
-  }
-  .urgent__btn:hover {
-    --btn-bg: #9f2f2a;
-  }
-  .urgent__call {
-    --btn-fg: var(--danger);
   }
   .h-small {
     font-size: 1.4rem;
