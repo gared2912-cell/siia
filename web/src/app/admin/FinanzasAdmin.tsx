@@ -3,9 +3,16 @@ import { adminCall, all, db, ok, type Schema } from '../api';
 import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
+import { BalanceMensual, EgresosAdmin } from './Egresos';
+import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
 
 type Pago = Schema['Pago']['type'];
 type Cargo = Schema['Cargo']['type'];
+type Egreso = Schema['Egreso']['type'];
+type SaldoMensual = Schema['SaldoMensual']['type'];
+
+// Finanzas en tres vistas: Ingresos (comprobantes, pagos, cargos y saldos por unidad), Egresos (gastos del
+// condominio con evidencia) y Balance mensual (saldo inicial, ingresos por tipo, egresos y Excel del mes).
 
 export function FinanzasAdmin() {
   const { condo, etiqueta, unidades, puede, tiene } = useAdmin();
@@ -13,14 +20,18 @@ export function FinanzasAdmin() {
   const gestiona = puede('finanzas', 'editar');
   const valida = tiene('finanzas.validarPagos');
   const { data, error, loading, reload } = useLoad(async () => {
-    const [pagos, cargos] = await Promise.all([
+    const [pagos, cargos, egresos, saldos] = await Promise.all([
       all<Pago>((o) => db.models.Pago.pagosPorCondominio({ condominioId: id }, o)),
       all<Cargo>((o) => db.models.Cargo.cargosPorCondominio({ condominioId: id }, o)),
+      all<Egreso>((o) => db.models.Egreso.egresosPorCondominio({ condominioId: id }, o)),
+      all<SaldoMensual>((o) => db.models.SaldoMensual.saldosPorCondominio({ condominioId: id }, o)),
     ]);
-    return { pagos, cargos };
+    return { pagos, cargos, egresos, saldos };
   }, [id]);
-  const [tab, setTab] = useState<'revision' | 'pagos' | 'cargos' | 'saldos'>('revision');
+  const [vista, setVista] = useState<'ingresos' | 'egresos' | 'balance'>('ingresos');
+  const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos'>('residentes');
   const [generar, setGenerar] = useState(false);
+  const [cobranza, setCobranza] = useState(false);
   const [cargo, setCargo] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const [filtroUnidad, setFiltroUnidad] = useState('');
@@ -67,32 +78,62 @@ export function FinanzasAdmin() {
   return (
     <div className="stack">
       <ModuloInactivo modulo="finanzas" />
-      <PageHead icon="money" title="Finanzas" sub="Validación de comprobantes, cuotas, cargos y morosidad.">
-        {gestiona && (
+      <PageHead icon="money" title="Finanzas" sub="Ingresos, egresos y balance mensual del condominio.">
+        {vista === 'ingresos' && (
+          <button className="btn-app secondary" onClick={() => setCobranza(true)}>
+            <Icon name="download" />
+            Reporte de cobranza
+          </button>
+        )}
+        {vista === 'ingresos' && gestiona && (
           <button className="btn-app secondary" onClick={() => setCargo(true)}>
             <Icon name="plus" />
             Cargo extraordinario
           </button>
         )}
-        {tiene('finanzas.generarCuotas') && (
+        {vista === 'ingresos' && tiene('finanzas.generarCuotas') && (
           <button className="btn-app" onClick={() => setGenerar(true)}>
             <Icon name="money" />
             Generar cuotas del mes
           </button>
         )}
       </PageHead>
+      <div className="vistas" role="tablist">
+        {(
+          [
+            ['ingresos', 'Ingresos', 'money'],
+            ['egresos', 'Egresos', 'file'],
+            ['balance', 'Balance mensual', 'chart'],
+          ] as const
+        ).map(([k, label, icon]) => (
+          <button key={k} type="button" role="tab" aria-selected={vista === k} onClick={() => setVista(k)}>
+            <Icon name={icon} />
+            {label}
+            {k === 'ingresos' && revision.length > 0 && <span className="vistas-n">{revision.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {vista === 'egresos' && <EgresosAdmin datos={data!} reload={() => reload(true)} />}
+      {vista === 'balance' && <BalanceMensual datos={data!} reload={() => reload(true)} />}
+
+      {vista === 'ingresos' && (
       <Seg
         value={tab}
         onChange={setTab}
         options={[
+          ['residentes', 'Residentes'],
           ['revision', `Por aprobar (${revision.length})`],
           ['pagos', 'Pagos procesados'],
           ['cargos', 'Cargos'],
           ['saldos', 'Saldos por unidad'],
         ]}
       />
+      )}
 
-      {tab === 'revision' && (
+      {vista === 'ingresos' && tab === 'residentes' && <ResidentesFinanzas pagos={pagos} cargos={cargos} />}
+
+      {vista === 'ingresos' && tab === 'revision' && (
         <section className="panel">
           {revision.length ? (
             <ul className="list">
@@ -133,7 +174,7 @@ export function FinanzasAdmin() {
         </section>
       )}
 
-      {tab === 'pagos' && (
+      {vista === 'ingresos' && tab === 'pagos' && (
         <section className="panel">
           {procesados.length ? (
             <div className="table-wrap">
@@ -179,7 +220,7 @@ export function FinanzasAdmin() {
         </section>
       )}
 
-      {tab === 'cargos' && (
+      {vista === 'ingresos' && tab === 'cargos' && (
         <section className="panel">
           <div className="panel-head">
             <h2>Cargos</h2>
@@ -199,6 +240,7 @@ export function FinanzasAdmin() {
                   <tr>
                     <th>Unidad</th>
                     <th>Concepto</th>
+                    <th>Tipo</th>
                     <th>Vence</th>
                     <th className="num">Monto</th>
                     <th>Estado</th>
@@ -212,6 +254,7 @@ export function FinanzasAdmin() {
                       <tr key={c.id}>
                         <td>{etiqueta(c.unidadId)}</td>
                         <td>{c.concepto}</td>
+                        <td className="small">{etiquetaIngreso(tipoDeCargo(c))}</td>
                         <td>{fecha(c.vence)}</td>
                         <td className="num">{money(c.monto)}</td>
                         <td>
@@ -236,7 +279,7 @@ export function FinanzasAdmin() {
         </section>
       )}
 
-      {tab === 'saldos' && (
+      {vista === 'ingresos' && tab === 'saldos' && (
         <section className="panel">
           <div className="table-wrap">
             <table className="tbl">
@@ -265,6 +308,7 @@ export function FinanzasAdmin() {
         </section>
       )}
 
+      {cobranza && <ReporteCobranza pagos={pagos} cargos={cargos} onClose={() => setCobranza(false)} />}
       {generar && <GenerarCuotas onClose={() => setGenerar(false)} onDone={() => (setGenerar(false), setTab('cargos'), reload(true))} />}
       {cargo && <NuevoCargo onClose={() => setCargo(false)} onDone={() => (setCargo(false), setTab('cargos'), reload(true))} />}
       {recibo && (
@@ -321,7 +365,7 @@ function GenerarCuotas({ onClose, onDone }: { onClose: () => void; onDone: () =>
 
 function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { condoId, unidades } = useAdmin();
-  const [f, setF] = useState({ unidadId: '', concepto: '', monto: '', vence: hoy(), todas: false });
+  const [f, setF] = useState({ unidadId: '', concepto: '', monto: '', vence: hoy(), todas: false, tipo: 'OTRO' });
   const { run, busy } = useAction();
   async function crear(e: React.FormEvent) {
     e.preventDefault();
@@ -338,6 +382,7 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
             vence: f.vence,
             periodo: f.vence.slice(0, 7),
             estado: 'PENDIENTE',
+            tipo: f.tipo,
           }),
         );
       }
@@ -366,6 +411,7 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         <Field label="Concepto">
           <input required maxLength={120} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} placeholder="Multa, cuota extraordinaria, renta de salón…" />
         </Field>
+        <TipoIngreso value={f.tipo} onChange={(tipo) => setF({ ...f, tipo })} />
         <div className="form-2">
           <Field label="Monto (MXN)">
             <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />
@@ -379,5 +425,128 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         </button>
       </form>
     </Modal>
+  );
+}
+
+/** Tipo de ingreso del cargo: con él se separan los ingresos en el balance mensual. */
+export function TipoIngreso({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Field label="Tipo de ingreso" hint="Así se separa en el balance mensual.">
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {TIPOS_CARGO_MANUAL.map((t) => (
+          <option key={t} value={t}>
+            {etiquetaIngreso(t)}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
+/** Reporte de cobranza en Excel: pagados, por aprobar y sin pago del mes, morosos y estado por unidad. */
+function ReporteCobranza({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Cargo[]; onClose: () => void }) {
+  const { condo, unidades } = useAdmin();
+  const [periodo, setPeriodo] = useState(periodoActual());
+  const { run, busy } = useAction();
+  async function descargar(e: React.FormEvent) {
+    e.preventDefault();
+    const okk = await run(async () => {
+      const [{ descargarReporteCobranza }, contactos] = await Promise.all([
+        import('./reporteCobranza'),
+        adminCall<Record<string, { nombre: string | null; telefono: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }),
+      ]);
+      await descargarReporteCobranza({
+        condominio: condo!.nombre,
+        periodo,
+        diaVencimiento: condo!.diaVencimiento,
+        hoy: hoy(),
+        unidades,
+        cargos,
+        pagos,
+        contactos,
+      });
+    }, 'Reporte de cobranza descargado');
+    if (okk) onClose();
+  }
+  return (
+    <Modal title="Reporte de cobranza" onClose={onClose}>
+      <form className="form" onSubmit={descargar}>
+        <p className="small muted" style={{ margin: 0 }}>
+          Excel con todas las casas o departamentos: lo pagado con recibo aprobado, lo que tiene comprobante por aprobar y lo que no se ha pagado en el mes, con
+          sus sumas; la lista de residentes morosos con lo que deben a la fecha, y el estado de cuenta de cada unidad.
+        </p>
+        <Field label="Mes">
+          <input required type="month" value={periodo} onChange={(e) => setPeriodo(e.target.value)} />
+        </Field>
+        <button className="btn-app" disabled={busy}>
+          <Icon name="download" />
+          {busy ? 'Generando…' : 'Descargar Excel'}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+/** Ingresos › Residentes: cada casa o departamento con su residente y su historial de pagos en PDF. */
+function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] }) {
+  const { condo, unidades } = useAdmin();
+  const contactos = useLoad(
+    () => adminCall<Record<string, { nombre: string | null; telefono: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }),
+    [condo!.id],
+  );
+  const [buscar, setBuscar] = useState('');
+  const [bajando, setBajando] = useState<string | null>(null);
+  const { run } = useAction();
+  const nombre = (u: (typeof unidades)[number]) =>
+    (contactos.data?.[u.id] ?? []).map((x) => x.nombre || x.email).join(', ') || u.propietario || '';
+  const q = buscar.trim().toLowerCase();
+  const lista = unidades.filter((u) => !q || `${u.etiqueta} ${nombre(u)}`.toLowerCase().includes(q));
+
+  const historial = (u: (typeof unidades)[number]) =>
+    run(async () => {
+      setBajando(u.id);
+      try {
+        const { descargarHistorial } = await import('../historialPdf');
+        await descargarHistorial({
+          condominio: condo!.nombre,
+          direccion: condo!.direccion,
+          unidad: u.etiqueta,
+          residente: nombre(u),
+          cargos: cargos.filter((c) => c.unidadId === u.id),
+          pagos: pagos.filter((p) => p.unidadId === u.id),
+          hoy: hoy(),
+        });
+      } finally {
+        setBajando(null);
+      }
+    }, `Historial de ${u.etiqueta} descargado`);
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Residentes</h2>
+        <input className="input" style={{ maxWidth: 260 }} placeholder="Buscar casa o nombre…" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
+      </div>
+      {contactos.loading && !contactos.data ? (
+        <Loading />
+      ) : lista.length ? (
+        <ul className="list">
+          {lista.map((u) => (
+            <li key={u.id}>
+              <div className="list-main">
+                <strong>{u.etiqueta}</strong>
+                <div className="list-sub">{nombre(u) || 'Sin residente registrado'}</div>
+              </div>
+              <button className="btn-app sm secondary" disabled={bajando === u.id} onClick={() => historial(u)}>
+                <Icon name="download" />
+                {bajando === u.id ? 'Generando…' : 'Historial de pagos (PDF)'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Empty icon="building">{q ? 'Sin resultados.' : 'El condominio no tiene casas o departamentos.'}</Empty>
+      )}
+    </section>
   );
 }

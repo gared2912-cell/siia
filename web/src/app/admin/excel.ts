@@ -120,3 +120,77 @@ export async function leerMachote(file: File): Promise<{ filas: FilaMachote[]; f
   });
   return { filas, fechasInvalidas };
 }
+
+// ---------- Reporte de una encuesta cerrada ----------
+export type ReporteEncuesta = {
+  condominio: string;
+  pregunta: string;
+  descripcion?: string | null;
+  cierra?: string | null;
+  opciones: string[];
+  unidades: { id: string; etiqueta: string }[];
+  votos: { unidadId: string; opcion: string; createdAt: string; nombre?: string | null; email?: string | null }[];
+};
+
+/** Excel con el resultado (ganador y votos por opción), quién votó y por qué opción, y qué unidades no votaron. */
+export async function descargarReporteEncuesta(r: ReporteEncuesta) {
+  const XLSX = await import('xlsx');
+  const total = r.votos.length;
+  const conteo = r.opciones.map((o) => ({ o, n: r.votos.filter((v) => v.opcion === o).length })).sort((a, b) => b.n - a.n);
+  const max = conteo[0]?.n ?? 0;
+  const ganadoras = conteo.filter((c) => c.n === max && max > 0);
+  const segundo = conteo.find((c) => c.n < max)?.n ?? 0;
+  const pct = (n: number) => (total ? n / total : 0);
+  const etiqueta = (id: string) => r.unidades.find((u) => u.id === id)?.etiqueta ?? '—';
+
+  const resultado =
+    !ganadoras.length
+      ? 'Sin votos'
+      : ganadoras.length > 1
+        ? `Empate entre ${ganadoras.map((g) => `«${g.o}»`).join(' y ')} con ${max} votos cada una`
+        : `«${ganadoras[0].o}» con ${max} de ${total} votos (${Math.round(pct(max) * 100)}%)` +
+          (conteo.length > 1 ? `, ganó por ${max - segundo} voto${max - segundo === 1 ? '' : 's'} de diferencia` : '');
+
+  const hojaRes = XLSX.utils.aoa_to_sheet([
+    ['Resultado de la encuesta · SIIA'],
+    [],
+    ['Condominio', r.condominio],
+    ['Pregunta', r.pregunta],
+    ...(r.descripcion ? [['Descripción', r.descripcion]] : []),
+    ...(r.cierra ? [['Fecha de cierre', r.cierra]] : []),
+    ['Participación', `${total} de ${r.unidades.length} unidades`],
+    ['Ganador', resultado],
+    [],
+    ['Opción', 'Votos', 'Porcentaje'],
+    ...conteo.map((c) => [c.o, c.n, pct(c.n)]),
+    ['Total', total, total ? 1 : 0],
+  ]);
+  const inicio = (r.descripcion ? 1 : 0) + (r.cierra ? 1 : 0) + 8;
+  for (let k = 0; k <= conteo.length; k++) {
+    const celda = hojaRes[XLSX.utils.encode_cell({ r: inicio + k, c: 2 })];
+    if (celda) celda.z = '0%';
+  }
+  hojaRes['!cols'] = [{ wch: 34 }, { wch: 60 }, { wch: 12 }];
+
+  const votos = [...r.votos].sort((a, b) => etiqueta(a.unidadId).localeCompare(etiqueta(b.unidadId), 'es', { numeric: true }));
+  const hojaVotos = XLSX.utils.aoa_to_sheet(
+    [
+      ['Casa o departamento', 'Votó', 'Correo', 'Votó por', 'Fecha y hora'],
+      ...votos.map((v) => [etiqueta(v.unidadId), v.nombre ?? '', v.email ?? '', v.opcion, new Date(v.createdAt)]),
+    ],
+    { cellDates: true, dateNF: 'dd/mm/yyyy hh:mm' },
+  );
+  hojaVotos['!cols'] = [{ wch: 22 }, { wch: 32 }, { wch: 32 }, { wch: 34 }, { wch: 18 }];
+
+  const votaron = new Set(r.votos.map((v) => v.unidadId));
+  const sinVoto = r.unidades.filter((u) => !votaron.has(u.id)).sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es', { numeric: true }));
+  const hojaSin = XLSX.utils.aoa_to_sheet([['Casa o departamento sin votar'], ...sinVoto.map((u) => [u.etiqueta])]);
+  hojaSin['!cols'] = [{ wch: 30 }];
+
+  const libro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hojaRes, 'Resultado');
+  XLSX.utils.book_append_sheet(libro, hojaVotos, 'Votos');
+  XLSX.utils.book_append_sheet(libro, hojaSin, 'Sin votar');
+  const limpio = (s: string) => s.replace(/[\/:*?"<>|]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  XLSX.writeFile(libro, `Encuesta ${limpio(r.pregunta)} ${limpio(r.condominio)}.xlsx`);
+}

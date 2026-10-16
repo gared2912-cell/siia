@@ -106,6 +106,8 @@ const schema = a
         monto: a.float().required(),
         vence: a.date(),
         estado: a.enum(['PENDIENTE', 'PAGADO', 'CANCELADO']),
+        // Tipo de ingreso para el balance (ver shared/finanzas.ts); los cargos anteriores se clasifican por su id.
+        tipo: a.string(),
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('cargosPorUnidad'),
@@ -133,6 +135,36 @@ const schema = a
         i('unidadId').name('byUnidad').queryField('pagosPorUnidad'),
         i('condominioId').name('byCondominio').queryField('pagosPorCondominio'),
       ])
+      .authorization(admin),
+
+    // Gasto del condominio con su evidencia: [{ path, nombre, tipo, tamano }] (1 a 5 archivos PDF o imagen).
+    Egreso: a
+      .model({
+        condominioId: a.id().required(),
+        fecha: a.date().required(),
+        categoria: a.string().required(),
+        concepto: a.string().required(),
+        proveedor: a.string(),
+        formaPago: a.string(),
+        monto: a.float().required(),
+        evidencias: a.json(),
+        registradoPor: a.string(),
+        registradoPorNombre: a.string(),
+      })
+      .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('egresosPorCondominio')])
+      .authorization(admin),
+
+    // Saldo inicial capturado a mano para un mes (id = <condominioId>#AAAA-MM). Sin registro, el saldo inicial
+    // es el saldo final del mes anterior.
+    SaldoMensual: a
+      .model({
+        condominioId: a.id().required(),
+        periodo: a.string().required(),
+        saldoInicial: a.float().required(),
+        nota: a.string(),
+        editadoPor: a.string(),
+      })
+      .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('saldosPorCondominio')])
       .authorization(admin),
 
     Comunicado: a

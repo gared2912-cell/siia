@@ -32,6 +32,7 @@ import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
+import { CATEGORIAS_EGRESO, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -185,11 +186,14 @@ const REGLAS: Record<string, Regla> = {
   Cargo: {
     seccion: 'finanzas',
     indices: { cargosPorCondominio: 'condominioId' },
-    crear: ['condominioId', 'unidadId', 'concepto', 'periodo', 'monto', 'vence', 'estado'],
+    crear: ['condominioId', 'unidadId', 'concepto', 'periodo', 'monto', 'vence', 'estado', 'tipo'],
     editar: ['estado'],
     valores: { estado: ['CANCELADO'] },
   },
   Pago: { seccion: 'finanzas', indices: { pagosPorCondominio: 'condominioId' } },
+  // Egresos y saldos iniciales se escriben con las acciones egresos.* y saldos.inicial.
+  Egreso: { seccion: 'finanzas', indices: { egresosPorCondominio: 'condominioId' } },
+  SaldoMensual: { seccion: 'finanzas', indices: { saldosPorCondominio: 'condominioId' } },
   Comunicado: {
     seccion: 'comunicados',
     indices: { comunicadosPorCondominio: 'condominioId' },
@@ -300,9 +304,12 @@ async function db(p: Item, yo: Yo) {
     if (campo === 'hilo') exigirCondo(yo, valor.split('#')[0]);
     if (campo === 'encuestaId') exigirCondo(yo, (await get('Encuesta', { id: valor }))?.condominioId);
     const items = await leerTodo((o) => M[op]({ [campo]: valor }, o));
-    // Quién atendió cada incidente solo lo ve el superadministrador.
+    // Todos los administradores ven el nombre de quien registró cada etapa; el correo solo el superadministrador.
     if (m === 'Incidente' && !yo.superadmin) {
-      return items.map((i) => ({ ...i, historial: JSON.stringify(historialDe(i).map(({ por, porNombre, ...h }) => h)) }));
+      return items.map((i) => ({
+        ...i,
+        historial: JSON.stringify(historialDe(i).map(({ por, porNombre, ...h }) => ({ ...h, porNombre: porNombre || por || null }))),
+      }));
     }
     return items;
   }
@@ -329,7 +336,10 @@ async function db(p: Item, yo: Yo) {
       if (!u || u.condominioId !== input.condominioId) fail('La unidad no pertenece al condominio.');
     }
     if (m === 'Amenidad') await validarParte(input, input.condominioId);
-    if (m === 'Cargo') input.estado = 'PENDIENTE';
+    if (m === 'Cargo') {
+      input.estado = 'PENDIENTE';
+      input.tipo = (TIPOS_CARGO_MANUAL as readonly string[]).includes(input.tipo) ? input.tipo : 'OTRO';
+    }
     if (m === 'Mensaje') {
       Object.assign(input, {
         canal: 'ADMIN',
@@ -490,10 +500,140 @@ const accionesDocumentos: Record<string, (p: Item, yo: Yo) => Promise<unknown>> 
   },
 };
 
+// ---------- finanzas: egresos con evidencia y saldo inicial del balance ----------
+const TIPOS_EVIDENCIA: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic', pdf: 'application/pdf' };
+const fechaValida = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)) ? v : '');
+
+async function condominioFinanzas(p: Item, yo: Yo, nivel: Nivel) {
+  exigir(yo, 'finanzas', nivel);
+  const c = await get('Condominio', { id: str(p.condominioId, 64) });
+  if (!c) fail('Selecciona el condominio.');
+  exigirCondo(yo, c!.id);
+  return c!;
+}
+
+const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // URL firmada para subir un archivo de evidencia del egreso (PDF o imagen, 10 MB, 10 minutos).
+  async 'egresos.subirEvidencia'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'evidencia.pdf';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_EVIDENCIA[ext]) fail('La evidencia debe ser PDF o imagen (JPG, PNG, WEBP o HEIC).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('Cada archivo debe pesar máximo 10 MB.');
+    const path = `condominios/${c.id}/egresos/${randomUUID()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_EVIDENCIA[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_EVIDENCIA[ext] };
+  },
+
+  // Alta o edición de un egreso: fecha, categoría, concepto, monto y de 1 a 5 archivos de evidencia ya subidos.
+  async 'egresos.guardar'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const id = str(p.id, 64);
+    const actual = id ? await get('Egreso', { id }) : undefined;
+    if (id && (!actual || actual.condominioId !== c.id)) fail('Egreso no encontrado.');
+    const fecha = fechaValida(p.fecha);
+    if (!fecha) fail('Indica la fecha del gasto.');
+    const categoria = str(p.categoria, 60);
+    if (!CATEGORIAS_EGRESO.includes(categoria)) fail('Elige la categoría del gasto.');
+    const concepto = str(p.concepto, 200);
+    if (!concepto) fail('Escribe el concepto del gasto.');
+    const monto = Math.round(Number(p.monto) * 100) / 100;
+    if (!(monto > 0) || monto > 100_000_000) fail('Indica un monto válido.');
+    const lista: Item[] = Array.isArray(p.evidencias) ? p.evidencias : [];
+    if (!lista.length) fail('Sube al menos un archivo de evidencia.');
+    if (lista.length > MAX_EVIDENCIAS_EGRESO) fail(`Máximo ${MAX_EVIDENCIAS_EGRESO} archivos de evidencia.`);
+    const evidencias = [];
+    for (const e of lista) {
+      const path = str(e?.path, 400);
+      if (!path.startsWith(`condominios/${c.id}/egresos/`)) fail('Archivo de evidencia no válido.');
+      const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: path })).catch(() => undefined);
+      if (!h) fail('No encontramos un archivo de evidencia. Vuelve a subirlo.');
+      evidencias.push({ path, nombre: str(e.nombre, 120) || path.split('/').pop(), tipo: h!.ContentType ?? '', tamano: h!.ContentLength ?? 0 });
+    }
+    const datos = {
+      fecha,
+      categoria,
+      concepto,
+      proveedor: str(p.proveedor, 120) || null,
+      formaPago: str(p.formaPago, 60) || null,
+      monto,
+      evidencias: JSON.stringify(evidencias),
+    };
+    if (actual) return update('Egreso', { id: actual.id }, datos);
+    const yoPerfil = await get('Perfil', { userId: yo.sub });
+    return put('Egreso', { condominioId: c.id, ...datos, registradoPor: yo.email, registradoPorNombre: yoPerfil?.nombre || null });
+  },
+
+  async 'egresos.borrar'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const e = await get('Egreso', { id: str(p.id, 64) });
+    if (!e) fail('Egreso no encontrado.');
+    exigirCondo(yo, e!.condominioId);
+    await remove('Egreso', { id: e!.id });
+    return { ok: true };
+  },
+
+  // URL firmada de un archivo de evidencia del egreso (15 minutos).
+  async 'egresos.evidencia'(p, yo) {
+    exigir(yo, 'finanzas', 'ver');
+    const e = await get('Egreso', { id: str(p.id, 64) });
+    if (!e) fail('Egreso no encontrado.');
+    exigirCondo(yo, e!.condominioId);
+    const path = str(p.path, 400);
+    let lista: any = e!.evidencias;
+    for (let k = 0; k < 2 && typeof lista === 'string'; k++) lista = JSON.parse(lista);
+    if (!Array.isArray(lista) || !lista.some((x: Item) => x.path === path)) fail('Archivo no disponible.');
+    return { url: await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path }), { expiresIn: 900 }) };
+  },
+
+  // Residentes de cada unidad (nombre, teléfono y correo) para el reporte de cobranza; basta con ver Finanzas.
+  async 'finanzas.contactos'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'ver');
+    const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', c.id);
+    const out: Record<string, { nombre: string | null; telefono: string | null; email: string }[]> = {};
+    for (const x of perfiles) {
+      if (x.rol !== 'RESIDENTE' || x.estado !== 'APROBADO' || !x.unidadId) continue;
+      (out[x.unidadId] ??= []).push({ nombre: x.nombre || null, telefono: x.telefono || null, email: x.email });
+    }
+    return out;
+  },
+
+  // Saldo inicial de un mes capturado a mano (saldoInicial = null lo quita y vuelve a arrastrarse del mes anterior).
+  async 'saldos.inicial'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const periodo = str(p.periodo, 7);
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo)) fail('Periodo no válido (AAAA-MM).');
+    const id = `${c.id}#${periodo}`;
+    if (p.saldoInicial === null || p.saldoInicial === '') {
+      await remove('SaldoMensual', { id });
+      return { ok: true };
+    }
+    const saldoInicial = Math.round(Number(p.saldoInicial) * 100) / 100;
+    if (!Number.isFinite(saldoInicial) || Math.abs(saldoInicial) > 1_000_000_000) fail('Indica un saldo válido.');
+    return put('SaldoMensual', { id, condominioId: c.id, periodo, saldoInicial, nota: str(p.nota, 300) || null, editadoPor: yo.email });
+  },
+};
+
+// ---------- encuestas: reporte de votos ----------
+const accionesEncuestas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // Quién votó en una encuesta (nombre y correo del residente) para el reporte de Excel. Los votos y las unidades
+  // ya los tiene el panel; aquí solo se agregan los nombres, que no requieren permiso de usuarios.
+  async 'encuestas.votantes'(p, yo) {
+    exigir(yo, 'encuestas', 'ver');
+    const e = await get('Encuesta', { id: str(p.encuestaId, 64) });
+    if (!e) fail('Encuesta no encontrada.');
+    exigirCondo(yo, e!.condominioId);
+    const votos = await byIndex('Voto', 'byEncuesta', 'encuestaId', e!.id);
+    const ids = [...new Set(votos.map((v) => v.userId).filter(Boolean))] as string[];
+    const perfiles = await Promise.all(ids.map((userId) => get('Perfil', { userId })));
+    return Object.fromEntries(perfiles.filter(Boolean).map((x) => [x!.userId, { nombre: x!.nombre || null, email: x!.email || null }]));
+  },
+};
+
 // ---------- incidentes: atención con evidencia ----------
-// Etapas en orden. Cada etapa guardada queda fija; el administrador solo puede avanzar (puede saltar etapas).
-const ESTADOS_INCIDENTE = ['ABIERTO', 'EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
-const ORDEN_INCIDENTE: Record<string, number> = { ABIERTO: 0, EN_SEGUIMIENTO: 1, EN_PROCESO: 2, RESUELTO: 2, CERRADO: 3 };
+// Etapas que registra el administrador. Cada etapa guardada queda fija; el administrador elige libremente la que
+// corresponde (puede repetirla: seguimiento, seguimiento, proceso… y al final cerrar).
+const ESTADOS_INCIDENTE = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
 const CON_EVIDENCIA = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
 const TIPOS_FOTO: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 type Paso = { estado: string; respuesta?: string | null; fotoPath?: string | null; por?: string; porNombre?: string | null; en: string; reabierto?: boolean };
@@ -532,16 +672,14 @@ const accionesIncidentes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> 
     return { url, path, contentType: TIPOS_FOTO[ext] };
   },
 
-  // Seguimiento por etapas (En seguimiento → En proceso → Cerrado): el administrador elige cualquiera de las
-  // etapas que siguen, con descripción y foto de evidencia obligatorias; lo guardado ya no se modifica. Un
-  // incidente cerrado ya no cambia, salvo que lo modifique el superadministrador (puede regresarlo a cualquier etapa).
+  // Seguimiento por etapas (En seguimiento / En proceso / Cerrado): el administrador elige la etapa que corresponde,
+  // con descripción y foto de evidencia obligatorias; lo guardado ya no se modifica. Un incidente cerrado ya no
+  // cambia, salvo que lo modifique el superadministrador (puede regresarlo a cualquier etapa).
   async 'incidentes.atender'(p, yo) {
     const i = await incidenteDe(p, yo, 'editar');
     if (i.estado === 'CERRADO' && !yo.superadmin) fail('El incidente está cerrado; solo el superadministrador puede modificarlo.');
     const estado = str(p.estado, 20);
     if (!ESTADOS_INCIDENTE.includes(estado)) fail('Estado no válido.');
-    const actual = ORDEN_INCIDENTE[i.estado ?? 'ABIERTO'] ?? 0;
-    if (!yo.superadmin && ORDEN_INCIDENTE[estado] <= actual) fail('Elige una etapa posterior a la actual.');
     const respuesta = str(p.respuesta, 2000) || null;
     const fotoPath = str(p.fotoPath, 400) || null;
     if (!respuesta) fail('Escribe la descripción de la etapa.');
@@ -557,7 +695,7 @@ const accionesIncidentes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> 
       respuesta,
       fotoPath,
       por: yo.email,
-      porNombre: yoPerfil?.nombre ?? null,
+      porNombre: yoPerfil?.nombre || null,
       en: now(),
       ...(i.estado === 'CERRADO' ? { reabierto: true } : {}),
     };
@@ -751,6 +889,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async yo(_p, yo) {
     return {
       email: yo.email,
+      nombre: (await get('Perfil', { userId: yo.sub }))?.nombre || null,
       superadmin: yo.superadmin,
       rol: yo.rolNombre,
       permisos: yo.permisos,
@@ -762,6 +901,8 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   archivo,
   ...accionesDocumentos,
   ...accionesIncidentes,
+  ...accionesEncuestas,
+  ...accionesFinanzas,
 
   // ----- app y notificaciones push (solo categorías que su rol permite) -----
   ...Object.fromEntries(
@@ -1063,6 +1204,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const ids: string[] | null = Array.isArray(p.unidadIds) ? p.unidadIds.map((x: unknown) => str(x, 64)) : null;
     const destino = ids ? todas.filter((u) => ids.includes(u.id)) : todas;
     if (!destino.length) fail('El condominio no tiene unidades.');
+    const tipo = (TIPOS_CARGO_MANUAL as readonly string[]).includes(p.tipo) ? p.tipo : 'RECAUDACION';
     const grupo = randomUUID().slice(0, 8);
     for (let i = 0; i < destino.length; i += 25) {
       await Promise.all(
@@ -1076,6 +1218,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
             monto,
             vence: p.vence,
             estado: 'PENDIENTE',
+            tipo,
           }),
         ),
       );

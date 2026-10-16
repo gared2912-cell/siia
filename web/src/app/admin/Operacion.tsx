@@ -37,12 +37,11 @@ const porFecha = <T extends { createdAt: string }>(a: T, b: T) => String(b.creat
 
 // ---------- Incidentes ----------
 // Lista compacta; al abrir un incidente se ve su tarjeta de seguimiento: el reporte del residente, cada etapa con
-// su descripción y foto de evidencia, y el formulario de la siguiente etapa (En seguimiento → En proceso → Cerrado).
-// Lo guardado queda fijo. Cerrado ya no se modifica, salvo por el superadministrador.
+// su descripción, foto de evidencia y quién la registró, y el formulario de la siguiente etapa. El administrador elige
+// la etapa que corresponde (puede repetirla). Lo guardado queda fijo. Cerrado ya no se modifica, salvo por el superadministrador.
 type Paso = { estado: string; respuesta?: string | null; fotoPath?: string | null; por?: string; porNombre?: string | null; en: string; reabierto?: boolean };
-// Etapas que elige el administrador, en orden (RESUELTO solo existe en registros anteriores).
+// Etapas que elige el administrador (RESUELTO solo existe en registros anteriores).
 const ETAPAS = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
-const ORDEN: Record<string, number> = { ABIERTO: 0, EN_SEGUIMIENTO: 1, EN_PROCESO: 2, RESUELTO: 2, CERRADO: 3 };
 
 function historialDe(i: Incidente): Paso[] {
   let h: unknown = i.historial;
@@ -167,12 +166,15 @@ function Seguimiento({ i, onBack, onCambio }: { i: Incidente; onBack: () => void
             <li key={k} className="etapa hecha">
               <strong>{etiquetaEstado(h.estado)}</strong>
               {h.reabierto && <Badge estado="PENDIENTE">Modificado después del cierre</Badge>}{' '}
-              <span className="list-sub">
-                · {fechaHora(h.en)}
-                {superadmin && h.por && ` · ${h.porNombre ? `${h.porNombre} (${h.por})` : h.por}`}
-              </span>
+              <span className="list-sub">· {fechaHora(h.en)}</span>
               {h.respuesta && <div className="small pre" style={{ margin: '4px 0' }}>{h.respuesta}</div>}
               {h.fotoPath && <FotoEvidencia incidenteId={i.id} path={h.fotoPath} />}
+              {(h.porNombre || h.por) && (
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  {etiquetaEstado(h.estado)} por {h.porNombre || h.por}
+                  {superadmin && h.porNombre && h.por && h.por !== h.porNombre && ` (${h.por})`}
+                </div>
+              )}
             </li>
           ))}
         </ol>
@@ -212,11 +214,10 @@ function FotoReporte({ i }: { i: Incidente }) {
   );
 }
 
-/** Formulario de la siguiente etapa: el administrador elige cualquiera de las que siguen; lo guardado queda fijo. */
+/** Formulario de la siguiente etapa: el administrador elige la que corresponde (puede repetirla); lo guardado queda fijo. */
 function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; superadmin?: boolean; onDone: () => void; onCancel?: () => void }) {
-  const actual = ORDEN[i.estado ?? 'ABIERTO'] ?? 0;
-  const opciones = superadmin ? ETAPAS : ETAPAS.filter((x) => ORDEN[x] > actual);
-  const [estado, setEstado] = useState(opciones[0]);
+  const { yoNombre } = useAdmin();
+  const [estado, setEstado] = useState(ETAPAS.includes(i.estado ?? '') && i.estado !== 'CERRADO' ? i.estado! : ETAPAS[0]);
   const [respuesta, setRespuesta] = useState('');
   const [foto, setFoto] = useState<File | null>(null);
   const [vista, setVista] = useState('');
@@ -255,7 +256,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
       <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>{superadmin ? 'Modificar incidente cerrado' : 'Siguiente etapa'}</h2>
       <form className="form" onSubmit={guardar}>
         <Field label="Etapa">
-          <Seg value={estado} onChange={setEstado} options={opciones.map((x) => [x, etiquetaEstado(x)] as [string, string])} />
+          <Seg value={estado} onChange={setEstado} options={ETAPAS.map((x) => [x, etiquetaEstado(x)] as [string, string])} />
         </Field>
         <Field label="Descripción" hint="Qué se está haciendo o por qué se cierra. El residente recibe un aviso.">
           <textarea required maxLength={2000} value={respuesta} onChange={(e) => setRespuesta(e.target.value)} />
@@ -269,6 +270,9 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
         {vista && <img src={vista} alt="Vista previa de la evidencia" style={{ width: 200, maxWidth: '100%', maxHeight: 160, borderRadius: 10, objectFit: 'cover' }} />}
         <p className="small muted" style={{ margin: 0 }}>
           Al guardar, la etapa queda registrada y ya no se puede modificar.
+        </p>
+        <p className="small muted" style={{ margin: 0 }}>
+          {etiquetaEstado(estado)} por {yoNombre}
         </p>
         <div className="row-actions">
           <button className="btn-app" disabled={busy || !foto || !respuesta.trim()}>

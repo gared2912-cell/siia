@@ -140,6 +140,17 @@ backend.auth.resources.cfnResources.cfnUserPoolClient.tokenValidityUnits = { ref
 backend.auth.resources.cfnResources.cfnUserPoolClient.accessTokenValidity = 60;
 backend.auth.resources.cfnResources.cfnUserPoolClient.idTokenValidity = 60;
 
+// ---------- correo ----------
+// Recargos por pago tardío: aviso por correo a los residentes (Amazon SES, dominio siia.casa verificado con DKIM).
+// EN PAUSA hasta tener el dominio con HTTPS y SES listo; para activarlo: CORREOS_ACTIVOS = '1'.
+backend.recargos.addEnvironment('CORREOS_ACTIVOS', '0');
+backend.recargos.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail'],
+    resources: [`arn:aws:ses:${Stack.of(backend.recargos.resources.lambda).region}:${Stack.of(backend.recargos.resources.lambda).account}:identity/*`],
+  }),
+);
+
 // ---------- notificaciones push ----------
 // El notificador escucha los registros nuevos de estas tablas (los streams ya existen en las tablas de Amplify).
 for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Mascota']) {

@@ -8,6 +8,7 @@ import { useAdmin, type Condominio } from './AdminApp';
 import { Residentes } from './Residentes';
 import { Documentos } from './Documentos';
 import { CatalogoAmenidades } from './Operacion';
+import { TipoIngreso } from './FinanzasAdmin';
 
 type Cargo = Schema['Cargo']['type'];
 type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
@@ -428,7 +429,7 @@ function Extraordinarias() {
 
 function NuevaExtraordinaria({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { condoId, unidades } = useAdmin();
-  const [f, setF] = useState({ concepto: '', monto: '', vence: hoy(), todas: true });
+  const [f, setF] = useState({ concepto: '', monto: '', vence: hoy(), todas: true, tipo: 'RECAUDACION' });
   const [elegidas, setElegidas] = useState<string[]>([]);
   const { run, busy } = useAction();
   const n = f.todas ? unidades.length : elegidas.length;
@@ -441,6 +442,7 @@ function NuevaExtraordinaria({ onClose, onDone }: { onClose: () => void; onDone:
         concepto: f.concepto,
         monto: Number(f.monto),
         vence: f.vence,
+        tipo: f.tipo,
         ...(f.todas ? {} : { unidadIds: elegidas }),
       });
     }, `Cuota extraordinaria cargada a ${n} unidad(es)`);
@@ -452,6 +454,7 @@ function NuevaExtraordinaria({ onClose, onDone }: { onClose: () => void; onDone:
         <Field label="Concepto">
           <input required maxLength={120} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} placeholder="Impermeabilización 2026" />
         </Field>
+        <TipoIngreso value={f.tipo} onChange={(tipo) => setF({ ...f, tipo })} />
         <div className="form-2">
           <Field label="Monto por unidad (MXN)">
             <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />

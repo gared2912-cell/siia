@@ -6,8 +6,15 @@ import type { ModProps } from './PortalApp';
 import { useAvisos } from './Notificaciones';
 
 type Cargo = { id: string; concepto: string; periodo?: string; monto: number; vence?: string; estado: string };
-type Pago = { id: string; monto: number; fecha?: string; referencia?: string; estado: string; folio?: string; nota?: string; comprobantePath?: string; createdAt: string };
-type Estado = { saldo: number; cargos: Cargo[]; pagos: Pago[]; datosPago: string | null; cuota: number | null };
+type Pago = { id: string; monto: number; fecha?: string; referencia?: string; estado: string; folio?: string; nota?: string; comprobantePath?: string; createdAt: string; cargoIds?: string[]; validadoEn?: string };
+type Estado = {
+  saldo: number;
+  cargos: Cargo[];
+  pagos: Pago[];
+  datosPago: string | null;
+  cuota: number | null;
+  titular?: { condominio: string; direccion: string | null; unidad: string; residente: string };
+};
 
 export function Finanzas(_: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<Estado>('finanzas.estadoCuenta'));
@@ -23,10 +30,28 @@ export function Finanzas(_: ModProps) {
   const enRevision = r.pagos.filter((p) => p.estado === 'EN_REVISION').reduce((s, p) => s + p.monto, 0);
 
   const verRecibo = (id: string) => run(async () => setRecibo(await portal<ReciboData>('finanzas.recibo', { pagoId: id })));
+  // Historial de pagos en PDF (protegido: solo ver e imprimir)
+  const historial = () =>
+    run(async () => {
+      const { descargarHistorial } = await import('../historialPdf');
+      await descargarHistorial({
+        condominio: r.titular?.condominio ?? '',
+        direccion: r.titular?.direccion,
+        unidad: r.titular?.unidad ?? '',
+        residente: r.titular?.residente,
+        cargos: r.cargos,
+        pagos: r.pagos,
+        hoy: hoyStr,
+      });
+    }, 'Historial de pagos descargado');
 
   return (
     <div className="stack">
       <PageHead icon="money" title="Finanzas" sub="Estado de cuenta de tu unidad, pagos y recibos.">
+        <button className="btn-app secondary" onClick={historial}>
+          <Icon name="download" />
+          Historial de pagos (PDF)
+        </button>
         <button className="btn-app" onClick={() => setPagar(true)}>
           <Icon name="plus" />
           Subir comprobante

@@ -141,7 +141,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   },
 
   // ----- Finanzas -----
-  async 'finanzas.estadoCuenta'({ unidad, condominio }) {
+  async 'finanzas.estadoCuenta'({ unidad, condominio, perfil, email }) {
     const [cargos, pagos] = await Promise.all([
       byIndex('Cargo', 'byUnidad', 'unidadId', unidad!.id),
       byIndex('Pago', 'byUnidad', 'unidadId', unidad!.id),
@@ -156,6 +156,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       pagos: pagos.sort(newest).map(sinPrivados),
       datosPago: condominio.datosPago ?? null,
       cuota: condominio.cuotaMensual ?? unidad!.cuota ?? null,
+      // Para el historial de pagos en PDF
+      titular: { condominio: condominio.nombre, direccion: condominio.direccion ?? null, unidad: unidad!.etiqueta, residente: perfil.nombre || email },
     };
   },
 

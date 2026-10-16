@@ -1,8 +1,16 @@
 // Recargo por pago tardío. En los condominios que lo tienen activo, al día siguiente del vencimiento
-// se carga el recargo a cada cuota de mantenimiento que siga sin pagar y sin comprobante en revisión.
-// Un solo recargo por cuota (id «<unidad>#<periodo>#recargo»), solo para cuotas que vencen después de
-// activarlo (recargoDesde), y la unidad recibe un aviso en el portal.
+// se carga el recargo a cada cuota de mantenimiento que siga sin pagar, siempre que la unidad no tenga
+// ningún comprobante subido en revisión (por aprobar). Un solo recargo por cuota (id «<unidad>#<periodo>#recargo»),
+// solo para cuotas que vencen después de activarlo (recargoDesde). La unidad recibe un aviso en el portal (que
+// también llega como notificación a la app) y cada residente de la unidad, un correo a su dirección registrada.
 import { byIndex, hoyMX, put, scan, type Item } from '../shared/db';
+import { enviarCorreo } from '../shared/correo';
+
+const PORTAL = process.env.PORTAL_URL ?? 'https://staging.siia.casa/portal/';
+const fechaLarga = (iso: string) => {
+  const [a, m, d] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(a, m - 1, d)));
+};
 
 const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 
@@ -10,21 +18,20 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
   const monto = Number(c.recargoMonto);
   if (!c.recargoActivo || !(monto > 0) || c.activo === false) return 0;
   const desde: string = c.recargoDesde ?? hoy;
-  const [cargos, pagos] = await Promise.all([
+  const [cargos, pagos, perfiles] = await Promise.all([
     byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
     byIndex('Pago', 'byCondominio', 'condominioId', c.id),
+    byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
   ]);
-  // Comprobantes en revisión: cubren sus cargos; uno sin cargos indicados cubre toda la unidad.
-  const enRevision = pagos.filter((p) => p.estado === 'EN_REVISION');
-  const cubiertos = new Set(enRevision.flatMap((p) => p.cargoIds ?? []));
-  const unidadesConPago = new Set(enRevision.filter((p) => !(p.cargoIds ?? []).length).map((p) => p.unidadId));
+  // Si la unidad tiene cualquier comprobante subido por aprobar, no se le carga recargo.
+  const unidadesConPago = new Set(pagos.filter((p) => p.estado === 'EN_REVISION').map((p) => p.unidadId));
   const existentes = new Set(cargos.map((x) => x.id));
 
   let n = 0;
   for (const cuota of cargos) {
     if (!String(cuota.id).endsWith('#cuota') || cuota.estado !== 'PENDIENTE') continue;
     if (!cuota.vence || cuota.vence >= hoy || cuota.vence < desde) continue;
-    if (cubiertos.has(cuota.id) || unidadesConPago.has(cuota.unidadId)) continue;
+    if (unidadesConPago.has(cuota.unidadId)) continue;
     const id = String(cuota.id).replace(/#cuota$/, '#recargo');
     if (existentes.has(id)) continue;
     try {
@@ -46,14 +53,29 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
       if (err?.name === 'ConditionalCheckFailedException') continue;
       throw err;
     }
+    const titulo = `Recargo por pago tardío de ${mxn(monto)}`;
     await put('Aviso', {
       condominioId: c.id,
       unidadId: cuota.unidadId,
       tipo: 'PAGO',
-      titulo: `Recargo por pago tardío de ${mxn(monto)}`,
-      texto: `Tu ${String(cuota.concepto).toLowerCase()} venció el ${cuota.vence} sin pago registrado. Puedes consultarlo y pagar en Finanzas.`,
+      titulo,
+      texto: `Tu ${String(cuota.concepto).toLowerCase()} venció el ${fechaLarga(cuota.vence)} sin pago registrado. Puedes consultarlo y pagar en Finanzas.`,
       leido: false,
     });
+    const residentes = perfiles.filter((p) => p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.unidadId === cuota.unidadId && p.email);
+    for (const r of residentes) {
+      await enviarCorreo(
+        r.email,
+        `${titulo} · ${c.nombre}`,
+        [
+          `Hola${r.nombre ? ` ${r.nombre}` : ''}:`,
+          `Tu ${String(cuota.concepto).toLowerCase()} de ${mxn(Number(cuota.monto) || 0)} en ${c.nombre} venció el ${fechaLarga(cuota.vence)} y no tenemos registrado tu pago ni un comprobante por revisar.`,
+          `Por eso se agregó a tu cuenta un recargo por pago tardío de ${mxn(monto)}. Tu adeudo por esta cuota ahora es de ${mxn((Number(cuota.monto) || 0) + monto)}.`,
+          'Puedes consultar tu estado de cuenta y subir tu comprobante en el portal de residentes, sección Finanzas. Si ya pagaste, sube tu comprobante para que la administración lo revise.',
+        ],
+        { texto: 'Ir al portal', url: PORTAL },
+      );
+    }
     n++;
   }
   return n;

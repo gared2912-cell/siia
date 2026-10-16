@@ -56,7 +56,7 @@ const apis = await new AppSyncClient({}).send(new ListGraphqlApisCommand({}));
 const api = apis.graphqlApis.find((a) => a.uris?.GRAPHQL === outputs.data.url);
 const SUFIJO_TABLA = `-${api.apiId}-NONE`;
 const T = (m) => `${m}${SUFIJO_TABLA}`;
-const MODELOS = ['Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota'];
+const MODELOS = ['Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual'];
 
 // ---------- utilidades ----------
 const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
@@ -213,7 +213,7 @@ async function limpiar() {
   let marcaK;
   let marcaV;
   do {
-    const l = await s3.send(new ListObjectVersionsCommand({ Bucket: BUCKET, Prefix: 'residentes/', KeyMarker: marcaK, VersionIdMarker: marcaV }));
+    const l = await s3.send(new ListObjectVersionsCommand({ Bucket: BUCKET, KeyMarker: marcaK, VersionIdMarker: marcaV }));
     const keys = [...(l.Versions ?? []), ...(l.DeleteMarkers ?? [])].filter((c) => c.Key.includes('-e2e-')).map((c) => ({ Key: c.Key, VersionId: c.VersionId }));
     for (let i = 0; i < keys.length; i += 1000) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: keys.slice(i, i + 1000) } }));
     archivos += keys.length;
@@ -504,6 +504,102 @@ try {
     await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: false, nota: 'El comprobante no es legible' }));
     const a = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.texto === 'El comprobante no es legible'));
     esperar(a.avisos.some((v) => v.titulo === 'Tu pago no fue aprobado'), 'sin aviso de rechazo');
+  });
+
+  // =====================================================================
+  grupo('Finanzas: egresos con evidencia y balance mensual');
+  const subirEvidencia = async (sesion, nombre, tipo, contenido) => {
+    const r = await ok(sesion.admin('egresos.subirEvidencia', { condominioId: X.robles, nombre, tamano: contenido.length }));
+    const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: contenido });
+    esperar(put.ok, `PUT ${put.status}`);
+    return { path: r.path, nombre };
+  };
+  await prueba('Contadora registra un egreso con 2 archivos de evidencia (PDF e imagen)', async () => {
+    const ev1 = await subirEvidencia(ct, 'factura-e2e-poda.pdf', 'application/pdf', '%PDF-1.4 factura de prueba');
+    const ev2 = await subirEvidencia(ct, 'foto-e2e-poda.jpg', 'image/jpeg', 'foto de prueba');
+    const e = await ok(
+      ct.admin('egresos.guardar', {
+        condominioId: X.robles,
+        fecha: hoy,
+        categoria: 'Poda y jardinería',
+        concepto: 'Poda de áreas verdes',
+        proveedor: 'Jardines e2e',
+        formaPago: 'Transferencia',
+        monto: 850.5,
+        evidencias: [ev1, ev2],
+      }),
+    );
+    X.egreso = e.id;
+    X.evidencia = ev1.path;
+    esperar(e.registradoPor === E('contador') && JSON.parse(e.evidencias).length === 2, JSON.stringify(e).slice(0, 160));
+    return `$${e.monto} · 2 archivos`;
+  });
+  await prueba('Egreso sin evidencia o con más de 5 archivos se rechaza', async () => {
+    const base = { condominioId: X.robles, fecha: hoy, categoria: 'Gas', concepto: 'Gas', monto: 100 };
+    await bloqueado(ct.admin('egresos.guardar', { ...base, evidencias: [] }));
+    const ev = { path: X.evidencia, nombre: 'x.pdf' };
+    return bloqueado(ct.admin('egresos.guardar', { ...base, evidencias: [ev, ev, ev, ev, ev, ev] }));
+  });
+  await prueba('Evidencia de otro condominio no se acepta', () =>
+    bloqueado(
+      ct.admin('egresos.guardar', {
+        condominioId: X.robles,
+        fecha: hoy,
+        categoria: 'Gas',
+        concepto: 'Gas',
+        monto: 100,
+        evidencias: [{ path: `condominios/${X.torre}/egresos/otro.pdf`, nombre: 'otro.pdf' }],
+      }),
+    ),
+  );
+  await prueba('Contadora abre la evidencia del egreso (URL firmada)', async () => {
+    const { url } = await ok(ct.admin('egresos.evidencia', { id: X.egreso, path: X.evidencia }));
+    const r = await fetch(url);
+    esperar(r.ok && (await r.text()).includes('factura de prueba'), `HTTP ${r.status}`);
+    return `HTTP ${r.status}`;
+  });
+  await prueba('Contadora edita el egreso (monto y una sola evidencia)', async () => {
+    const e = await ok(
+      ct.admin('egresos.guardar', {
+        id: X.egreso,
+        condominioId: X.robles,
+        fecha: hoy,
+        categoria: 'Poda y jardinería',
+        concepto: 'Poda de áreas verdes',
+        monto: 900,
+        evidencias: [{ path: X.evidencia, nombre: 'factura-e2e-poda.pdf' }],
+      }),
+    );
+    esperar(e.monto === 900 && JSON.parse(e.evidencias).length === 1 && e.registradoPor === E('contador'), JSON.stringify(e).slice(0, 160));
+    return '$900 · 1 archivo';
+  });
+  await prueba('Saldo inicial capturado del mes', async () => {
+    await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: 12500, nota: 'Estado de cuenta e2e' }));
+    const l = await hasta(() => ok(ct.db('SaldoMensual', 'saldosPorCondominio', { args: { condominioId: X.robles } })), (x) => x.length === 1);
+    esperar(l[0]?.saldoInicial === 12500 && l[0]?.periodo === periodo, JSON.stringify(l));
+    return '$12,500';
+  });
+  await prueba('Comité de consulta ve egresos pero no registra ni cambia el saldo', async () => {
+    const l = await hasta(() => ok(cs.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })), (x) => x.length === 1);
+    await bloqueado(cs.admin('egresos.subirEvidencia', { condominioId: X.robles, nombre: 'x.pdf', tamano: 10 }));
+    await bloqueado(cs.admin('egresos.borrar', { id: X.egreso }));
+    await bloqueado(cs.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: 1 }));
+    return `lee ${l.length} egreso(s)`;
+  });
+  await prueba('Gerente de operación no ve egresos', () => bloqueado(op.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })));
+  await prueba('Quitar saldo capturado y eliminar egreso', async () => {
+    await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: null }));
+    await ok(ct.admin('egresos.borrar', { id: X.egreso }));
+    const l = await hasta(() => ok(ct.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })), (x) => !x.length);
+    esperar(!l.length, `${l.length} egreso(s)`);
+  });
+  await prueba('Cargo extraordinario guarda su tipo de ingreso', async () => {
+    const r = await ok(ct.admin('cargoExtraordinario', { condominioId: X.robles, concepto: 'Reparación de bomba', monto: 150, vence: manana, tipo: 'MANT_EXTERNO', unidadIds: [X.unidadesRobles[0]] }));
+    const l = await hasta(() => ok(ct.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.robles } })), (x) => x.some((c) => c.concepto === 'Reparación de bomba'));
+    const c = l.find((x) => x.concepto === 'Reparación de bomba');
+    esperar(r.creados === 1 && c?.tipo === 'MANT_EXTERNO', JSON.stringify(c));
+    await ok(ct.db('Cargo', 'update', { input: { id: c.id, estado: 'CANCELADO' } }));
+    return 'Mantenimiento externo';
   });
 
   // =====================================================================

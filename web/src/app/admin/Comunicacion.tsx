@@ -3,6 +3,7 @@ import { adminCall, all, db, ok, type Schema } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
+import { descargarReporteEncuesta } from './excel';
 
 type Comunicado = Schema['Comunicado']['type'];
 type Encuesta = Schema['Encuesta']['type'];
@@ -122,6 +123,7 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
 export function EncuestasAdmin() {
   const { condo, unidades, puede } = useAdmin();
   const gestiona = puede('encuestas', 'editar');
+  const [descargando, setDescargando] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(async () => {
     const encuestas = await all<Encuesta>((o) => db.models.Encuesta.encuestasPorCondominio({ condominioId: condo!.id }, o));
     const votos = await Promise.all(encuestas.map((e) => all<Voto>((o) => db.models.Voto.votosPorEncuesta({ encuestaId: e.id }, o))));
@@ -143,6 +145,25 @@ export function EncuestasAdmin() {
       ok(await db.models.Encuesta.delete({ id: e.id }));
       reload(true);
     }, 'Encuesta eliminada');
+  // Excel de una encuesta cerrada: ganador, votos por opción, quién votó y por cuál opción, y quién no votó.
+  const excel = (e: Encuesta, votos: Voto[]) =>
+    run(async () => {
+      setDescargando(e.id);
+      try {
+        const nombres = await adminCall<Record<string, { nombre: string | null; email: string | null }>>('encuestas.votantes', { encuestaId: e.id });
+        await descargarReporteEncuesta({
+          condominio: condo!.nombre,
+          pregunta: e.pregunta,
+          descripcion: e.descripcion,
+          cierra: e.cierra ? fecha(e.cierra) : null,
+          opciones: (e.opciones ?? []).filter((o): o is string => !!o),
+          unidades: unidades.map((u) => ({ id: u.id, etiqueta: u.etiqueta })),
+          votos: votos.map((v) => ({ unidadId: v.unidadId, opcion: v.opcion, createdAt: v.createdAt, ...(v.userId ? nombres[v.userId] : {}) })),
+        });
+      } finally {
+        setDescargando(null);
+      }
+    }, 'Reporte descargado');
 
   return (
     <div className="stack">
@@ -179,6 +200,14 @@ export function EncuestasAdmin() {
               </div>
             </div>
             {e.descripcion && <p className="small pre">{e.descripcion}</p>}
+            {e.estado === 'CERRADA' && (
+              <div className="row-actions" style={{ marginBottom: 8 }}>
+                <button className="btn-app sm secondary" disabled={descargando === e.id} onClick={() => excel(e, votos)}>
+                  <Icon name="download" />
+                  {descargando === e.id ? 'Generando…' : 'Descargar resultados en Excel'}
+                </button>
+              </div>
+            )}
             <p className="small muted">
               Participación: {votos.length} de {unidades.length} unidades {e.cierra && `· Cierra ${fecha(e.cierra)}`}
             </p>

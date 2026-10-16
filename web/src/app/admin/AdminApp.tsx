@@ -27,12 +27,14 @@ type Ctx = {
   reloadUnidades: () => void;
   etiqueta: (unidadId?: string | null) => string;
   yo: string;
+  /** Nombre del administrador de la sesión (o su correo si no tiene nombre). */
+  yoNombre: string;
   /** Permisos del administrador (el superadministrador puede todo). */
   superadmin: boolean;
   puede: (seccion: string, nivel?: Nivel) => boolean;
   tiene: (extra: string) => boolean;
 };
-export type MisPermisos = { email: string; superadmin: boolean; rol: string; permisos: Permisos; condominios: '*' | string[] };
+export type MisPermisos = { email: string; nombre?: string | null; superadmin: boolean; rol: string; permisos: Permisos; condominios: '*' | string[] };
 const AdminCtx = createContext<Ctx>(null as unknown as Ctx);
 export const useAdmin = () => useContext(AdminCtx);
 
@@ -151,6 +153,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     reloadUnidades: () => unidades.reload(true),
     etiqueta: (id) => unidadesOrden.find((u) => u.id === id)?.etiqueta ?? '—',
     yo,
+    yoNombre: mios.nombre || mios.email || yo,
     superadmin: mios.superadmin,
     puede,
     tiene,

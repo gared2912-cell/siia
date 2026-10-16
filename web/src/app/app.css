@@ -701,6 +701,50 @@ table.tbl {
   }
 }
 
+/* Vistas principales de un módulo (Finanzas: Ingresos · Egresos · Balance mensual) */
+.vistas {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.vistas button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  font: 700 0.95rem var(--font-body);
+  color: var(--slate);
+  cursor: pointer;
+}
+.vistas button[aria-selected='true'] {
+  background: var(--teal-dark);
+  border-color: var(--teal-dark);
+  color: #fff;
+}
+.vistas-n {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.75rem;
+  line-height: 20px;
+}
+@media (max-width: 520px) {
+  .vistas button {
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.8rem;
+    padding: 8px 4px;
+  }
+}
+
 /* Segmentos (pestañas internas) */
 .seg {
   display: inline-flex;
