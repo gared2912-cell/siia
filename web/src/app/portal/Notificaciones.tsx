@@ -7,7 +7,7 @@ import { portal } from '../api';
 import { Icon, fechaHora, usePoll, useToast } from '../ui';
 import { useInsigniaApp } from '../AppMovil';
 
-export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string; leido?: boolean; createdAt: string };
+export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string; leido?: boolean; createdAt: string; imagen?: string };
 export type ChatSinLeer = { ADMIN: number; CASETA: number };
 type Estado = { sinLeer: number; avisos: Aviso[]; chat: ChatSinLeer };
 /** `total`: avisos sin leer + mensajes de chat sin leer (campana e icono de la app). */
@@ -132,6 +132,7 @@ export function Campana() {
                   </span>
                   <div className="list-main">
                     <strong>{a.titulo}</strong>
+                    {a.imagen && <img className="aviso-imagen" src={a.imagen} alt="" loading="lazy" />}
                     {a.texto && <div className="small">{a.texto}</div>}
                     <div className="list-sub">{fechaHora(a.createdAt)}</div>
                   </div>

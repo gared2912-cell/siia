@@ -168,8 +168,8 @@ const REGLAS: Record<string, Regla> = {
     seccion: 'condominios',
     lecturaLibre: true,
     indices: {},
-    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'modulos', 'activo', ...CAMPOS_PAGO],
-    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'modulos', 'activo', ...CAMPOS_PAGO],
+    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO],
+    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO],
     extras: {
       modulos: 'condominios.servicios',
       activo: 'condominios.servicios',
@@ -245,6 +245,8 @@ const REGLAS: Record<string, Regla> = {
   },
   Reserva: { seccion: 'amenidades', indices: { reservasPorCondominio: 'condominioId' }, editar: ['estado', 'nota'] },
   Visita: { seccion: 'visitas', indices: { visitasPorCondominio: 'condominioId' } },
+  // Registro de vigilancia (cambios de turno): la administración solo consulta.
+  TurnoVigilancia: { seccion: 'visitas', indices: { turnosPorCondominio: 'condominioId' } },
   Mascota: { seccion: 'mascotas', indices: { mascotasPorCondominio: 'condominioId' }, editar: ['estado', 'notas'] },
 };
 
@@ -305,6 +307,17 @@ async function db(p: Item, yo: Yo) {
     if (campo === 'hilo') exigirCondo(yo, valor.split('#')[0]);
     if (campo === 'encuestaId') exigirCondo(yo, (await get('Encuesta', { id: valor }))?.condominioId);
     const items = await leerTodo((o) => M[op]({ [campo]: valor }, o));
+    // Fotos del cambio de turno: URL temporal en lugar de la ruta en S3.
+    if (m === 'TurnoVigilancia') {
+      const firmar = (k: string) => getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: k }), { expiresIn: 3600 });
+      return Promise.all(
+        items.map(async ({ fotoGuardiaPath, fotoCasetaPath, registradoId, ...x }) => ({
+          ...x,
+          fotoGuardiaUrl: fotoGuardiaPath ? await firmar(fotoGuardiaPath) : null,
+          fotoCasetaUrl: fotoCasetaPath ? await firmar(fotoCasetaPath) : null,
+        })),
+      );
+    }
     // Fotos del chat: URL temporal en lugar de la ruta en S3.
     if (m === 'Mensaje') {
       return Promise.all(

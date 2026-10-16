@@ -9,7 +9,7 @@ import { VAPID_PUBLIC_KEY, VAPID_SUBJECT, type Categoria } from './notificacione
  * `badge`: número para el icono de la app (pendientes del destinatario); sin él, el icono no cambia.
  * `silent`: sin sonido ni vibración (preferencia Perfil.notifSilencio del destinatario).
  */
-export type Aviso = { title: string; body?: string; url: string; tag?: string; badge?: number; silent?: boolean };
+export type Aviso = { title: string; body?: string; url: string; tag?: string; badge?: number; silent?: boolean; image?: string };
 
 let listo = false;
 function configurar() {

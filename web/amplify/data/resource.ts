@@ -54,6 +54,10 @@ const schema = a
         // Archivos importantes: [{ slot: 'reglamento' | 'doc1' | 'doc2', titulo, path, nombre, tamano, subido }]
         documentos: a.json(),
         telefonoCaseta: a.string(),
+        // Lugares de estacionamiento para visitas (0 o vacío = no se lleva el control)
+        estacionamientoVisitas: a.integer(),
+        // Servicios que entran al condominio (basura, gas, agua…): la caseta avisa a todos los residentes cuando llegan
+        serviciosCondominio: a.string().array(),
         folioSeq: a.integer(),
       })
       .authorization(admin),
@@ -318,17 +322,48 @@ const schema = a
         fechaFin: a.date(),
         codigo: a.string(),
         origen: a.enum(['RESIDENTE', 'CASETA']),
-        estado: a.enum(['PROGRAMADA', 'DENTRO', 'SALIO', 'CANCELADA']),
+        // POR_AUTORIZAR: llegó sin pase y la caseta pidió permiso al residente → AUTORIZADA (puede entrar) o RECHAZADA
+        estado: a.enum(['PROGRAMADA', 'POR_AUTORIZAR', 'AUTORIZADA', 'RECHAZADA', 'DENTRO', 'SALIO', 'CANCELADA']),
         entradaEn: a.datetime(),
         salidaEn: a.datetime(),
         registradoPor: a.string(),
         notas: a.string(),
+        // Llega en auto; al entrar ocupa un lugar de estacionamiento de visitas (ocupaLugar) hasta que sale
+        enAuto: a.boolean(),
+        ocupaLugar: a.boolean(),
+        // Solicitud de acceso sin pase: quién la pidió en caseta y quién respondió (residente o caseta por llamada)
+        solicitadoPor: a.string(),
+        solicitadoEn: a.datetime(),
+        respuestaPor: a.string(),
+        respuestaEn: a.datetime(),
+        respuestaVia: a.string(), // RESIDENTE | LLAMADA
+        respuestaNota: a.string(),
       })
       .secondaryIndexes((i) => [
         i('condominioId').name('byCondominio').queryField('visitasPorCondominio'),
         i('unidadId').name('byUnidad').queryField('visitasPorUnidad'),
         i('codigo').name('byCodigo').queryField('visitasPorCodigo'),
       ])
+      .authorization(admin),
+
+    // Registro de vigilancia: cambio de turno con foto del guardia en caseta y de la caseta limpia, equipo entregado y
+    // notas. No se edita: solo se agregan notas [{ texto, en, por }].
+    TurnoVigilancia: a
+      .model({
+        condominioId: a.id().required(),
+        entra: a.string().required(),
+        sale: a.string().required(),
+        registradoPor: a.string(),
+        registradoId: a.string(),
+        fotoGuardiaPath: a.string().required(),
+        fotoCasetaPath: a.string().required(),
+        casetaLimpia: a.boolean(),
+        equipo: a.string().array(),
+        notas: a.json(),
+        visitasDentro: a.integer(),
+        lugaresOcupados: a.integer(),
+      })
+      .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('turnosPorCondominio')])
       .authorization(admin),
 
     // Notificaciones para una unidad (alertas de caseta, pagos validados, reservas, etc.)
@@ -339,6 +374,7 @@ const schema = a
         tipo: a.string(),
         titulo: a.string().required(),
         texto: a.string(),
+        imagen: a.string(), // ruta pública de una imagen (p. ej. /servicios/basura.jpg en el aviso de servicios)
         leido: a.boolean(),
       })
       .secondaryIndexes((i) => [i('unidadId').name('byUnidad').queryField('avisosPorUnidad')])

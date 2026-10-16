@@ -13,6 +13,8 @@ import { TipoIngreso } from './FinanzasAdmin';
 type Cargo = Schema['Cargo']['type'];
 type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
 
+// Servicios que entran al condominio; la caseta avisa a todos los residentes cuando llegan.
+const SERVICIOS_SUGERIDOS = ['Basura', 'Gas', 'Agua (pipa)', 'Mantenimiento', 'Administración', 'Rondín de supervisión', 'Jardinería'];
 const TIPOS = ['Condominio horizontal', 'Condominio vertical (edificio)', 'Fraccionamiento cerrado', 'Uso mixto / otro'];
 const nombreTipoUnidad = (t?: string | null) => (t === 'DEPARTAMENTO' ? 'Departamentos' : t === 'CASA' ? 'Casas' : 'Sin definir');
 
@@ -161,6 +163,8 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
     tipoUnidad: c.tipoUnidad ?? '',
     direccion: c.direccion ?? '',
     telefonoCaseta: c.telefonoCaseta ?? '',
+    estacionamientoVisitas: c.estacionamientoVisitas ? String(c.estacionamientoVisitas) : '',
+    serviciosCondominio: (c.serviciosCondominio ?? []).filter(Boolean) as string[],
     cuotaMensual: c.cuotaMensual != null ? String(c.cuotaMensual) : '',
     diaVencimiento: String(c.diaVencimiento ?? 10),
     recargoActivo: !!c.recargoActivo,
@@ -186,7 +190,15 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    const general = { nombre: f.nombre.trim(), tipo: f.tipo, tipoUnidad: f.tipoUnidad, direccion: f.direccion, telefonoCaseta: f.telefonoCaseta };
+    const general = {
+      nombre: f.nombre.trim(),
+      tipo: f.tipo,
+      tipoUnidad: f.tipoUnidad,
+      direccion: f.direccion,
+      telefonoCaseta: f.telefonoCaseta,
+      estacionamientoVisitas: f.estacionamientoVisitas === '' ? null : Math.max(0, Math.floor(Number(f.estacionamientoVisitas))),
+      serviciosCondominio: f.serviciosCondominio,
+    };
     const pago = {
       cuotaMensual: f.cuotaMensual === '' ? null : Number(f.cuotaMensual),
       diaVencimiento: Number(f.diaVencimiento) || 10,
@@ -257,10 +269,17 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
               <Field label="Teléfono de caseta">
                 <input type="tel" maxLength={20} value={f.telefonoCaseta} onChange={set('telefonoCaseta')} disabled={!puedeGeneral} />
               </Field>
+              <Field
+                label="Lugares de estacionamiento para visitas"
+                hint="La caseta ve cuántos quedan libres: cada visita en auto ocupa uno al entrar y lo libera al salir. Déjalo vacío si no se lleva el control."
+              >
+                <input type="number" min="0" max="999" step="1" value={f.estacionamientoVisitas} onChange={set('estacionamientoVisitas')} disabled={!puedeGeneral} placeholder="Ej. 5" />
+              </Field>
             </div>
             <Field label="Dirección">
               <textarea rows={2} maxLength={300} value={f.direccion} onChange={set('direccion')} disabled={!puedeGeneral} placeholder="Calle, número, colonia, municipio, estado, C.P." />
             </Field>
+            <ServiciosCondominio valor={f.serviciosCondominio} onChange={(serviciosCondominio) => setF({ ...f, serviciosCondominio })} disabled={!puedeGeneral} />
           </div>
         </section>
       )}
@@ -491,5 +510,55 @@ function NuevaExtraordinaria({ onClose, onDone }: { onClose: () => void; onDone:
         </button>
       </form>
     </Modal>
+  );
+}
+
+/** Servicios del condominio: se agregan de la lista (o uno propio) y se quitan con la ×. */
+function ServiciosCondominio({ valor, onChange, disabled }: { valor: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  const [elegido, setElegido] = useState('');
+  const [otro, setOtro] = useState('');
+  const disponibles = SERVICIOS_SUGERIDOS.filter((x) => !valor.includes(x));
+  const agregar = () => {
+    const nuevo = (elegido === '__otro' ? otro : elegido).trim();
+    if (!nuevo || valor.some((x) => x.toLowerCase() === nuevo.toLowerCase())) return;
+    onChange([...valor, nuevo]);
+    setElegido('');
+    setOtro('');
+  };
+  return (
+    <Field label="Servicios del condominio" hint="La caseta avisa a todos los residentes cuando entra uno de estos servicios (botón «Aviso de servicios»).">
+      <div className="servicios-chips">
+        {valor.length ? (
+          valor.map((x) => (
+            <span key={x} className="acceso-chip">
+              {x}
+              {!disabled && (
+                <button type="button" className="chip-x" aria-label={`Quitar ${x}`} onClick={() => onChange(valor.filter((y) => y !== x))}>
+                  ×
+                </button>
+              )}
+            </span>
+          ))
+        ) : (
+          <span className="small muted">Sin servicios configurados.</span>
+        )}
+      </div>
+      {!disabled && (
+        <div className="servicios-agregar">
+          <select value={elegido} onChange={(e) => setElegido(e.target.value)}>
+            <option value="">Agregar servicio…</option>
+            {disponibles.map((x) => (
+              <option key={x}>{x}</option>
+            ))}
+            <option value="__otro">Otro…</option>
+          </select>
+          {elegido === '__otro' && <input maxLength={40} value={otro} onChange={(e) => setOtro(e.target.value)} placeholder="Ej. Fumigación" />}
+          <button type="button" className="btn-app sm secondary" disabled={!elegido || (elegido === '__otro' && !otro.trim())} onClick={agregar}>
+            <Icon name="plus" />
+            Agregar
+          </button>
+        </div>
+      )}
+    </Field>
   );
 }

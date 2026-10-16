@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { portal } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, etiquetaEstado, fecha, fechaHora, hoy, useAction, useLoad } from '../ui';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, etiquetaEstado, fecha, fechaHora, hoy, useAction, useLoad, usePoll } from '../ui';
 import type { ModProps } from './PortalApp';
 
 export type Visita = {
@@ -18,6 +18,15 @@ export type Visita = {
   salidaEn?: string;
   notas?: string;
   vigente?: boolean;
+  enAuto?: boolean;
+  ocupaLugar?: boolean;
+  solicitadoPor?: string;
+  solicitadoEn?: string;
+  respuestaPor?: string;
+  respuestaEn?: string;
+  respuestaVia?: string;
+  respuestaNota?: string;
+  createdAt?: string;
 };
 
 const TIPOS: [string, string][] = [
@@ -32,14 +41,22 @@ export function Visitas({ perfil }: ModProps) {
   const [nueva, setNueva] = useState(false);
   const [pase, setPase] = useState<Visita | null>(null);
   const [filtro, setFiltro] = useState<'activas' | 'historial'>('activas');
-  const { run } = useAction();
+  const { run, busy } = useAction();
+  // Alguien en caseta esperando que el residente autorice su acceso
+  const porAutorizar = (data ?? []).filter((v) => v.estado === 'POR_AUTORIZAR');
+  usePoll(() => reload(true), 15000);
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
   const hoyStr = hoy();
   const vigenteOFutura = (v: Visita) => v.estado !== 'CANCELADA' && v.estado !== 'DENTRO' && !!v.codigo && (v.fechaFin || v.fecha) >= hoyStr && (v.estado === 'PROGRAMADA' || !!v.vigente);
-  const activas = data!.filter((v) => v.estado === 'DENTRO' || vigenteOFutura(v));
-  const lista = filtro === 'activas' ? activas : data!.filter((v) => !activas.includes(v));
+  const activas = data!.filter((v) => v.estado === 'DENTRO' || v.estado === 'AUTORIZADA' || vigenteOFutura(v));
+  const lista = (filtro === 'activas' ? activas : data!.filter((v) => !activas.includes(v))).filter((v) => v.estado !== 'POR_AUTORIZAR');
+  const responder = (v: Visita, autorizar: boolean) => {
+    const nota = autorizar ? '' : prompt('Motivo (opcional, lo verá la caseta):');
+    if (nota === null) return;
+    run(() => portal('visitas.responder', { visitaId: v.id, autorizar, nota }).then(() => reload(true)), autorizar ? 'Acceso autorizado; la caseta ya puede dejarlo pasar' : 'Acceso rechazado; se avisó a la caseta');
+  };
 
   const cancelar = (v: Visita) =>
     confirm(`¿Cancelar el pase de ${v.nombre}?`) &&
@@ -53,6 +70,35 @@ export function Visitas({ perfil }: ModProps) {
           Nuevo pase
         </button>
       </PageHead>
+
+      {porAutorizar.map((v) => (
+        <section key={v.id} className="panel acceso-pide">
+          <div className="acceso-pide-cab">
+            <Icon name="shield" />
+            <div>
+              <strong>Alguien pide acceso en caseta</strong>
+              <div className="small muted">{fechaHora(v.solicitadoEn ?? v.createdAt)}</div>
+            </div>
+          </div>
+          <p style={{ margin: '10px 0 4px', fontSize: '1.1rem' }}>
+            <strong>{v.nombre}</strong> · {TIPOS.find((t) => t[0] === v.tipo)?.[1].split(' (')[0]}
+          </p>
+          <p className="small" style={{ margin: 0 }}>
+            {v.enAuto ? `Llega en auto · placas ${v.placas ?? ''}` : 'Llega a pie'}
+            {v.solicitadoPor && ` · registrado por ${v.solicitadoPor}`}
+          </p>
+          {v.notas && <p className="small pre" style={{ margin: '6px 0 0' }}>{v.notas}</p>}
+          <div className="row-actions" style={{ marginTop: 12 }}>
+            <button className="btn-app" disabled={busy} onClick={() => responder(v, true)}>
+              <Icon name="check" />
+              Autorizar acceso
+            </button>
+            <button className="btn-app danger" disabled={busy} onClick={() => responder(v, false)}>
+              Rechazar
+            </button>
+          </div>
+        </section>
+      ))}
 
       <Seg value={filtro} onChange={setFiltro} options={[['activas', `Vigentes (${activas.length})`], ['historial', 'Historial']]} />
 
@@ -69,9 +115,16 @@ export function Visitas({ perfil }: ModProps) {
                   <div className="list-sub">
                     {TIPOS.find((t) => t[0] === v.tipo)?.[1].split(' (')[0]} · {fecha(v.fecha)}
                     {v.fechaFin && ` al ${fecha(v.fechaFin)}`}
+                    {v.enAuto && ' · en auto'}
                     {v.placas && ` · ${v.placas}`}
                     {v.origen === 'CASETA' && ' · Registrada en caseta'}
                   </div>
+                  {v.respuestaPor && (v.estado === 'AUTORIZADA' || v.estado === 'RECHAZADA' || v.respuestaVia === 'LLAMADA') && (
+                    <div className="list-sub">
+                      {v.estado === 'RECHAZADA' ? 'Rechazado' : 'Autorizado'} por {v.respuestaPor}
+                      {v.respuestaVia === 'LLAMADA' && ' (por llamada a caseta)'}
+                    </div>
+                  )}
                   {(v.entradaEn || v.salidaEn) && (
                     <div className="list-sub">
                       {v.entradaEn && `Entrada ${fechaHora(v.entradaEn)}`} {v.salidaEn && `· Salida ${fechaHora(v.salidaEn)}`}
@@ -116,6 +169,7 @@ export function Visitas({ perfil }: ModProps) {
 
 function NuevaVisita({ onClose, onDone }: { onClose: () => void; onDone: (v: Visita) => void }) {
   const [f, setF] = useState({ tipo: 'VISITA', nombre: '', placas: '', fecha: hoy(), fechaFin: '', notas: '' });
+  const [enAuto, setEnAuto] = useState(false);
   const [varios, setVarios] = useState(false);
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -125,7 +179,7 @@ function NuevaVisita({ onClose, onDone }: { onClose: () => void; onDone: (v: Vis
     e.preventDefault();
     let v: Visita | undefined;
     const okk = await run(async () => {
-      v = await portal<Visita>('visitas.crear', { ...f, fechaFin: varios ? f.fechaFin : '' });
+      v = await portal<Visita>('visitas.crear', { ...f, placas: enAuto ? f.placas : '', enAuto, fechaFin: varios ? f.fechaFin : '' });
     }, 'Pase generado');
     if (okk && v) onDone(v);
   }
@@ -145,14 +199,18 @@ function NuevaVisita({ onClose, onDone }: { onClose: () => void; onDone: (v: Vis
         <Field label="Nombre de la visita o empresa">
           <input required maxLength={120} value={f.nombre} onChange={set('nombre')} />
         </Field>
-        <div className="form-2">
-          <Field label="Fecha">
-            <input required type="date" min={hoy()} value={f.fecha} onChange={set('fecha')} />
+        <Field label="Fecha">
+          <input required type="date" min={hoy()} value={f.fecha} onChange={set('fecha')} />
+        </Field>
+        <label className="check">
+          <input type="checkbox" checked={enAuto} onChange={(e) => setEnAuto(e.target.checked)} />
+          Mi visita llegará en auto (ocupa un lugar de estacionamiento de visitas)
+        </label>
+        {enAuto && (
+          <Field label="Placas del auto">
+            <input required maxLength={20} value={f.placas} onChange={set('placas')} style={{ textTransform: 'uppercase' }} placeholder="Ej. ABC-123-D" />
           </Field>
-          <Field label="Placas (opcional)">
-            <input maxLength={20} value={f.placas} onChange={set('placas')} style={{ textTransform: 'uppercase' }} />
-          </Field>
-        </div>
+        )}
         <label className="check">
           <input type="checkbox" checked={varios} onChange={(e) => setVarios(e.target.checked)} />
           Acceso por varios días (personal de servicio, obra…)

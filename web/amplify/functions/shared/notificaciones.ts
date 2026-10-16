@@ -15,7 +15,10 @@ export const CATEGORIAS_RESIDENTE: Categoria[] = [
   { key: 'chat', label: 'Mensajes', desc: 'Respuestas de la administración o de la caseta en el chat.' },
 ];
 
-export const CATEGORIAS_VIGILANTE: Categoria[] = [{ key: 'chat', label: 'Mensajes de residentes', desc: 'Un residente escribe al chat de caseta.' }];
+export const CATEGORIAS_VIGILANTE: Categoria[] = [
+  { key: 'chat', label: 'Mensajes de residentes', desc: 'Un residente escribe al chat de caseta.' },
+  { key: 'accesos', label: 'Respuestas de acceso', desc: 'Un residente autoriza o rechaza a alguien que llegó sin pase.' },
+];
 
 export const CATEGORIAS_ADMIN: (Categoria & { seccion: string; nivel: 'ver' | 'editar'; extra?: string })[] = [
   { key: 'pagos', label: 'Comprobantes por aprobar', desc: 'Un residente sube un comprobante de pago.', seccion: 'finanzas', nivel: 'ver', extra: 'finanzas.validarPagos' },
@@ -32,6 +35,8 @@ export function categoriaDeAviso(tipo?: string | null): string {
       return 'pagos';
     case 'VISITA':
     case 'CASETA':
+    case 'ACCESO':
+    case 'SERVICIO':
       return 'caseta';
     case 'INCIDENTE':
     case 'RESERVA':

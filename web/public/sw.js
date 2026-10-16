@@ -18,6 +18,8 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
+      // Imagen grande (aviso de servicios): Android la muestra debajo del texto
+      ...(data.image ? { image: data.image } : {}),
       tag: data.tag,
       // En silencio: sin sonido ni vibración (preferencia del usuario); tampoco vuelve a sonar al reemplazar otra.
       silent: !!data.silent,

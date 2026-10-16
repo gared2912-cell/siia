@@ -26,7 +26,7 @@ export type PerfilResp = {
     unidadSolicitada?: string;
     nota?: string;
   };
-  condominio?: { id: string; nombre: string; modulos: string[]; datosPago?: string; telefonoCaseta?: string } | null;
+  condominio?: { id: string; nombre: string; modulos: string[]; datosPago?: string; telefonoCaseta?: string; serviciosCondominio?: string[] } | null;
   unidad?: { id: string; etiqueta: string; cuota?: number } | null;
 };
 

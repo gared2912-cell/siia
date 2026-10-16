@@ -81,8 +81,11 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviarAResidentes(r.condominioId, r.unidadId, categoriaDeAviso(r.tipo), {
         title: r.titulo,
         body: r.texto ? corto(r.texto) : undefined,
-        url: '/portal/#inicio',
+        // Una solicitud de acceso abre Visitas para autorizarla ahí mismo
+        url: r.tipo === 'ACCESO' ? '/portal/#visitas' : '/portal/#inicio',
         tag: `aviso-${r.id}`,
+        // Imagen grande en la notificación (aviso de servicios); Android la muestra, iPhone solo el texto
+        ...(r.imagen ? { image: r.imagen } : {}),
       });
 
     case 'Mensaje': {

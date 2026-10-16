@@ -1642,3 +1642,200 @@ table.tbl {
   font-style: normal;
   font-weight: 600;
 }
+
+/* Caseta: lugares de estacionamiento de visitas libres */
+.lugares {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.95rem;
+  width: fit-content;
+  max-width: 100%;
+}
+.lugares strong {
+  font-size: 1.15rem;
+}
+.lugares svg {
+  width: 20px;
+  height: 20px;
+}
+.lugares-p {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: currentColor;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+.lugares-p {
+  color: inherit;
+}
+.lugares.ok {
+  background: #e6f4ec;
+  color: #1e7d4f;
+}
+.lugares.warn {
+  background: #fff4d6;
+  color: #8a6100;
+}
+.lugares.mal {
+  background: #fdecea;
+  color: #b42318;
+}
+.lugares .lugares-p {
+  background: none;
+  border: 2px solid currentColor;
+}
+
+/* Caseta: solicitudes de acceso */
+.solicitud.autorizada {
+  background: #f1faf4;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.solicitud.rechazada {
+  opacity: 0.75;
+}
+@keyframes parpadeo {
+  50% {
+    opacity: 0.25;
+  }
+}
+.pill-punto.parpadea {
+  animation: parpadeo 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-punto.parpadea {
+    animation: none;
+  }
+}
+
+/* Portal: alguien pide acceso en caseta */
+.acceso-pide {
+  border: 2px solid #f0c24b;
+  background: #fffaf0;
+}
+.acceso-pide-cab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8a6100;
+}
+.acceso-pide-cab svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* Registro de vigilancia: tarjeta de cambio de turno */
+.turno {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+.turno-cab {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.turno-fotos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 170px));
+  gap: 12px;
+}
+.turno-fotos figure {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+.turno-fotos .chat-foto {
+  width: 100%;
+}
+.turno-fotos .chat-foto img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+.turno-notas {
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+}
+.turno-notas ul {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.turno-notas li {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+/* Caseta: barra superior (lugares de estacionamiento y aviso de servicios) */
+.caseta-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.caseta-barra:empty {
+  display: none;
+}
+.btn-app.btn-azul {
+  background: #1d5fd1;
+  border-color: #1d5fd1;
+  color: #fff;
+}
+.btn-app.btn-azul:hover:not(:disabled) {
+  background: #174da9;
+  border-color: #174da9;
+}
+/* Servicios del condominio (Datos generales) */
+.servicios-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.chip-x {
+  margin-left: 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.servicios-agregar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.servicios-agregar select,
+.servicios-agregar input {
+  flex: 1 1 180px;
+}
+
+/* Imagen de un aviso (aviso de servicios) en la campana */
+.aviso-imagen {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 2 / 1;
+  object-fit: cover;
+  border-radius: 10px;
+  margin: 6px 0;
+}

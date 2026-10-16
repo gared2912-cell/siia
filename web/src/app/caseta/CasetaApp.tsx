@@ -5,16 +5,35 @@ import { useEffect, useRef, useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Shell, useHashNav, type NavItem } from '../Shell';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, PageHead, etiquetaEstado, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, etiquetaEstado, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import type { PerfilResp } from '../portal/PortalApp';
 import type { Visita } from '../portal/Visitas';
 import { useInsigniaApp } from '../AppMovil';
 import { comprimirImagen, mensajeErrorCamara, pedirCamara } from '../camara';
+import { RegistroVigilancia } from './Vigilancia';
 
-type V = Visita & { unidad: string };
+type V = Visita & { unidad: string; estacionamiento?: Estacionamiento };
+
+/** Lugares de estacionamiento de visitas libres (siempre visible en la caseta si el condominio lo configuró). */
+function Lugares({ e }: { e?: Estacionamiento }) {
+  if (!e?.total) return null;
+  const clase = !e.libres ? 'mal' : e.libres <= Math.max(1, Math.round(e.total * 0.2)) ? 'warn' : 'ok';
+  return (
+    <div className={`lugares ${clase}`} role="status" aria-live="polite" title="Estacionamiento de visitas">
+      <span className="lugares-p">P</span>
+      <span>
+        <strong>{e.libres}</strong> de {e.total} lugares libres
+      </span>
+      <Icon name="car" />
+    </div>
+  );
+}
 type Hilo = { unidadId: string; unidad: string; ultimo: Msg };
+type Estacionamiento = { total: number; ocupados: number; libres: number };
 type Panel = {
   hoy: string;
+  estacionamiento?: Estacionamiento;
+  solicitudes?: V[];
   dentro: V[];
   esperadas: V[];
   bitacora: V[];
@@ -26,7 +45,10 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   const mods = perfil.condominio!.modulos ?? [];
   const [cur, go] = useHashNav('escanear');
   const panel = useLoad(() => portal<Panel>('caseta.panel'), []);
-  usePoll(() => panel.reload(true), 30000, mods.includes('visitas'));
+  // Con solicitudes de acceso esperando respuesta del residente se actualiza más seguido
+  const esperando = (panel.data?.solicitudes ?? []).some((v) => v.estado === 'POR_AUTORIZAR');
+  usePoll(() => panel.reload(true), esperando ? 6000 : 30000, mods.includes('visitas'));
+  const porAtender = (panel.data?.solicitudes ?? []).filter((v) => v.estado === 'AUTORIZADA').length;
   // Conversaciones cuyo último mensaje es de un residente (menú Chat e icono de la app)
   const conChat = mods.includes('visitas') && mods.includes('chat');
   const hilos = useLoad(() => (conChat ? portal<Hilo[]>('caseta.hilos') : Promise.resolve([] as Hilo[])), [conChat]);
@@ -42,9 +64,10 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
     );
 
   const nav: NavItem[] = [
-    { key: 'escanear', label: 'Escanear pase', icon: 'qr' },
+    { key: 'escanear', label: 'Escanear pase', icon: 'qr', count: porAtender },
     { key: 'hoy', label: 'Hoy', icon: 'calendar', count: panel.data?.dentro.length },
     { key: 'llegada', label: 'Registrar llegada', icon: 'package' },
+    { key: 'vigilancia', label: 'Registro de vigilancia', icon: 'shield' },
     ...(mods.includes('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: porResponder }] : []),
   ];
   const actual = nav.some((n) => n.key === cur) ? cur : 'escanear';
@@ -58,9 +81,27 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
           {panel.data.extraviadas.map((m) => `${m.nombre} (${[m.especie, m.color].filter(Boolean).join(', ')} · ${m.unidad})`).join(' · ')}
         </div>
       )}
-      {actual === 'escanear' && <Escanear onCambio={() => panel.reload(true)} />}
+      <div className="caseta-barra">
+        <Lugares e={panel.data?.estacionamiento} />
+        {!!perfil.condominio!.serviciosCondominio?.length && <AvisoServicios servicios={perfil.condominio!.serviciosCondominio!} />}
+      </div>
+      {actual === 'escanear' && (
+        <>
+          <Solicitudes lista={panel.data?.solicitudes ?? []} est={panel.data?.estacionamiento} onCambio={() => panel.reload(true)} />
+          <Escanear onCambio={() => panel.reload(true)} />
+        </>
+      )}
       {actual === 'hoy' && (panel.data ? <Hoy panel={panel.data} onCambio={() => panel.reload(true)} /> : <Loading />)}
-      {actual === 'llegada' && (panel.data ? <Llegada unidades={panel.data.unidades} onCambio={() => panel.reload(true)} /> : <Loading />)}
+      {actual === 'llegada' &&
+        (panel.data ? (
+          <>
+            <Llegada unidades={panel.data.unidades} onCambio={() => panel.reload(true)} />
+            <Solicitudes lista={panel.data.solicitudes ?? []} est={panel.data.estacionamiento} onCambio={() => panel.reload(true)} />
+          </>
+        ) : (
+          <Loading />
+        ))}
+      {actual === 'vigilancia' && <RegistroVigilancia miNombre={perfil.perfil?.nombre ?? ''} />}
       {actual === 'chat' && <ChatCaseta unidades={panel.data?.unidades ?? []} hilos={hilos} />}
     </Shell>
   );
@@ -132,13 +173,24 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
       }
     });
 
-  const entrada = () =>
+  const entrada = (sinLugar = false) =>
     run(async () => {
-      await portal('caseta.entrada', { visitaId: visita!.id });
+      const r = await portal<V>('caseta.entrada', { visitaId: visita!.id, sinLugar });
       setVisita(null);
       setCodigo('');
       onCambio();
-    }, 'Entrada registrada; se avisó al residente.');
+      return r;
+    }, visita?.enAuto && !sinLugar && visita.estacionamiento?.total ? 'Entrada registrada: ocupa un lugar de estacionamiento.' : 'Entrada registrada; se avisó al residente.');
+  // Al volver a escanear el QR de quien está dentro: salida (y se libera su lugar)
+  const salida = () =>
+    run(async () => {
+      await portal('caseta.salida', { visitaId: visita!.id });
+      setVisita(null);
+      setCodigo('');
+      onCambio();
+    }, visita?.ocupaLugar ? 'Salida registrada: se liberó un lugar de estacionamiento.' : 'Salida registrada.');
+  const est = visita?.estacionamiento;
+  const sinLugares = !!(visita?.enAuto && est?.total && est.libres === 0);
 
   return (
     <div className="stack">
@@ -202,16 +254,34 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
             Destino: <strong>{visita.unidad}</strong> · {etiquetaEstado(visita.tipo)}
             {visita.placas && ` · Placas ${visita.placas}`}
           </p>
+          {visita.enAuto && !!est?.total && visita.estado !== 'DENTRO' && (
+            <div className={`alert small ${sinLugares ? 'error' : ''}`}>
+              <Icon name="car" /> Llega en auto.{' '}
+              {sinLugares ? 'No hay lugares de estacionamiento de visitas libres.' : `Ocupará un lugar: quedarán ${est.libres - 1} de ${est.total}.`}
+            </div>
+          )}
           <p className="small muted">
             Vigencia: {fecha(visita.fecha)}
             {visita.fechaFin && ` al ${fecha(visita.fechaFin)}`} · Estado: {etiquetaEstado(visita.estado)}
           </p>
           {visita.notas && <div className="alert small">{visita.notas}</div>}
-          {visita.vigente && (
-            <button className="btn-app" style={{ marginTop: 12 }} disabled={busy} onClick={entrada}>
-              <Icon name="check" />
-              Registrar entrada
+          {visita.estado === 'DENTRO' ? (
+            <button className="btn-app" style={{ marginTop: 12 }} disabled={busy} onClick={salida}>
+              <Icon name="logout" />
+              Registrar salida{visita.ocupaLugar ? ' y liberar lugar' : ''}
             </button>
+          ) : (
+            visita.vigente &&
+            (sinLugares ? (
+              <button className="btn-app secondary" style={{ marginTop: 12 }} disabled={busy} onClick={() => entrada(true)}>
+                Registrar entrada sin lugar de estacionamiento
+              </button>
+            ) : (
+              <button className="btn-app" style={{ marginTop: 12 }} disabled={busy} onClick={() => entrada()}>
+                <Icon name="check" />
+                Registrar entrada
+              </button>
+            ))
           )}
         </section>
       )}
@@ -228,7 +298,8 @@ function Hoy({ panel, onCambio }: { panel: Panel; onCambio: () => void }) {
       <div className="list-main">
         <strong>{v.nombre}</strong> <Badge estado={v.estado} />
         <div className="list-sub">
-          {v.unidad} · {etiquetaEstado(v.tipo)} {v.placas && `· ${v.placas}`} {v.entradaEn && `· Entrada ${fechaHora(v.entradaEn)}`}{' '}
+          {v.unidad} · {etiquetaEstado(v.tipo)} {v.ocupaLugar ? '· 🚗 ocupa lugar' : v.enAuto ? '· en auto' : ''} {v.placas && `· ${v.placas}`}{' '}
+          {v.entradaEn && `· Entrada ${fechaHora(v.entradaEn)}`}{' '}
           {v.salidaEn && `· Salida ${fechaHora(v.salidaEn)}`}
         </div>
       </div>
@@ -287,26 +358,36 @@ function Hoy({ panel, onCambio }: { panel: Panel; onCambio: () => void }) {
 
 function Llegada({ unidades, onCambio }: { unidades: Panel['unidades']; onCambio: () => void }) {
   const [modo, setModo] = useState<'llegada' | 'alerta'>('llegada');
-  const [f, setF] = useState({ unidadId: '', tipo: 'PAQUETERIA', nombre: '', placas: '', notas: '', titulo: '', texto: '' });
+  const [f, setF] = useState({ unidadId: '', tipo: 'VISITA', nombre: '', placas: '', notas: '', titulo: '', texto: '' });
+  const [enAuto, setEnAuto] = useState(false);
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setF({ ...f, [k]: e.target.value });
+  const paqueteria = f.tipo === 'PAQUETERIA';
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     const okk =
       modo === 'llegada'
-        ? await run(() => portal('caseta.registrar', f), 'Registrado; se alertó al residente.')
+        ? await run(
+            () => portal('caseta.registrar', { ...f, enAuto: !paqueteria && enAuto, placas: !paqueteria && enAuto ? f.placas : '' }),
+            paqueteria ? 'Paquetería registrada; se avisó al residente.' : 'Solicitud enviada al residente. Espera su respuesta en «Solicitudes de acceso».',
+          )
         : await run(() => portal('caseta.alertar', { unidadId: f.unidadId, titulo: f.titulo, texto: f.texto }), 'Alerta enviada');
     if (okk) {
       setF({ ...f, nombre: '', placas: '', notas: '', titulo: '', texto: '' });
+      setEnAuto(false);
       onCambio();
     }
   }
 
   return (
     <div className="stack">
-      <PageHead icon="package" title="Registrar llegada" sub="Visitas sin pase, servicios o paquetería. El residente recibe una alerta en su portal." />
+      <PageHead
+        icon="package"
+        title="Registrar llegada"
+        sub="Sin pase QR: a una visita, servicio o proveedor se le pide permiso al residente; la paquetería solo se avisa."
+      />
       <div className="seg" role="group">
         <button type="button" aria-pressed={modo === 'llegada'} onClick={() => setModo('llegada')}>
           Llegada
@@ -328,24 +409,32 @@ function Llegada({ unidades, onCambio }: { unidades: Panel['unidades']; onCambio
         </Field>
         {modo === 'llegada' ? (
           <>
-            <div className="form-2">
-              <Field label="Tipo">
-                <select value={f.tipo} onChange={set('tipo')}>
-                  <option value="PAQUETERIA">Paquetería</option>
-                  <option value="VISITA">Visita sin pase</option>
-                  <option value="SERVICIO">Servicio</option>
-                  <option value="PROVEEDOR">Proveedor</option>
-                </select>
-              </Field>
-              <Field label="Placas (opcional)">
-                <input maxLength={20} value={f.placas} onChange={set('placas')} />
-              </Field>
-            </div>
-            <Field label={f.tipo === 'PAQUETERIA' ? 'Paquetería / remitente' : 'Nombre'}>
+            <Field label="Tipo">
+              <select value={f.tipo} onChange={set('tipo')}>
+                <option value="VISITA">Visita sin pase</option>
+                <option value="SERVICIO">Servicio</option>
+                <option value="PROVEEDOR">Proveedor</option>
+                <option value="PAQUETERIA">Paquetería</option>
+              </select>
+            </Field>
+            <Field label={paqueteria ? 'Paquetería / remitente' : 'Nombre completo'}>
               <input required maxLength={120} value={f.nombre} onChange={set('nombre')} />
             </Field>
-            <Field label="Notas (opcional)">
-              <textarea maxLength={500} value={f.notas} onChange={set('notas')} />
+            {!paqueteria && (
+              <>
+                <label className="check">
+                  <input type="checkbox" checked={enAuto} onChange={(e) => setEnAuto(e.target.checked)} />
+                  Llega en auto
+                </label>
+                {enAuto && (
+                  <Field label="Placas">
+                    <input required maxLength={20} value={f.placas} onChange={set('placas')} style={{ textTransform: 'uppercase' }} />
+                  </Field>
+                )}
+              </>
+            )}
+            <Field label={paqueteria ? 'Notas (opcional)' : 'Motivo o notas (opcional)'}>
+              <textarea maxLength={500} value={f.notas} onChange={set('notas')} placeholder={paqueteria ? '' : 'Ej. Entrega de muebles, viene de parte de…'} />
             </Field>
           </>
         ) : (
@@ -360,10 +449,83 @@ function Llegada({ unidades, onCambio }: { unidades: Panel['unidades']; onCambio
         )}
         <button className="btn-app" disabled={busy}>
           <Icon name="bell" />
-          {modo === 'llegada' ? 'Registrar y alertar' : 'Enviar alerta'}
+          {modo === 'alerta' ? 'Enviar alerta' : paqueteria ? 'Registrar y avisar' : 'Pedir autorización al residente'}
         </button>
       </form>
     </div>
+  );
+}
+
+/** Llegadas sin pase del día: esperando al residente, autorizadas (registrar entrada) o rechazadas. */
+function Solicitudes({ lista, est, onCambio }: { lista: V[]; est?: Estacionamiento; onCambio: () => void }) {
+  const { run, busy } = useAction();
+  if (!lista.length) return null;
+  const sinLugares = (v: V) => !!(v.enAuto && est?.total && est.libres === 0);
+  const entrada = (v: V, sinLugar = false) =>
+    run(() => portal('caseta.entrada', { visitaId: v.id, sinLugar }).then(onCambio), `Entrada de ${v.nombre} registrada; se avisó al residente.`);
+  const llamada = (v: V) => {
+    const nota = prompt(`¿Con quién de ${v.unidad} hablaste por teléfono para autorizar a ${v.nombre}?`);
+    if (nota) run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'LLAMADA', nota }).then(onCambio), 'Acceso autorizado por llamada');
+  };
+  const cancelar = (v: V) =>
+    confirm(`¿Cancelar la solicitud de ${v.nombre}?`) && run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'CANCELAR' }).then(onCambio), 'Solicitud cancelada');
+  return (
+    <section className="panel">
+      <h2>Solicitudes de acceso</h2>
+      <ul className="list">
+        {lista.map((v) => (
+          <li key={v.id} className={`solicitud ${v.estado.toLowerCase()}`}>
+            <div className="list-main">
+              <strong>{v.nombre}</strong>{' '}
+              {v.estado === 'POR_AUTORIZAR' ? (
+                <span className="pill warn">
+                  <span className="pill-punto parpadea" />
+                  Esperando al residente
+                </span>
+              ) : v.estado === 'AUTORIZADA' ? (
+                <span className="pill ok">Autorizada{v.respuestaVia === 'LLAMADA' ? ' por llamada' : ''}</span>
+              ) : (
+                <span className="pill mal">Rechazada</span>
+              )}
+              <div className="list-sub">
+                {v.unidad} · {etiquetaEstado(v.tipo)} {v.enAuto ? `· 🚗 ${v.placas ?? ''}` : '· a pie'} · pidió {fechaHora(v.solicitadoEn ?? v.createdAt)}
+              </div>
+              {v.respuestaPor && v.estado !== 'POR_AUTORIZAR' && (
+                <div className="small muted">
+                  {v.estado === 'RECHAZADA' ? 'Rechazó' : 'Autorizó'}: {v.respuestaPor}
+                  {v.respuestaNota && ` · «${v.respuestaNota}»`}
+                </div>
+              )}
+              {v.estado === 'AUTORIZADA' && sinLugares(v) && <div className="small" style={{ color: 'var(--danger)' }}>No hay lugares de estacionamiento de visitas libres.</div>}
+            </div>
+            <div className="row-actions">
+              {v.estado === 'POR_AUTORIZAR' && (
+                <>
+                  <button className="btn-app sm secondary" disabled={busy} onClick={() => llamada(v)}>
+                    <Icon name="phone" />
+                    Autorizado por llamada
+                  </button>
+                  <button className="btn-app sm danger" disabled={busy} onClick={() => cancelar(v)}>
+                    Cancelar
+                  </button>
+                </>
+              )}
+              {v.estado === 'AUTORIZADA' &&
+                (sinLugares(v) ? (
+                  <button className="btn-app sm secondary" disabled={busy} onClick={() => entrada(v, true)}>
+                    Entrada sin lugar de estacionamiento
+                  </button>
+                ) : (
+                  <button className="btn-app sm" disabled={busy} onClick={() => entrada(v)}>
+                    <Icon name="check" />
+                    Registrar entrada
+                  </button>
+                ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -420,5 +582,58 @@ function ChatCaseta({ unidades, hilos }: { unidades: Panel['unidades']; hilos: {
         </section>
       </div>
     </div>
+  );
+}
+
+/** Botón azul: avisa a todos los residentes que acaba de entrar un servicio del condominio. */
+function AvisoServicios({ servicios }: { servicios: string[] }) {
+  const [abierto, setAbierto] = useState(false);
+  const [servicio, setServicio] = useState('');
+  const [nota, setNota] = useState('');
+  const { run, busy } = useAction();
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault();
+    if (!confirm(`¿Avisar a todos los residentes que acaba de entrar el servicio de ${servicio.toLowerCase()}?`)) return;
+    const okk = await run(async () => {
+      const r = await portal<{ enviados: number }>('caseta.servicio', { servicio, nota });
+      return r;
+    }, `Aviso enviado a todo el condominio: ${servicio}`);
+    if (okk) {
+      setAbierto(false);
+      setServicio('');
+      setNota('');
+    }
+  }
+  return (
+    <>
+      <button type="button" className="btn-app btn-azul" onClick={() => setAbierto(true)}>
+        <Icon name="megaphone" />
+        Aviso de servicios
+      </button>
+      {abierto && (
+        <Modal title="Aviso de servicios" onClose={() => setAbierto(false)}>
+          <form className="form" onSubmit={enviar}>
+            <p className="small muted" style={{ margin: 0 }}>
+              Todos los residentes reciben la notificación de que el servicio acaba de entrar al condominio.
+            </p>
+            <Field label="Servicio que entra">
+              <select required value={servicio} onChange={(e) => setServicio(e.target.value)}>
+                <option value="">Selecciona…</option>
+                {servicios.map((x) => (
+                  <option key={x}>{x}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Nota (opcional)">
+              <input maxLength={300} value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej. Saquen su basura en los próximos 15 minutos" />
+            </Field>
+            <button className="btn-app btn-azul" disabled={busy || !servicio}>
+              <Icon name="megaphone" />
+              {busy ? 'Enviando…' : 'Enviar'}
+            </button>
+          </form>
+        </Modal>
+      )}
+    </>
   );
 }

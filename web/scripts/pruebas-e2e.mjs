@@ -56,7 +56,7 @@ const apis = await new AppSyncClient({}).send(new ListGraphqlApisCommand({}));
 const api = apis.graphqlApis.find((a) => a.uris?.GRAPHQL === outputs.data.url);
 const SUFIJO_TABLA = `-${api.apiId}-NONE`;
 const T = (m) => `${m}${SUFIJO_TABLA}`;
-const MODELOS = ['Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual'];
+const MODELOS = ['Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia'];
 
 // ---------- utilidades ----------
 const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
@@ -829,8 +829,10 @@ try {
     await bloqueado(g1.portal('caseta.entrada', { visitaId: X.visita.id }));
     return 'el mismo pase no entra dos veces';
   });
-  await prueba('Salida registrada en la bitácora', async () => {
+  await prueba('Salida registrada en la bitácora y aviso al residente', async () => {
     await ok(g1.portal('caseta.salida', { visitaId: X.visita.id }));
+    const av = await hasta(() => ok(r1.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.titulo === 'Tu visita Juan Pérez salió'));
+    esperar(av.avisos.some((v) => v.titulo === 'Tu visita Juan Pérez salió'), 'sin aviso de salida');
     const p = await hasta(() => ok(g1.portal('caseta.panel')), (x) => x.bitacora.some((v) => v.id === X.visita.id && v.estado === 'SALIO'));
     esperar(p.bitacora.some((v) => v.id === X.visita.id && v.estado === 'SALIO'), 'no aparece en bitácora');
   });
@@ -846,10 +848,100 @@ try {
     const c = await ok(r2.portal('visitas.cancelar', { visitaId: v.id }));
     esperar(c.estado === 'CANCELADA', c.estado);
   });
+  await prueba('Estacionamiento de visitas: la visita en auto ocupa un lugar y lo libera al salir', async () => {
+    await ok(sa.db('Condominio', 'update', { input: { id: X.robles, estacionamientoVisitas: 1 } }));
+    await bloqueado(r1.portal('visitas.crear', { nombre: 'Sin placas', fecha: hoy, enAuto: true }));
+    const v = await ok(r1.portal('visitas.crear', { nombre: 'Visita en auto', fecha: hoy, enAuto: true, placas: 'xyz-987' }));
+    esperar(v.enAuto === true, JSON.stringify(v));
+    const val = await ok(g1.portal('caseta.validar', { codigo: v.codigo }));
+    esperar(val.estacionamiento?.total === 1 && val.estacionamiento.libres === 1, JSON.stringify(val.estacionamiento));
+    const e = await ok(g1.portal('caseta.entrada', { visitaId: v.id }));
+    esperar(e.ocupaLugar === true && e.estacionamiento.libres === 0, JSON.stringify(e.estacionamiento));
+    const p = await hasta(() => ok(g1.portal('caseta.panel')), (x) => x.estacionamiento.ocupados === 1);
+    esperar(p.estacionamiento.libres === 0 && p.estacionamiento.ocupados === 1, JSON.stringify(p.estacionamiento));
+    // Sin lugares: un segundo auto (sin pase, autorizado por el residente) solo entra «sin lugar»
+    const sol = await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[1], tipo: 'VISITA', nombre: 'Segundo auto', enAuto: true, placas: 'seg-001' }));
+    await ok(r2.portal('visitas.responder', { visitaId: sol.id, autorizar: true }));
+    await bloqueado(g1.portal('caseta.entrada', { visitaId: sol.id }));
+    const sin = await ok(g1.portal('caseta.entrada', { visitaId: sol.id, sinLugar: true }));
+    esperar(sin.ocupaLugar === false, JSON.stringify(sin));
+    const s = await ok(g1.portal('caseta.salida', { visitaId: v.id }));
+    esperar(s.estacionamiento.libres === 1, JSON.stringify(s.estacionamiento));
+    await ok(g1.portal('caseta.salida', { visitaId: sin.id }));
+    await ok(sa.db('Condominio', 'update', { input: { id: X.robles, estacionamientoVisitas: null } }));
+    return '1 lugar: ocupado al entrar, segundo auto sin lugar, liberado al salir';
+  });
+  await prueba('Llegada sin QR: la caseta pide permiso y el residente autoriza', async () => {
+    await bloqueado(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[0], tipo: 'VISITA', nombre: 'Sin placas', enAuto: true }));
+    const v = await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[0], tipo: 'VISITA', nombre: 'Pedro Sin Pase', notas: 'Viene a dejar documentos' }));
+    esperar(v.estado === 'POR_AUTORIZAR', v.estado);
+    await bloqueado(g1.portal('caseta.entrada', { visitaId: v.id }));
+    const a = await hasta(() => ok(r1.portal('inicio.avisos')), (x) => x.avisos.some((y) => y.titulo.includes('Pedro Sin Pase')));
+    esperar(a.avisos.some((y) => y.tipo === 'ACCESO' && y.titulo === 'Una visita pide acceso: Pedro Sin Pase'), 'sin aviso de solicitud');
+    await bloqueado(r2.portal('visitas.responder', { visitaId: v.id, autorizar: true }));
+    const r = await ok(r1.portal('visitas.responder', { visitaId: v.id, autorizar: true }));
+    esperar(r.estado === 'AUTORIZADA' && r.respuestaVia === 'RESIDENTE', JSON.stringify(r).slice(0, 160));
+    const p = await ok(g1.portal('caseta.panel'));
+    esperar(p.solicitudes.some((x) => x.id === v.id && x.estado === 'AUTORIZADA'), 'la caseta no ve la autorización');
+    await ok(g1.portal('caseta.entrada', { visitaId: v.id }));
+    await ok(g1.portal('caseta.salida', { visitaId: v.id }));
+    return 'pidió permiso, autorizó el residente, entró y salió';
+  });
+  await prueba('Llegada sin QR: rechazo del residente, autorización por llamada y cancelación', async () => {
+    const v1 = await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[0], tipo: 'SERVICIO', nombre: 'Vendedor' }));
+    const r1r = await ok(r1.portal('visitas.responder', { visitaId: v1.id, autorizar: false, nota: 'No lo conozco' }));
+    esperar(r1r.estado === 'RECHAZADA', r1r.estado);
+    await bloqueado(g1.portal('caseta.entrada', { visitaId: v1.id }));
+    await bloqueado(r1.portal('visitas.responder', { visitaId: v1.id, autorizar: true }));
+    const v2 = await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[0], tipo: 'PROVEEDOR', nombre: 'Técnico de gas' }));
+    await bloqueado(g1.portal('caseta.solicitud', { visitaId: v2.id, accion: 'LLAMADA' }));
+    const l = await ok(g1.portal('caseta.solicitud', { visitaId: v2.id, accion: 'LLAMADA', nota: 'Habló con la Sra. de Casa 1' }));
+    esperar(l.estado === 'AUTORIZADA' && l.respuestaVia === 'LLAMADA', JSON.stringify(l).slice(0, 160));
+    const v3 = await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[0], tipo: 'VISITA', nombre: 'Se fue' }));
+    const c = await ok(g1.portal('caseta.solicitud', { visitaId: v3.id, accion: 'CANCELAR' }));
+    esperar(c.estado === 'CANCELADA', c.estado);
+    return 'rechazada, autorizada por llamada y cancelada';
+  });
+  await prueba('Registro de vigilancia: cambio de turno con fotos y notas sin edición', async () => {
+    const f1 = await g1.subir('vigilancia', 'guardia.jpg', 'foto guardia', 'image/jpeg');
+    const f2 = await g1.subir('vigilancia', 'caseta.jpg', 'foto caseta', 'image/jpeg');
+    const base = { entra: 'Vigilante Noche', sale: 'Vigilante Día', fotoGuardiaPath: f1, fotoCasetaPath: f2, equipo: ['Radio', 'Llaves de caseta'], nota: 'Sin novedades' };
+    await bloqueado(g1.portal('vigilancia.cambioTurno', base));
+    await bloqueado(g1.portal('vigilancia.cambioTurno', { ...base, casetaLimpia: true, fotoCasetaPath: '' }));
+    const t = await ok(g1.portal('vigilancia.cambioTurno', { ...base, casetaLimpia: true }));
+    esperar(t.casetaLimpia && !t.fotoGuardiaPath && JSON.parse(t.notas).length === 1, JSON.stringify(t).slice(0, 160));
+    const n = await ok(g1.portal('vigilancia.nota', { turnoId: t.id, texto: 'Se fue la luz 10 minutos' }));
+    esperar(n.notas.length === 2 && n.notas[0].texto === 'Sin novedades', JSON.stringify(n));
+    const l = await ok(g1.portal('vigilancia.turnos'));
+    const mio = l.find((x) => x.id === t.id);
+    esperar(mio && (await (await fetch(mio.fotoGuardiaUrl)).text()) === 'foto guardia', 'no se ve la foto');
+    const adm = await ok(ag.db('TurnoVigilancia', 'turnosPorCondominio', { args: { condominioId: X.robles } }));
+    esperar(adm.some((x) => x.id === t.id && x.fotoCasetaUrl), 'la administración no lo ve');
+    await bloqueado(ag.db('TurnoVigilancia', 'update', { input: { id: t.id, entra: 'Otro' } }));
+    await bloqueado(r1.portal('vigilancia.turnos'));
+    return 'registrado, nota agregada, visible para la administración y sin edición';
+  });
   await prueba('Caseta registra paquetería sin pase y avisa a la unidad', async () => {
     await ok(g1.portal('caseta.registrar', { unidadId: X.unidadesRobles[1], tipo: 'PAQUETERIA', nombre: 'Amazon', notas: '2 cajas' }));
     const a = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.titulo.includes('paquetería')));
     esperar(a.avisos.some((v) => v.titulo === 'Tienes paquetería en caseta: Amazon'), 'sin aviso');
+  });
+  await prueba('Aviso de servicios: la caseta avisa a todo el condominio', async () => {
+    await ok(sa.db('Condominio', 'update', { input: { id: X.robles, serviciosCondominio: ['Basura', 'Gas', 'Rondín de supervisión'] } }));
+    await bloqueado(g1.portal('caseta.servicio', { servicio: 'Pizza' }));
+    await bloqueado(r1.portal('caseta.servicio', { servicio: 'Basura' }));
+    const r = await ok(g1.portal('caseta.servicio', { servicio: 'Basura', nota: 'Saquen su basura' }));
+    esperar(r.enviados === 8, JSON.stringify(r));
+    const titulo = 'Llegó el camión de la basura 🚪';
+    for (const s of [r1, r2]) {
+      const a = await hasta(() => ok(s.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.titulo === titulo));
+      esperar(a.avisos.some((v) => v.titulo === titulo && v.texto === 'Saquen su basura' && v.imagen === '/servicios/basura.jpg'), 'sin aviso de servicio con imagen');
+    }
+    const img = await fetch(`${new URL(outputs.data.url).origin.includes('appsync') ? 'https://staging.siia.casa' : ''}/servicios/basura.jpg`);
+    esperar(img.ok && img.headers.get('content-type')?.includes('image'), `imagen HTTP ${img.status}`);
+    const perfil = await ok(g1.portal('perfil'));
+    esperar((perfil.condominio?.serviciosCondominio ?? []).includes('Gas'), JSON.stringify(perfil.condominio));
+    return `${r.enviados} unidades avisadas`;
   });
   await prueba('Caseta envía alerta a una unidad', async () => {
     await ok(g1.portal('caseta.alertar', { unidadId: X.unidadesRobles[0], titulo: 'Dejaste las luces del auto encendidas' }));
@@ -926,11 +1018,11 @@ try {
     const keys = async (ses) => (await ok(api(ses)('notificaciones.estado'))).categorias.map((c) => c.key).join(',');
     const r = { residente: await keys(r1), vigilante: await keys(g1), contadora: await keys(ct), operacion: await keys(op), general: await keys(ag) };
     esperar(r.residente === 'pagos,caseta,comunicados,tramites,chat', `residente: ${r.residente}`);
-    esperar(r.vigilante === 'chat', `vigilante: ${r.vigilante}`);
+    esperar(r.vigilante === 'chat,accesos', `vigilante: ${r.vigilante}`);
     esperar(r.contadora === 'pagos,chat', `contadora: ${r.contadora}`);
     esperar(r.operacion === 'chat,incidentes,reservas,mascotas', `operación: ${r.operacion}`);
     esperar(r.general === 'pagos,chat,incidentes,reservas,mascotas', `general: ${r.general}`);
-    return 'residente 5 · vigilante 1 · contadora 2 · operación 4 · general 5';
+    return 'residente 5 · vigilante 2 · contadora 2 · operación 4 · general 5';
   });
   await prueba('Preferencias: apagar un tipo (ignora tipos que no le corresponden)', async () => {
     const r = await ok(r2.portal('notificaciones.preferencias', { apagadas: ['caseta', 'incidentes', 'inventado'] }));

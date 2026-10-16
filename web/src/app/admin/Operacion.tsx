@@ -21,6 +21,7 @@ import {
 } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { Documentos } from './Documentos';
+import { TarjetaTurno, type Turno } from '../caseta/Vigilancia';
 import { SLOTS_AMENIDADES } from '../../../amplify/functions/shared/documentos';
 
 type Incidente = Schema['Incidente']['type'];
@@ -736,6 +737,50 @@ function EditarAmenidad({ a, amenidades, onClose, onDone }: { a: Partial<Amenida
 
 // ---------- Visitas (bitácora) ----------
 export function VisitasAdmin() {
+  const [vista, setVista] = useState<'bitacora' | 'turnos'>('bitacora');
+  return (
+    <div className="stack">
+      <Seg
+        value={vista}
+        onChange={setVista}
+        options={[
+          ['bitacora', 'Bitácora de visitas'],
+          ['turnos', 'Registro de vigilancia'],
+        ]}
+      />
+      {vista === 'bitacora' ? <BitacoraVisitas /> : <TurnosAdmin />}
+    </div>
+  );
+}
+
+/** Cambios de turno de la caseta (solo consulta): fotos, equipo entregado y notas. */
+function TurnosAdmin() {
+  const { condo } = useAdmin();
+  const { data, error, loading, reload } = useLoad(
+    // admin-api entrega las fotos como URL temporal (fotoGuardiaUrl / fotoCasetaUrl), no como el modelo guardado.
+    () => all<Turno>((o) => db.models.TurnoVigilancia.turnosPorCondominio({ condominioId: condo!.id }, o) as unknown as ReturnType<Parameters<typeof all<Turno>>[0]>),
+    [condo!.id],
+  );
+  const lista = [...(data ?? [])].sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)));
+  return (
+    <>
+      <PageHead icon="shield" title="Registro de vigilancia" sub="Cambios de turno de la caseta con su evidencia y notas. No se pueden editar." />
+      {loading && !data ? (
+        <Loading />
+      ) : error ? (
+        <ErrorBox error={error} retry={reload} />
+      ) : lista.length ? (
+        lista.map((t) => <TarjetaTurno key={t.id} t={t} />)
+      ) : (
+        <section className="panel">
+          <Empty icon="shield">La caseta aún no registra cambios de turno.</Empty>
+        </section>
+      )}
+    </>
+  );
+}
+
+function BitacoraVisitas() {
   const { condo, etiqueta } = useAdmin();
   const { data, error, loading, reload } = useLoad(
     () => all<Visita>((o) => db.models.Visita.visitasPorCondominio({ condominioId: condo!.id }, o)),

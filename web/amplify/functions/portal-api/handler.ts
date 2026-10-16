@@ -20,7 +20,9 @@ import {
   type Item,
 } from '../shared/db';
 import { emailDe } from '../shared/cognito';
+import { enviarAUsuario } from '../shared/push';
 import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../shared/finanzas';
+import { IMAGENES_SERVICIO, imagenServicio } from '../shared/servicios';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
 import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendientes';
@@ -43,6 +45,7 @@ const pub = (c: Item) => ({
   modulos: c.modulos ?? [],
   datosPago: c.datosPago,
   telefonoCaseta: c.telefonoCaseta,
+  serviciosCondominio: (c.serviciosCondominio ?? []).filter(Boolean),
 });
 
 const sinPrivados = ({ userId, __typename, ...rest }: Item) => rest;
@@ -61,6 +64,7 @@ const TIPOS_ARCHIVO: Record<string, RegExp> = {
   incidentes: /^image\/[\w.+-]+$/,
   mascotas: /^image\/[\w.+-]+$/,
   chat: /^image\/[\w.+-]+$/,
+  vigilancia: /^image\/[\w.+-]+$/,
 };
 
 // Mensaje de chat con su foto como URL temporal (la ruta en S3 no se comparte).
@@ -104,11 +108,21 @@ function visitaVigente(v: Item, hoy = hoyMX()) {
   if (v.estado === 'CANCELADA' || v.estado === 'DENTRO') return false;
   const fin = v.fechaFin || v.fecha;
   if (hoy < v.fecha || hoy > fin) return false;
-  return v.estado === 'PROGRAMADA' || (v.estado === 'SALIO' && fin > v.fecha);
+  return v.estado === 'PROGRAMADA' || v.estado === 'AUTORIZADA' || (v.estado === 'SALIO' && fin > v.fecha);
 }
 
 async function aviso(c: Item, unidadId: string, tipo: string, titulo: string, texto?: string) {
   await put('Aviso', { condominioId: c.id, unidadId, tipo, titulo, texto, leido: false });
+}
+
+/** Notificación push a los vigilantes del condominio (respuestas a solicitudes de acceso). */
+async function avisarCaseta(condominioId: string, title: string, body: string) {
+  const vigilantes = (await byIndex('Perfil', 'byCondominio', 'condominioId', condominioId)).filter(
+    (p) => p.rol === 'VIGILANTE' && p.estado === 'APROBADO' && !(p.notifApagadas ?? []).includes('accesos'),
+  );
+  await Promise.all(
+    vigilantes.map((p) => enviarAUsuario(p.userId, { title, body, url: '/portal/#escanear', tag: `acceso-${condominioId}`, silent: !!p.notifSilencio }).catch(() => 0)),
+  );
 }
 
 async function etiquetas(condominioId: string) {
@@ -535,6 +549,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     if (fechaFin && fechaFin < fecha) fail('La fecha final debe ser posterior a la inicial.');
     if (fechaFin && (Date.parse(fechaFin) - Date.parse(fecha)) / 86400000 > 90) fail('La vigencia máxima es de 90 días.');
     if (fechaFin === fecha) fechaFin = undefined;
+    const placas = str(p.placas, 20).toUpperCase();
+    if (p.enAuto && !placas) fail('Escribe las placas del auto de tu visita.');
     // Código único para el QR (reintenta en el improbable caso de colisión)
     let codigo = codigoCorto();
     for (let i = 0; i < 3 && (await byIndex('Visita', 'byCodigo', 'codigo', codigo)).length; i++) codigo = codigoCorto();
@@ -544,7 +560,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       userId: sub,
       tipo,
       nombre,
-      placas: str(p.placas, 20).toUpperCase(),
+      placas,
+      enAuto: !!p.enAuto || !!placas,
       fecha,
       fechaFin,
       codigo,
@@ -553,6 +570,28 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       notas: str(p.notas, 500),
     });
     return { ...sinPrivados(v), vigente: visitaVigente(v) };
+  },
+
+  // Alguien llegó sin pase y la caseta pide permiso: el residente autoriza o rechaza el acceso.
+  async 'visitas.responder'({ condominio, unidad, perfil, p }) {
+    const v = await get('Visita', { id: str(p.visitaId, 64) });
+    if (!v || v.unidadId !== unidad!.id) fail('Solicitud no encontrada.');
+    if (v!.estado !== 'POR_AUTORIZAR') fail(v!.estado === 'CANCELADA' ? 'La caseta canceló esta solicitud.' : 'Esta solicitud ya fue respondida.');
+    const autorizar = !!p.autorizar;
+    const nota = str(p.nota, 300) || null;
+    const quien = `${perfil.nombre ?? perfil.email} · ${unidad!.etiqueta}`;
+    const r = await update(
+      'Visita',
+      { id: v!.id },
+      { estado: autorizar ? 'AUTORIZADA' : 'RECHAZADA', respuestaPor: quien, respuestaEn: now(), respuestaVia: 'RESIDENTE', respuestaNota: nota },
+      { estado: 'POR_AUTORIZAR' },
+    );
+    await avisarCaseta(
+      condominio.id,
+      autorizar ? `✅ ${unidad!.etiqueta} autorizó el acceso` : `⛔ ${unidad!.etiqueta} rechazó el acceso`,
+      `${v!.nombre}${nota ? ` · «${nota}»` : ''}`,
+    );
+    return sinPrivados(r);
   },
 
   async 'visitas.cancelar'({ unidad, p }) {
@@ -606,6 +645,31 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
 // Módulo requerido por cada grupo de acciones del residente
 const moduloDe = (action: string) => action.split('.')[0];
 
+// ---------- estacionamiento de visitas ----------
+// Lugares configurados en el condominio; los ocupa cada visita en auto que está dentro (ocupaLugar).
+async function estacionamiento(condominio: Item, visitas?: Item[]) {
+  const total = Math.max(0, Math.floor(Number(condominio.estacionamientoVisitas) || 0));
+  if (!total) return { total: 0, ocupados: 0, libres: 0 };
+  const lista = visitas ?? (await byIndex('Visita', 'byCondominio', 'condominioId', condominio.id));
+  const ocupados = lista.filter((v) => v.estado === 'DENTRO' && v.ocupaLugar).length;
+  return { total, ocupados, libres: Math.max(0, total - ocupados) };
+}
+/** Estacionamiento contando ya el cambio recién guardado (el índice por condominio tarda un instante en reflejarlo). */
+async function estacionamientoCon(condominio: Item, cambio: Item) {
+  const lista = await byIndex('Visita', 'byCondominio', 'condominioId', condominio.id);
+  return estacionamiento(condominio, [...lista.filter((v) => v.id !== cambio.id), cambio]);
+}
+const SIN_LUGAR = 'No hay lugares de estacionamiento de visitas disponibles.';
+/** ¿La visita que entra ocupa un lugar? Falla si no hay lugar, salvo que la caseta la registre «sin lugar». */
+async function lugarAlEntrar(condominio: Item, enAuto: boolean, sinLugar: boolean) {
+  if (!enAuto) return false;
+  const e = await estacionamiento(condominio);
+  if (!e.total) return false;
+  if (e.libres > 0) return true;
+  if (!sinLugar) fail(SIN_LUGAR);
+  return false;
+}
+
 // ---------- acciones de caseta (vigilantes) ----------
 const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown> }> = {
   'caseta.panel': {
@@ -622,6 +686,12 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
       const conUnidad = (v: Item) => ({ ...sinPrivados(v), unidad: et[v.unidadId] ?? '' });
       return {
         hoy,
+        estacionamiento: await estacionamiento(condominio, visitas),
+        // Llegadas sin pase esperando o ya respondidas por el residente (del día)
+        solicitudes: visitas
+          .filter((v) => ['POR_AUTORIZAR', 'AUTORIZADA', 'RECHAZADA'].includes(v.estado) && v.fecha === hoy)
+          .sort((a, b) => String(b.solicitadoEn ?? b.createdAt).localeCompare(String(a.solicitadoEn ?? a.createdAt)))
+          .map(conUnidad),
         dentro: visitas.filter((v) => v.estado === 'DENTRO').map(conUnidad),
         esperadas: visitas.filter((v) => visitaVigente(v, hoy)).map(conUnidad),
         bitacora: visitas
@@ -646,7 +716,7 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
       const [v] = (await byIndex('Visita', 'byCodigo', 'codigo', codigo)).filter((x) => x.condominioId === condominio.id);
       if (!v) fail('Código no registrado en este condominio.');
       const unidad = await get('Unidad', { id: v!.unidadId });
-      return { ...sinPrivados(v!), unidad: unidad?.etiqueta ?? '', vigente: visitaVigente(v!) };
+      return { ...sinPrivados(v!), unidad: unidad?.etiqueta ?? '', vigente: visitaVigente(v!), estacionamiento: await estacionamiento(condominio) };
     },
   },
 
@@ -656,10 +726,17 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
       const v = await get('Visita', { id: str(p.visitaId, 64) });
       if (!v || v.condominioId !== condominio.id) fail('Visita no encontrada.');
       if (!visitaVigente(v!)) fail('El pase no está vigente para hoy.');
-      const r = await update('Visita', { id: v!.id }, { estado: 'DENTRO', entradaEn: now(), registradoPor: perfil.nombre ?? perfil.email });
+      const ocupaLugar = await lugarAlEntrar(condominio, !!v!.enAuto, !!p.sinLugar);
+      const r = await update('Visita', { id: v!.id }, { estado: 'DENTRO', entradaEn: now(), registradoPor: perfil.nombre ?? perfil.email, ocupaLugar });
       const tipo = v!.tipo === 'VISITA' ? 'Tu visita' : 'Tu servicio';
-      await aviso(condominio, v!.unidadId, 'VISITA', `${tipo} ${v!.nombre} ingresó`, `Registrado en caseta.`);
-      return sinPrivados(r);
+      await aviso(
+        condominio,
+        v!.unidadId,
+        'VISITA',
+        `${tipo} ${v!.nombre} ingresó`,
+        ocupaLugar ? 'Registrado en caseta. Ocupa un lugar de estacionamiento de visitas.' : 'Registrado en caseta.',
+      );
+      return { ...sinPrivados(r), estacionamiento: await estacionamientoCon(condominio, r) };
     },
   },
 
@@ -669,11 +746,16 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
       const v = await get('Visita', { id: str(p.visitaId, 64) });
       if (!v || v.condominioId !== condominio.id) fail('Visita no encontrada.');
       if (v!.estado !== 'DENTRO') fail('La visita no está registrada dentro.');
-      return sinPrivados(await update('Visita', { id: v!.id }, { estado: 'SALIO', salidaEn: now() }));
+      // Al salir se libera su lugar de estacionamiento y se avisa al residente
+      const r = await update('Visita', { id: v!.id }, { estado: 'SALIO', salidaEn: now(), ocupaLugar: false });
+      const tipo = v!.tipo === 'VISITA' ? 'Tu visita' : v!.tipo === 'PROVEEDOR' ? 'Tu proveedor' : 'Tu servicio';
+      await aviso(condominio, v!.unidadId, 'VISITA', `${tipo} ${v!.nombre} salió`, 'Salida registrada en caseta.');
+      return { ...sinPrivados(r), estacionamiento: await estacionamientoCon(condominio, r) };
     },
   },
 
-  // Llegada sin pase previo (visita, servicio, paquetería): se registra y se alerta a la unidad.
+  // Llegada sin pase previo. Paquetería: se registra y se avisa a la unidad. Visita, servicio o proveedor: se pide
+  // permiso al residente (POR_AUTORIZAR); entra cuando lo autoriza (o la caseta lo confirma por llamada).
   'caseta.registrar': {
     modulo: 'visitas',
     async fn({ condominio, perfil, p }) {
@@ -682,29 +764,173 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
       const nombre = str(p.nombre, 120);
       if (!nombre) fail('Escribe el nombre.');
       const tipo = ['VISITA', 'SERVICIO', 'PROVEEDOR', 'PAQUETERIA'].includes(p.tipo) ? p.tipo : 'VISITA';
-      const paqueteria = tipo === 'PAQUETERIA';
+      const quien = perfil.nombre ?? perfil.email;
+      const notas = str(p.notas, 500);
+      if (tipo === 'PAQUETERIA') {
+        const v = await put('Visita', {
+          condominioId: condominio.id,
+          unidadId: unidad!.id,
+          tipo,
+          nombre,
+          fecha: hoyMX(),
+          origen: 'CASETA',
+          estado: 'SALIO',
+          entradaEn: now(),
+          salidaEn: now(),
+          registradoPor: quien,
+          notas,
+        });
+        await aviso(condominio, unidad!.id, 'CASETA', `Tienes paquetería en caseta: ${nombre}`, notas || 'Registrado en caseta.');
+        return sinPrivados(v);
+      }
+      const enAuto = !!p.enAuto;
+      const placas = str(p.placas, 20).toUpperCase();
+      if (enAuto && !placas) fail('Escribe las placas del auto.');
       const v = await put('Visita', {
         condominioId: condominio.id,
         unidadId: unidad!.id,
         tipo,
         nombre,
-        placas: str(p.placas, 20).toUpperCase(),
+        placas,
+        enAuto,
         fecha: hoyMX(),
         origen: 'CASETA',
-        estado: paqueteria ? 'SALIO' : 'DENTRO',
-        entradaEn: now(),
-        salidaEn: paqueteria ? now() : undefined,
-        registradoPor: perfil.nombre ?? perfil.email,
-        notas: str(p.notas, 500),
+        estado: 'POR_AUTORIZAR',
+        solicitadoPor: quien,
+        solicitadoEn: now(),
+        notas,
       });
-      const titulos: Record<string, string> = {
-        VISITA: `Llegó tu visita: ${nombre}`,
-        SERVICIO: `Llegó un servicio: ${nombre}`,
-        PROVEEDOR: `Llegó un proveedor: ${nombre}`,
-        PAQUETERIA: `Tienes paquetería en caseta: ${nombre}`,
-      };
-      await aviso(condominio, unidad!.id, 'CASETA', titulos[tipo], str(p.notas, 500) || 'Registrado en caseta.');
+      const que: Record<string, string> = { VISITA: 'Una visita', SERVICIO: 'Un servicio', PROVEEDOR: 'Un proveedor' };
+      const detalle = [enAuto ? `Llega en auto, placas ${placas}` : 'Llega a pie', notas].filter(Boolean).join(' · ');
+      await aviso(condominio, unidad!.id, 'ACCESO', `${que[tipo]} pide acceso: ${nombre}`, `${detalle}. Autoriza o rechaza en Visitas.`);
       return sinPrivados(v);
+    },
+  },
+
+  // La caseta confirma el permiso por llamada (el residente no respondió en la app) o cancela la solicitud.
+  'caseta.solicitud': {
+    modulo: 'visitas',
+    async fn({ condominio, perfil, p }) {
+      const v = await get('Visita', { id: str(p.visitaId, 64) });
+      if (!v || v.condominioId !== condominio.id) fail('Solicitud no encontrada.');
+      if (v!.estado !== 'POR_AUTORIZAR') fail('Esta solicitud ya fue respondida.');
+      const quien = perfil.nombre ?? perfil.email;
+      if (p.accion === 'LLAMADA') {
+        const nota = str(p.nota, 300);
+        if (!nota) fail('Escribe con quién hablaste por teléfono.');
+        const r = await update(
+          'Visita',
+          { id: v!.id },
+          { estado: 'AUTORIZADA', respuestaPor: quien, respuestaEn: now(), respuestaVia: 'LLAMADA', respuestaNota: nota },
+          { estado: 'POR_AUTORIZAR' },
+        );
+        await aviso(condominio, v!.unidadId, 'VISITA', `Caseta autorizó por teléfono el acceso de ${v!.nombre}`, nota);
+        return sinPrivados(r);
+      }
+      if (p.accion === 'CANCELAR') {
+        const r = await update('Visita', { id: v!.id }, { estado: 'CANCELADA', respuestaPor: quien, respuestaEn: now() }, { estado: 'POR_AUTORIZAR' });
+        await aviso(condominio, v!.unidadId, 'VISITA', `Se canceló la solicitud de acceso de ${v!.nombre}`, 'La persona ya no está en caseta.');
+        return sinPrivados(r);
+      }
+      fail('Acción no válida.');
+    },
+  },
+
+  // ----- Registro de vigilancia: cambios de turno (no se editan; solo se agregan notas) -----
+  'vigilancia.turnos': {
+    modulo: 'visitas',
+    async fn({ condominio }) {
+      const items = (await byIndex('TurnoVigilancia', 'byCondominio', 'condominioId', condominio.id)).sort(newest).slice(0, 60);
+      return Promise.all(
+        items.map(async ({ fotoGuardiaPath, fotoCasetaPath, registradoId, ...t }) => ({
+          ...sinPrivados(t),
+          fotoGuardiaUrl: await fotoUrl(fotoGuardiaPath),
+          fotoCasetaUrl: await fotoUrl(fotoCasetaPath),
+        })),
+      );
+    },
+  },
+
+  'vigilancia.cambioTurno': {
+    modulo: 'visitas',
+    async fn({ condominio, perfil, sub, p }) {
+      const entra = str(p.entra, 120);
+      const sale = str(p.sale, 120);
+      if (!entra) fail('Escribe el nombre de quien recibe el turno.');
+      if (!sale) fail('Escribe el nombre de quien entrega el turno.');
+      if (!p.fotoGuardiaPath) fail('Toma la foto del guardia en la caseta.');
+      if (!p.fotoCasetaPath) fail('Toma la foto de la caseta limpia.');
+      if (!p.casetaLimpia) fail('Confirma que la caseta se entrega limpia y en orden.');
+      const fotoGuardiaPath = await archivoPropio(p.fotoGuardiaPath, sub, 'vigilancia');
+      const fotoCasetaPath = await archivoPropio(p.fotoCasetaPath, sub, 'vigilancia');
+      const quien = perfil.nombre ?? perfil.email;
+      const texto = str(p.nota, 2000);
+      const visitas = await byIndex('Visita', 'byCondominio', 'condominioId', condominio.id);
+      const t = await put('TurnoVigilancia', {
+        condominioId: condominio.id,
+        entra,
+        sale,
+        registradoPor: quien,
+        registradoId: sub,
+        fotoGuardiaPath,
+        fotoCasetaPath,
+        casetaLimpia: true,
+        equipo: (Array.isArray(p.equipo) ? p.equipo : []).map((x: unknown) => str(x, 60)).filter(Boolean).slice(0, 15),
+        notas: JSON.stringify(texto ? [{ texto, en: now(), por: quien }] : []),
+        // Situación al momento del cambio (la registra el sistema)
+        visitasDentro: visitas.filter((v) => v.estado === 'DENTRO').length,
+        lugaresOcupados: (await estacionamiento(condominio, visitas)).ocupados,
+      });
+      const { fotoGuardiaPath: _g, fotoCasetaPath: _c, registradoId: _r, ...publico } = t;
+      return sinPrivados(publico);
+    },
+  },
+
+  // Agregar una nota a un cambio de turno (lo anterior no se modifica).
+  'vigilancia.nota': {
+    modulo: 'visitas',
+    async fn({ condominio, perfil, p }) {
+      const t = await get('TurnoVigilancia', { id: str(p.turnoId, 64) });
+      if (!t || t.condominioId !== condominio.id) fail('Turno no encontrado.');
+      const texto = str(p.texto, 2000);
+      if (!texto) fail('Escribe la nota.');
+      let notas: any = t!.notas;
+      for (let k = 0; k < 2 && typeof notas === 'string'; k++) notas = JSON.parse(notas);
+      const lista = [...(Array.isArray(notas) ? notas : []), { texto, en: now(), por: perfil.nombre ?? perfil.email }];
+      if (lista.length > 100) fail('Este turno ya tiene el máximo de notas.');
+      await update('TurnoVigilancia', { id: t!.id }, { notas: JSON.stringify(lista) });
+      return { notas: lista };
+    },
+  },
+
+  // Aviso de servicios: la caseta avisa a TODOS los residentes que acaba de entrar un servicio del condominio.
+  'caseta.servicio': {
+    modulo: 'visitas',
+    async fn({ condominio, perfil, p }) {
+      const servicios: string[] = (condominio.serviciosCondominio ?? []).filter(Boolean);
+      const servicio = str(p.servicio, 60);
+      if (!servicios.includes(servicio)) fail('Elige un servicio de la lista del condominio.');
+      const nota = str(p.nota, 300);
+      const imagen = imagenServicio(servicio);
+      const conocido = IMAGENES_SERVICIO.find((x) => `/servicios/${x.clave}.jpg` === imagen);
+      const titulo = conocido ? `${conocido.titulo} 🚪` : `Acaba de entrar el servicio de ${servicio.toLowerCase()}`;
+      const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', condominio.id);
+      for (let i = 0; i < unidades.length; i += 25) {
+        await Promise.all(
+          unidades.slice(i, i + 25).map((u) =>
+            put('Aviso', {
+              condominioId: condominio.id,
+              unidadId: u.id,
+              tipo: 'SERVICIO',
+              titulo,
+              texto: nota || `${servicio} · aviso de caseta`,
+              imagen,
+              leido: false,
+            }),
+          ),
+        );
+      }
+      return { enviados: unidades.length, servicio, imagen };
     },
   },
 
@@ -808,7 +1034,7 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     if (action.startsWith('notificaciones.')) {
       const esVigilante = perfil!.rol === 'VIGILANTE';
       const categorias = esVigilante
-        ? modulos.includes('chat') ? CATEGORIAS_VIGILANTE : []
+        ? CATEGORIAS_VIGILANTE.filter((c) => c.key !== 'chat' || modulos.includes('chat'))
         : CATEGORIAS_RESIDENTE.filter((c) => c.key !== 'chat' || modulos.includes('chat'));
       return await accionNotificaciones(action, p, sub, categorias, esVigilante ? '/portal/#hoy' : '/portal/#inicio');
     }
