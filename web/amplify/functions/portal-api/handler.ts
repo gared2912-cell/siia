@@ -27,6 +27,7 @@ import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
 import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendientes';
 import { SLOTS_AMENIDADES, documentosDe } from '../shared/documentos';
+import { nombreAdjunto } from '../shared/comunicados';
 import { ACTIVAS, HORAS_APARTADO, apartadas, cancelarCargoReserva, cargoDeReserva, confirmarReserva, limitePago, relacionadas, vencerSiCorresponde } from '../shared/reservas';
 
 type Ctx = {
@@ -61,11 +62,28 @@ async function fotoUrl(path?: string) {
 const MAX_ARCHIVO = 8 * 1024 * 1024;
 const TIPOS_ARCHIVO: Record<string, RegExp> = {
   comprobantes: /^(image\/[\w.+-]+|application\/pdf)$/,
-  incidentes: /^image\/[\w.+-]+$/,
+  incidentes: /^(image\/[\w.+-]+|application\/pdf)$/,
   mascotas: /^image\/[\w.+-]+$/,
   chat: /^image\/[\w.+-]+$/,
   vigilancia: /^image\/[\w.+-]+$/,
 };
+
+// Comunicado con sus imágenes y PDF como URLs temporales (las rutas en S3 no se comparten).
+// Los PDF se firman para descargarse con su nombre.
+async function conImagenes(c: Item) {
+  const { imagenes, adjuntos, ...rest } = sinPrivados(c);
+  return {
+    ...rest,
+    imagenUrls: (await Promise.all(((imagenes ?? []) as string[]).map(fotoUrl))).filter(Boolean),
+    adjuntos: await Promise.all(
+      ((adjuntos ?? []) as string[]).map(async (path) => {
+        const nombre = nombreAdjunto(path);
+        const cmd = new GetObjectCommand({ Bucket: process.env.BUCKET, Key: path, ResponseContentDisposition: `attachment; filename="${nombre}"` });
+        return { nombre, url: await getSignedUrl(s3, cmd, { expiresIn: 3600 }) };
+      }),
+    ),
+  };
+}
 
 // Mensaje de chat con su foto como URL temporal (la ruta en S3 no se comparte).
 const TEXTO_FOTO = '📷 Foto';
@@ -92,7 +110,7 @@ async function archivoPropio(path: string, sub: string, carpeta: keyof typeof TI
   }
   if (h!.Metadata?.sub !== sub) fail('El archivo adjunto no es tuyo. Súbelo de nuevo desde tu cuenta.');
   if ((h!.ContentLength ?? 0) > MAX_ARCHIVO) fail('El archivo supera 8 MB.');
-  if (!TIPOS_ARCHIVO[carpeta].test(h!.ContentType ?? '')) fail(carpeta === 'comprobantes' ? 'Adjunta una imagen o un PDF.' : 'Adjunta una imagen.');
+  if (!TIPOS_ARCHIVO[carpeta].test(h!.ContentType ?? '')) fail(['comprobantes', 'incidentes'].includes(carpeta) ? 'Adjunta una imagen o un PDF.' : 'Adjunta una imagen.');
   return p;
 }
 
@@ -154,7 +172,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         .sort((a, b) => (a.fecha + a.horaInicio).localeCompare(b.fecha + b.horaInicio))
         .slice(0, 3)
         .map(sinPrivados),
-      comunicados: comunicados.sort(newest).slice(0, 3).map(sinPrivados),
+      comunicados: await Promise.all(comunicados.sort(newest).slice(0, 3).map(conImagenes)),
     };
   },
 
@@ -249,7 +267,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   // ----- Comunicados y encuestas -----
   async 'comunicados.lista'({ condominio }) {
     const items = await byIndex('Comunicado', 'byCondominio', 'condominioId', condominio.id);
-    return items.sort(newest).map(sinPrivados);
+    return Promise.all(items.sort(newest).map(conImagenes));
   },
 
   async 'encuestas.lista'({ condominio, unidad }) {

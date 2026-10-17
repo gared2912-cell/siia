@@ -271,13 +271,15 @@ export function VerImagen({ src, alt = '', onClose }: { src: string; alt?: strin
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+/** `grupo`: para campos con botones (p. ej. ElegirArchivo); un <label> los activaría al tocar el título. */
+export function Field({ label, hint, grupo, children }: { label: string; hint?: string; grupo?: boolean; children: ReactNode }) {
+  const Tag = grupo ? 'div' : 'label';
   return (
-    <label className="fld">
+    <Tag className="fld" role={grupo ? 'group' : undefined}>
       <span>{label}</span>
       {children}
       {hint && <small>{hint}</small>}
-    </label>
+    </Tag>
   );
 }
 

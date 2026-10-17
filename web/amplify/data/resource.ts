@@ -182,6 +182,10 @@ const schema = a
         cuerpo: a.string().required(),
         importante: a.boolean(),
         autor: a.string(),
+        // Rutas en S3 de las imágenes del comunicado (condominios/{id}/comunicados/…), en orden; máximo 6
+        imagenes: a.string().array(),
+        // Rutas en S3 de los PDF adjuntos (convocatorias, invitaciones, orden del día…); máximo 5
+        adjuntos: a.string().array(),
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('comunicadosPorCondominio')])
       .authorization(admin),

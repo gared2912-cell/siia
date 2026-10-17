@@ -31,6 +31,7 @@ import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
+import { nombreAdjunto } from '../shared/comunicados';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
 import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
@@ -768,6 +769,93 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
   },
 };
 
+// ---------- comunicados con imágenes ----------
+const MAX_IMAGENES_COMUNICADO = 6;
+const MAX_ADJUNTOS_COMUNICADO = 5;
+
+async function archivosComunicado(c: Item) {
+  const firmar = (path: string, descarga?: string) =>
+    getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ...(descarga ? { ResponseContentDisposition: `attachment; filename="${descarga}"` } : {}) }),
+      { expiresIn: 3600 },
+    );
+  return {
+    imagenes: await Promise.all(((c.imagenes ?? []) as string[]).map((path) => firmar(path))),
+    adjuntos: await Promise.all(
+      ((c.adjuntos ?? []) as string[]).map(async (path) => {
+        const nombre = nombreAdjunto(path);
+        return { nombre, url: await firmar(path, nombre) };
+      }),
+    ),
+  };
+}
+
+async function condominioComunicados(p: Item, yo: Yo, nivel: Nivel) {
+  exigir(yo, 'comunicados', nivel);
+  const c = await get('Condominio', { id: str(p.condominioId, 64) });
+  if (!c) fail('Selecciona el condominio.');
+  exigirCondo(yo, c!.id);
+  return c!;
+}
+
+const accionesComunicados: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // URL firmada para subir una imagen o un PDF del comunicado (10 MB, 10 minutos).
+  async 'comunicados.subirArchivo'(p, yo) {
+    const c = await condominioComunicados(p, yo, 'editar');
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'imagen.jpg';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_EVIDENCIA[ext]) fail('Adjunta una imagen (JPG, PNG, WEBP o HEIC) o un PDF.');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('Cada archivo debe pesar máximo 10 MB.');
+    const path = `condominios/${c.id}/comunicados/${randomUUID()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_EVIDENCIA[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_EVIDENCIA[ext] };
+  },
+
+  // Alta o edición de un comunicado con sus imágenes ya subidas.
+  async 'comunicados.guardar'(p, yo) {
+    const c = await condominioComunicados(p, yo, 'editar');
+    const id = str(p.id, 64);
+    const actual = id ? await get('Comunicado', { id }) : undefined;
+    if (id && (!actual || actual.condominioId !== c.id)) fail('Comunicado no encontrado.');
+    const titulo = str(p.titulo, 140);
+    const cuerpo = str(p.cuerpo, 8000);
+    if (!titulo) fail('Escribe el título.');
+    if (!cuerpo) fail('Escribe el mensaje.');
+    // Archivos ya subidos con comunicados.subirArchivo: imágenes y PDF, cada uno en su lista
+    const validar = async (valor: unknown, max: number, esPdf: boolean, que: string) => {
+      const lista: unknown[] = Array.isArray(valor) ? valor : [];
+      if (lista.length > max) fail(`Máximo ${max} ${que} por comunicado.`);
+      const out: string[] = [];
+      for (const x of lista) {
+        const path = str(x, 400);
+        if (!path.startsWith(`condominios/${c.id}/comunicados/`) || /\.pdf$/i.test(path) !== esPdf) fail('Archivo no válido.');
+        if (![...(actual?.imagenes ?? []), ...(actual?.adjuntos ?? [])].includes(path)) {
+          const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: path })).catch(() => undefined);
+          if (!h) fail('No encontramos un archivo. Vuelve a subirlo.');
+        }
+        out.push(path);
+      }
+      return out;
+    };
+    const imagenes = await validar(p.imagenes, MAX_IMAGENES_COMUNICADO, false, 'imágenes');
+    const adjuntos = await validar(p.adjuntos, MAX_ADJUNTOS_COMUNICADO, true, 'PDF');
+    const datos = { titulo, cuerpo, importante: p.importante === true, imagenes, adjuntos };
+    if (actual) return update('Comunicado', { id: actual.id }, datos);
+    const yoPerfil = await get('Perfil', { userId: yo.sub });
+    return put('Comunicado', { condominioId: c.id, ...datos, autor: yoPerfil?.nombre || yo.email });
+  },
+
+  // URLs temporales (1 hora) de las imágenes, en el mismo orden, y de los PDF (para descargar, con su nombre).
+  async 'comunicados.archivos'(p, yo) {
+    exigir(yo, 'comunicados', 'ver');
+    const c = await get('Comunicado', { id: str(p.id, 64) });
+    if (!c) fail('Comunicado no encontrado.');
+    exigirCondo(yo, c!.condominioId);
+    return archivosComunicado(c!);
+  },
+};
+
 // ---------- encuestas: reporte de votos ----------
 const accionesEncuestas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Quién votó en una encuesta (nombre y correo del residente) para el reporte de Excel. Los votos y las unidades
@@ -819,11 +907,11 @@ const accionesIncidentes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> 
     if (i.estado === 'CERRADO' && !yo.superadmin) fail('El incidente está cerrado; solo el superadministrador puede modificarlo.');
     const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'foto.jpg';
     const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
-    if (!TIPOS_FOTO[ext]) fail('La evidencia debe ser una foto (JPG, PNG, WEBP o HEIC).');
-    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('La foto debe pesar máximo 10 MB.');
+    if (!TIPOS_EVIDENCIA[ext]) fail('La evidencia debe ser una foto (JPG, PNG, WEBP o HEIC) o un PDF.');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('La evidencia debe pesar máximo 10 MB.');
     const path = `condominios/${i.condominioId}/incidentes/${i.id}/${Date.now()}-${nombre}`;
-    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_FOTO[ext] }), { expiresIn: 600 });
-    return { url, path, contentType: TIPOS_FOTO[ext] };
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_EVIDENCIA[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_EVIDENCIA[ext] };
   },
 
   // Seguimiento por etapas (En seguimiento / En proceso / Cerrado): el administrador elige la etapa que corresponde,
@@ -1056,6 +1144,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   ...accionesDocumentos,
   ...accionesIncidentes,
   ...accionesEncuestas,
+  ...accionesComunicados,
   ...accionesFinanzas,
 
   // ----- app y notificaciones push (solo categorías que su rol permite) -----

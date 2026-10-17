@@ -40,10 +40,36 @@ export type { Schema };
 
 type Kind = 'portal' | 'admin';
 
+// La cuenta de AWS limita cuántas funciones corren a la vez: al abrir el panel se piden muchas cosas juntas,
+// así que se envían de pocas en pocas y, si AWS responde «Rate Exceeded» (429), se reintenta con espera.
+const MAX_SIMULTANEAS = 4;
+let enCurso = 0;
+const enEspera: (() => void)[] = [];
+async function turno<T>(fn: () => Promise<T>): Promise<T> {
+  if (enCurso >= MAX_SIMULTANEAS) await new Promise<void>((ok) => enEspera.push(ok));
+  enCurso++;
+  try {
+    return await fn();
+  } finally {
+    enCurso--;
+    enEspera.shift()?.();
+  }
+}
+const esSaturado = (m: string) => /Rate Exceeded|TooManyRequests|Status Code: 429|Throttl/i.test(m);
+const esperar = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
 async function call<T = any>(kind: Kind, action: string, payload?: object): Promise<T> {
   const fn = kind === 'portal' ? client.mutations.portal : client.mutations.admin;
-  const { data, errors } = await fn({ action, payload: JSON.stringify(payload ?? {}) });
-  if (errors?.length) throw new Error(errors[0].message.includes('Not Authorized') ? 'No tienes permiso para esta acción.' : errors[0].message);
+  let res = await turno(() => fn({ action, payload: JSON.stringify(payload ?? {}) }));
+  for (let intento = 1; intento <= 4 && res.errors?.length && esSaturado(res.errors[0].message); intento++) {
+    await esperar(400 * 2 ** intento + Math.random() * 300);
+    res = await turno(() => fn({ action, payload: JSON.stringify(payload ?? {}) }));
+  }
+  const { data, errors } = res;
+  if (errors?.length) {
+    const m = errors[0].message;
+    throw new Error(m.includes('Not Authorized') ? 'No tienes permiso para esta acción.' : esSaturado(m) ? 'El servidor está ocupado. Intenta de nuevo en unos segundos.' : m);
+  }
   // AWSJSON llega como texto; se decodifica hasta obtener el objeto.
   let r: any = data;
   for (let i = 0; i < 2 && typeof r === 'string'; i++) r = JSON.parse(r);

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
@@ -151,8 +152,8 @@ function NuevoIncidente({ onClose, onDone }: { onClose: () => void; onDone: () =
         <Field label="Detalles (opcional)">
           <textarea maxLength={3000} value={f.descripcion} onChange={set('descripcion')} />
         </Field>
-        <Field label="Foto (opcional)">
-          <input type="file" accept="image/*" capture="environment" onChange={(e) => setFoto(e.target.files?.[0] ?? null)} />
+        <Field grupo label="Foto o evidencia (opcional)" hint="Imagen o PDF, máximo 8 MB.">
+          <ElegirArchivo pdf value={foto} onChange={(fs) => setFoto(fs[0] ?? null)} />
         </Field>
         <button className="btn-app block" disabled={busy}>
           {busy ? 'Enviando…' : 'Enviar reporte'}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
@@ -144,8 +145,8 @@ function NuevaMascota({ onClose, onDone }: { onClose: () => void; onDone: () => 
         <Field label="Última vacuna antirrábica">
           <input type="date" value={f.vacunaAntirrabica} onChange={set('vacunaAntirrabica')} />
         </Field>
-        <Field label="Foto">
-          <input type="file" accept="image/*" onChange={(e) => setFoto(e.target.files?.[0] ?? null)} />
+        <Field grupo label="Foto">
+          <ElegirArchivo value={foto} onChange={(fs) => setFoto(fs[0] ?? null)} />
         </Field>
         <Field label="Notas (opcional)">
           <textarea maxLength={500} value={f.notas} onChange={set('notas')} />

@@ -23,6 +23,7 @@ import { ModuloInactivo, useAdmin } from './AdminApp';
 import { Documentos } from './Documentos';
 import { TarjetaTurno, type Turno } from '../caseta/Vigilancia';
 import { SLOTS_AMENIDADES } from '../../../amplify/functions/shared/documentos';
+import { ElegirArchivo } from '../ElegirArchivo';
 
 type Incidente = Schema['Incidente']['type'];
 type Mantenimiento = Schema['Mantenimiento']['type'];
@@ -60,6 +61,13 @@ function historialDe(i: Incidente): Paso[] {
 function FotoEvidencia({ incidenteId, path }: { incidenteId: string; path: string }) {
   const url = useLoad(() => adminCall<{ url: string }>('incidentes.evidencia', { incidenteId, path }).then((r) => r.url), [path]);
   if (!url.data) return <span className="photo-thumb" />;
+  if (/\.pdf$/i.test(path))
+    return (
+      <a href={url.data} target="_blank" rel="noopener" className="btn-app sm secondary">
+        <Icon name="file" />
+        Ver PDF de evidencia
+      </a>
+    );
   return (
     <a href={url.data} target="_blank" rel="noopener" title="Ver foto completa">
       <img src={url.data} alt="Evidencia" style={{ width: 160, maxWidth: '100%', height: 120, objectFit: 'cover', borderRadius: 10, display: 'block' }} />
@@ -208,6 +216,13 @@ function Seguimiento({ i, onBack, onCambio }: { i: Incidente; onBack: () => void
 function FotoReporte({ i }: { i: Incidente }) {
   const url = useLoad(() => urlArchivoAdmin('Incidente', i.id), [i.id]);
   if (!url.data) return <span className="photo-thumb" />;
+  if (/\.pdf$/i.test(i.fotoPath ?? ''))
+    return (
+      <a href={url.data} target="_blank" rel="noopener" className="btn-app sm secondary">
+        <Icon name="file" />
+        Ver PDF del reporte
+      </a>
+    );
   return (
     <a href={url.data} target="_blank" rel="noopener" title="Ver foto completa">
       <img src={url.data} alt="Foto del reporte" style={{ width: 280, maxWidth: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 12, display: 'block' }} />
@@ -221,14 +236,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
   const [estado, setEstado] = useState(ETAPAS.includes(i.estado ?? '') && i.estado !== 'CERRADO' ? i.estado! : ETAPAS[0]);
   const [respuesta, setRespuesta] = useState('');
   const [foto, setFoto] = useState<File | null>(null);
-  const [vista, setVista] = useState('');
   const { run, busy } = useAction();
-
-  const elegir = (f?: File) => {
-    if (vista) URL.revokeObjectURL(vista);
-    setFoto(f ?? null);
-    setVista(f ? URL.createObjectURL(f) : '');
-  };
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
@@ -238,7 +246,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
         : 'Una vez guardada, esta etapa ya no se podrá modificar. ¿Continuar?';
     if (!confirm(aviso)) return;
     const okk = await run(async () => {
-      if (!foto) throw new Error('Sube la foto de evidencia.');
+      if (!foto) throw new Error('Sube la foto o el PDF de evidencia.');
       const nombre = foto.name || 'evidencia.jpg';
       const r = await adminCall<{ url: string; path: string; contentType: string }>('incidentes.subirEvidencia', {
         incidenteId: i.id,
@@ -246,7 +254,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
         tamano: foto.size,
       });
       const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: foto });
-      if (!put.ok) throw new Error('No se pudo subir la foto. Intenta de nuevo.');
+      if (!put.ok) throw new Error('No se pudo subir la evidencia. Intenta de nuevo.');
       await adminCall('incidentes.atender', { incidenteId: i.id, estado, respuesta, fotoPath: r.path });
     }, estado === 'CERRADO' ? 'Incidente cerrado; se avisó al residente.' : 'Etapa guardada; se avisó al residente.');
     if (okk) onDone();
@@ -263,12 +271,12 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
           <textarea required maxLength={2000} value={respuesta} onChange={(e) => setRespuesta(e.target.value)} />
         </Field>
         <Field
-          label="Foto de evidencia (obligatoria)"
-          hint={estado === 'CERRADO' ? 'Foto que muestre por qué se cierra el incidente.' : 'Foto que muestre el avance. Puedes tomarla con la cámara.'}
+          grupo
+          label="Evidencia (obligatoria)"
+          hint={estado === 'CERRADO' ? 'Foto o PDF que muestre por qué se cierra el incidente. Máximo 10 MB.' : 'Foto o PDF que muestre el avance. Máximo 10 MB.'}
         >
-          <input type="file" accept="image/*" capture="environment" onChange={(e) => elegir(e.target.files?.[0])} />
+          <ElegirArchivo pdf value={foto} onChange={(fs) => setFoto(fs[0] ?? null)} />
         </Field>
-        {vista && <img src={vista} alt="Vista previa de la evidencia" style={{ width: 200, maxWidth: '100%', maxHeight: 160, borderRadius: 10, objectFit: 'cover' }} />}
         <p className="small muted" style={{ margin: 0 }}>
           Al guardar, la etapa queda registrada y ya no se puede modificar.
         </p>

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
+import { ComunicadoCompleto, TarjetaComunicado, type Adjunto } from '../ComunicadoVista';
+import { nombreAdjunto } from '../../../amplify/functions/shared/comunicados';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { descargarReporteEncuesta } from './excel';
@@ -48,29 +51,22 @@ export function ComunicadosAdmin() {
         [...data!]
           .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
           .map((c) => (
-            <article key={c.id} className="panel">
-              <div className="panel-head">
-                <h2>
-                  {c.titulo} {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
-                </h2>
-                {gestiona && (
-                  <div className="row-actions">
-                    <button className="linklike" onClick={() => setEditar(c)}>
+            <ComunicadoAdmin
+              key={c.id}
+              c={c}
+              acciones={
+                gestiona && (
+                  <>
+                    <button className="btn-app sm secondary" onClick={() => setEditar(c)}>
                       Editar
                     </button>
-                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(c)}>
+                    <button className="btn-app sm danger" onClick={() => borrar(c)}>
                       Eliminar
                     </button>
-                  </div>
-                )}
-              </div>
-              <div className="small muted" style={{ marginTop: -6, marginBottom: 8 }}>
-                {fechaHora(c.createdAt)} {c.autor && `· ${c.autor}`}
-              </div>
-              <p className="pre" style={{ margin: 0 }}>
-                {c.cuerpo}
-              </p>
-            </article>
+                  </>
+                )
+              }
+            />
           ))
       ) : (
         <section className="panel">
@@ -82,16 +78,93 @@ export function ComunicadosAdmin() {
   );
 }
 
+const MAX_IMAGENES = 6;
+const MAX_PDF = 5;
+const rutas = (v?: (string | null)[] | null) => (v ?? []).filter((x): x is string => !!x);
+const esPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+type ArchivosComunicado = { imagenes: string[]; adjuntos: Adjunto[] };
+const archivosDe = (c: Partial<Comunicado>): Promise<ArchivosComunicado> =>
+  c.id && (rutas(c.imagenes).length || rutas(c.adjuntos).length)
+    ? adminCall<ArchivosComunicado>('comunicados.archivos', { id: c.id })
+    : Promise.resolve({ imagenes: [], adjuntos: [] });
+
+/** Comunicado en la lista del panel: tarjeta que se abre con el texto completo, las imágenes y los PDF. */
+function ComunicadoAdmin({ c, acciones }: { c: Comunicado; acciones: React.ReactNode }) {
+  const archivos = useLoad(() => archivosDe(c), [c.id, c.updatedAt]);
+  const [abierto, setAbierto] = useState(false);
+  const datos = { ...c, createdAt: String(c.createdAt) };
+  const urls = archivos.data?.imagenes ?? [];
+  const adjuntos = archivos.data?.adjuntos ?? [];
+  return (
+    <>
+      <TarjetaComunicado c={datos} urls={urls} adjuntos={adjuntos} onAbrir={() => setAbierto(true)} acciones={acciones || undefined} />
+      {abierto && <ComunicadoCompleto c={datos} urls={urls} adjuntos={adjuntos} onClose={() => setAbierto(false)} />}
+    </>
+  );
+}
+
 function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onClose: () => void; onDone: () => void }) {
-  const { condoId, yo } = useAdmin();
+  const { condoId } = useAdmin();
   const [f, setF] = useState({ titulo: c.titulo ?? '', cuerpo: c.cuerpo ?? '', importante: !!c.importante });
   const [notificar, setNotificar] = useState(!c.id);
+  // Archivos ya guardados (ruta + URL temporal para verlos) y nuevos por subir, en el orden en que se muestran
+  const guardadas = useLoad(
+    async () => {
+      const a = await archivosDe(c);
+      return {
+        imagenes: rutas(c.imagenes).map((path, i) => ({ path, url: a.imagenes[i] })),
+        pdfs: rutas(c.adjuntos).map((path) => ({ path, nombre: nombreAdjunto(path) })),
+      };
+    },
+    [c.id],
+  );
+  const [quitadas, setQuitadas] = useState<string[]>([]);
+  const [nuevas, setNuevas] = useState<{ file: File; url: string }[]>([]);
+  const [nuevosPdf, setNuevosPdf] = useState<File[]>([]);
   const { run, busy } = useAction();
+  const actuales = (guardadas.data?.imagenes ?? []).filter((g) => !quitadas.includes(g.path));
+  const pdfsActuales = (guardadas.data?.pdfs ?? []).filter((g) => !quitadas.includes(g.path));
+  const totalImg = actuales.length + nuevas.length;
+  const totalPdf = pdfsActuales.length + nuevosPdf.length;
+
+  useEffect(() => () => nuevas.forEach((n) => URL.revokeObjectURL(n.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const agregar = (files: File[]) => {
+    const pdfs = files.filter(esPdf);
+    const imgs = files.filter((x) => !esPdf(x));
+    const cabenImg = imgs.slice(0, MAX_IMAGENES - totalImg);
+    const cabenPdf = pdfs.slice(0, MAX_PDF - totalPdf);
+    if (imgs.length > cabenImg.length) alert(`Máximo ${MAX_IMAGENES} imágenes por comunicado.`);
+    if (pdfs.length > cabenPdf.length) alert(`Máximo ${MAX_PDF} PDF por comunicado.`);
+    setNuevas([...nuevas, ...cabenImg.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+    setNuevosPdf([...nuevosPdf, ...cabenPdf]);
+  };
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const okk = await run(async () => {
-      if (c.id) ok(await db.models.Comunicado.update({ id: c.id, ...f }));
-      else ok(await db.models.Comunicado.create({ condominioId: condoId, autor: yo, ...f }));
+      const subir = async (file: File) => {
+        const nombre = file.name || 'imagen.jpg';
+        const r = await adminCall<{ url: string; path: string; contentType: string }>('comunicados.subirArchivo', {
+          condominioId: condoId,
+          nombre: /\.[a-z0-9]+$/i.test(nombre) ? nombre : `${nombre}.jpg`,
+          tamano: file.size,
+        });
+        const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: file });
+        if (!put.ok) throw new Error(`No se pudo subir «${nombre}». Intenta de nuevo.`);
+        return r.path;
+      };
+      const subidas: string[] = [];
+      for (const n of nuevas) subidas.push(await subir(n.file));
+      const pdfsSubidos: string[] = [];
+      for (const p of nuevosPdf) pdfsSubidos.push(await subir(p));
+      await adminCall('comunicados.guardar', {
+        condominioId: condoId,
+        id: c.id,
+        ...f,
+        imagenes: [...actuales.map((g) => g.path), ...subidas],
+        adjuntos: [...pdfsActuales.map((g) => g.path), ...pdfsSubidos],
+      });
       if (notificar) await adminCall('avisar', { condominioId: condoId, tipo: 'COMUNICADO', titulo: `Nuevo comunicado: ${f.titulo}`, texto: f.cuerpo.slice(0, 200) });
     }, 'Comunicado publicado');
     if (okk) onDone();
@@ -104,6 +177,66 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
         </Field>
         <Field label="Mensaje">
           <textarea required rows={8} maxLength={8000} value={f.cuerpo} onChange={(e) => setF({ ...f, cuerpo: e.target.value })} />
+        </Field>
+        <Field
+          grupo
+          label="Imágenes y PDF (opcional)"
+          hint={`Hasta ${MAX_IMAGENES} imágenes (se ven en grande) y ${MAX_PDF} PDF (convocatorias, invitaciones, orden del día), máximo 10 MB cada uno. Los residentes descargan los PDF desde su app.`}
+        >
+          <ElegirArchivo pdf multiple disabled={busy || (totalImg >= MAX_IMAGENES && totalPdf >= MAX_PDF)} onChange={agregar} />
+          {(pdfsActuales.length > 0 || nuevosPdf.length > 0) && (
+            <ul className="comunicado-descargas">
+              {pdfsActuales.map((g) => (
+                <li key={g.path}>
+                  <Icon name="file" />
+                  <span>{g.nombre}</span>
+                  <button type="button" className="linklike" style={{ color: 'var(--danger)' }} onClick={() => setQuitadas([...quitadas, g.path])}>
+                    Quitar
+                  </button>
+                </li>
+              ))}
+              {nuevosPdf.map((p, i) => (
+                <li key={`${p.name}-${i}`}>
+                  <Icon name="file" />
+                  <span>
+                    {p.name} <span className="muted small">· nuevo</span>
+                  </span>
+                  <button type="button" className="linklike" style={{ color: 'var(--danger)' }} onClick={() => setNuevosPdf(nuevosPdf.filter((_, j) => j !== i))}>
+                    Quitar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {guardadas.loading && !guardadas.data ? (
+            <span className="small muted">Cargando archivos…</span>
+          ) : (
+            totalImg > 0 && (
+              <div className="comunicado-editar-imgs">
+                {actuales.map((g) => (
+                  <figure key={g.path}>
+                    {g.url ? <img src={g.url} alt="" /> : <span className="photo-thumb" />}
+                    <button type="button" className="linklike" style={{ color: 'var(--danger)' }} onClick={() => setQuitadas([...quitadas, g.path])}>
+                      Quitar
+                    </button>
+                  </figure>
+                ))}
+                {nuevas.map((n, i) => (
+                  <figure key={n.url}>
+                    <img src={n.url} alt="" />
+                    <button
+                      type="button"
+                      className="linklike"
+                      style={{ color: 'var(--danger)' }}
+                      onClick={() => (URL.revokeObjectURL(n.url), setNuevas(nuevas.filter((_, j) => j !== i)))}
+                    >
+                      Quitar
+                    </button>
+                  </figure>
+                ))}
+              </div>
+            )
+          )}
         </Field>
         <label className="check">
           <input type="checkbox" checked={f.importante} onChange={(e) => setF({ ...f, importante: e.target.checked })} />

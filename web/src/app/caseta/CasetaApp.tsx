@@ -151,6 +151,7 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
   const [camara, setCamara] = useState(false);
   const [errorCamara, setErrorCamara] = useState('');
   const foto = useRef<HTMLInputElement>(null);
+  const imagen = useRef<HTMLInputElement>(null);
   const [codigo, setCodigo] = useState('');
   const [visita, setVisita] = useState<V | null>(null);
   const { run, busy } = useAction();
@@ -251,7 +252,12 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
               <Icon name="qr" />
               Tomar foto del código
             </button>
+            <button className="btn-app block secondary" style={{ marginTop: 8 }} disabled={busy} onClick={() => imagen.current?.click()}>
+              <Icon name="image" />
+              Elegir imagen del código
+            </button>
             <input ref={foto} type="file" accept="image/*" capture="environment" hidden onChange={(e) => (desdeFoto(e.target.files?.[0]), (e.target.value = ''))} />
+            <input ref={imagen} type="file" accept="image/*" hidden onChange={(e) => (desdeFoto(e.target.files?.[0]), (e.target.value = ''))} />
           </>
         )}
         {errorCamara && (

@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { adminCall, type Schema } from '../api';
 import { Empty, Field, Icon, Modal, fecha, hoy, money, periodoActual, useAction } from '../ui';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
 import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO } from '../../../amplify/functions/shared/finanzas';
@@ -149,9 +150,9 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
   const { run, busy } = useAction();
   const lleno = archivos.length >= MAX_EVIDENCIAS_EGRESO;
 
-  const agregar = (files: FileList | null) => {
-    if (!files) return;
-    const nuevos = [...files].slice(0, MAX_EVIDENCIAS_EGRESO - archivos.length).map((file) => ({ file }));
+  const agregar = (files: File[]) => {
+    if (!files.length) return;
+    const nuevos = files.slice(0, MAX_EVIDENCIAS_EGRESO - archivos.length).map((file) => ({ file }));
     if (files.length > nuevos.length) alert(`Máximo ${MAX_EVIDENCIAS_EGRESO} archivos de evidencia por egreso.`);
     setArchivos([...archivos, ...nuevos]);
   };
@@ -219,8 +220,8 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
         <Field label="Monto (MXN)">
           <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(x) => setF({ ...f, monto: x.target.value })} />
         </Field>
-        <Field label={`Evidencia (de 1 a ${MAX_EVIDENCIAS_EGRESO} archivos)`} hint="Factura, nota, recibo o fotos del trabajo. PDF o imagen, máximo 10 MB cada uno.">
-          <input type="file" multiple accept="application/pdf,image/*" disabled={lleno} onChange={(x) => (agregar(x.target.files), (x.target.value = ''))} />
+        <Field grupo label={`Evidencia (de 1 a ${MAX_EVIDENCIAS_EGRESO} archivos)`} hint="Factura, nota, recibo o fotos del trabajo. PDF o imagen, máximo 10 MB cada uno.">
+          <ElegirArchivo pdf multiple disabled={lleno} onChange={agregar} />
         </Field>
         {archivos.length > 0 && (
           <ul className="list">

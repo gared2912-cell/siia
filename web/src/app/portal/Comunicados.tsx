@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { portal } from '../api';
+import { ComunicadoCompleto, TarjetaComunicado, type Adjunto, type ComunicadoDatos } from '../ComunicadoVista';
 import { Badge, Empty, ErrorBox, Loading, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
-type Comunicado = { id: string; titulo: string; cuerpo: string; importante?: boolean; createdAt: string };
+type Comunicado = ComunicadoDatos & { imagenUrls?: string[]; adjuntos?: Adjunto[] };
 type Encuesta = {
   id: string;
   pregunta: string;
@@ -32,25 +33,16 @@ export function Comunicados({ has }: ModProps) {
 
 function ListaComunicados() {
   const { data, error, loading, reload } = useLoad(() => portal<Comunicado[]>('comunicados.lista'));
+  const [abierto, setAbierto] = useState<Comunicado | null>(null);
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
   if (!data!.length) return <section className="panel"><Empty icon="megaphone">Sin comunicados publicados.</Empty></section>;
   return (
     <>
       {data!.map((c) => (
-        <article key={c.id} className="panel">
-          <div className="panel-head">
-            <h2>{c.titulo}</h2>
-            {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
-          </div>
-          <div className="small muted" style={{ marginTop: -6, marginBottom: 8 }}>
-            {fecha(c.createdAt, { day: 'numeric', month: 'long', year: 'numeric' })}
-          </div>
-          <p className="pre" style={{ margin: 0 }}>
-            {c.cuerpo}
-          </p>
-        </article>
+        <TarjetaComunicado key={c.id} c={c} urls={c.imagenUrls ?? []} adjuntos={c.adjuntos} onAbrir={() => setAbierto(c)} />
       ))}
+      {abierto && <ComunicadoCompleto c={abierto} urls={abierto.imagenUrls ?? []} adjuntos={abierto.adjuntos} onClose={() => setAbierto(null)} />}
     </>
   );
 }

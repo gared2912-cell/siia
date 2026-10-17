@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, hoy, money, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
@@ -212,8 +213,8 @@ function RegistrarPago({ pendientes, onClose, onDone }: { pendientes: Cargo[]; o
         <Field label="Referencia o clave de rastreo (opcional)">
           <input maxLength={120} value={referencia} onChange={(e) => setRef(e.target.value)} />
         </Field>
-        <Field label="Comprobante" hint="Imagen o PDF, máximo 8 MB.">
-          <input required type="file" accept="image/*,application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <Field grupo label="Comprobante" hint="Foto o PDF, máximo 8 MB.">
+          <ElegirArchivo pdf value={file} onChange={(fs) => setFile(fs[0] ?? null)} />
         </Field>
         <button className="btn-app block" disabled={busy}>
           {busy ? 'Subiendo comprobante…' : 'Enviar comprobante'}

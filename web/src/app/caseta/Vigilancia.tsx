@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { comprimirImagen } from '../camara';
+import { ElegirArchivo } from '../ElegirArchivo';
 import { Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fechaHora, useAction, useLoad } from '../ui';
 
 export type Nota = { texto: string; en: string; por: string };
@@ -137,23 +138,11 @@ export function RegistroVigilancia({ miNombre }: { miNombre: string }) {
   );
 }
 
-/** Campo de foto con cámara y vista previa. */
+/** Campo de foto: cámara o galería, con vista previa. */
 function FotoEvidencia({ label, hint, foto, onFoto }: { label: string; hint: string; foto: File | null; onFoto: (f: File | null) => void }) {
-  const [vista, setVista] = useState('');
   return (
-    <Field label={label} hint={hint}>
-      <input
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={(e) => {
-          const f = e.target.files?.[0] ?? null;
-          if (vista) URL.revokeObjectURL(vista);
-          setVista(f ? URL.createObjectURL(f) : '');
-          onFoto(f);
-        }}
-      />
-      {foto && vista && <img src={vista} alt={label} style={{ width: 180, maxWidth: '100%', maxHeight: 140, objectFit: 'cover', borderRadius: 10, marginTop: 8 }} />}
+    <Field grupo label={label} hint={hint}>
+      <ElegirArchivo value={foto} onChange={(fs) => onFoto(fs[0] ?? null)} />
     </Field>
   );
 }

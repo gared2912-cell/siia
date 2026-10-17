@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { itemDeAviso, useAvisos } from './Notificaciones';
+import { ComunicadoCompleto, type Adjunto, type ComunicadoDatos } from '../ComunicadoVista';
 import { ItemAviso } from '../Campana';
 import { portal } from '../api';
 import { Badge, Empty, ErrorBox, Icon, Loading, MODULOS, PageHead, fecha, money, useLoad } from '../ui';
@@ -11,7 +13,7 @@ type Resumen = {
   avisosSinLeer: number;
   visitasHoy: number;
   proximasReservas: { id: string; fecha: string; horaInicio: string; horaFin: string; estado: string }[];
-  comunicados: { id: string; titulo: string; cuerpo: string; importante?: boolean; createdAt: string }[];
+  comunicados: (ComunicadoDatos & { imagenUrls?: string[]; adjuntos?: Adjunto[] })[];
 };
 
 const DESTINO: Record<string, string> = {
@@ -29,6 +31,7 @@ const DESTINO: Record<string, string> = {
 export function Inicio({ perfil, go, has }: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<Resumen>('inicio.resumen'));
   const avisos = useAvisos();
+  const [comunicado, setComunicado] = useState<Resumen['comunicados'][number] | null>(null);
   const nombre = (perfil.perfil?.nombre ?? '').split(' ')[0];
 
   if (loading && !data) return <Loading />;
@@ -130,16 +133,23 @@ export function Inicio({ perfil, go, has }: ModProps) {
           <ul className="list">
             {r.comunicados.map((c) => (
               <li key={c.id}>
-                <div className="list-main">
-                  <strong>{c.titulo}</strong> {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
-                  <div className="small muted">{fecha(c.createdAt)}</div>
-                  <div className="small pre">{c.cuerpo.length > 220 ? `${c.cuerpo.slice(0, 220)}…` : c.cuerpo}</div>
-                </div>
+                <button type="button" className="fila-click" onClick={() => setComunicado(c)}>
+                  {c.imagenUrls?.[0] && <img className="photo-thumb" src={c.imagenUrls[0]} alt="" loading="lazy" />}
+                  <span className="list-main">
+                    <strong>{c.titulo}</strong> {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
+                    <span className="small muted" style={{ display: 'block' }}>
+                      {fecha(c.createdAt)}
+                    </span>
+                    <span className="comunicado-resumen small">{c.cuerpo}</span>
+                  </span>
+                  <Icon name="arrow" />
+                </button>
               </li>
             ))}
           </ul>
         </section>
       )}
+      {comunicado && <ComunicadoCompleto c={comunicado} urls={comunicado.imagenUrls ?? []} adjuntos={comunicado.adjuntos} onClose={() => setComunicado(null)} />}
     </div>
   );
 }
