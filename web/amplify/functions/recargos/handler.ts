@@ -1,9 +1,12 @@
+// Tarea diaria (00:15, hora de México): primero genera las cuotas automáticas del mes (generarCuotaAutomatica)
+// y después aplica los recargos.
 // Recargo por pago tardío. En los condominios que lo tienen activo, al día siguiente del vencimiento
 // se carga el recargo a cada cuota de mantenimiento que siga sin pagar, siempre que la unidad no tenga
 // ningún comprobante subido en revisión (por aprobar). Un solo recargo por cuota (id «<unidad>#<periodo>#recargo»),
 // solo para cuotas que vencen después de activarlo (recargoDesde). La unidad recibe un aviso en el portal (que
 // también llega como notificación a la app) y cada residente de la unidad, un correo a su dirección registrada.
 import { byIndex, hoyMX, put, scan, type Item } from '../shared/db';
+import { crearCuotas, fechaCargo } from '../shared/cuotas';
 import { enviarCorreo } from '../shared/correo';
 
 const PORTAL = process.env.PORTAL_URL ?? 'https://staging.siia.casa/portal/';
@@ -81,9 +84,44 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
   return n;
 }
 
+/**
+ * Cuota automática: si el condominio la tiene activa y hoy ya es (o pasó) su día de cargo, genera la cuota del mes
+ * para cada unidad (no se duplica si ya existe) y avisa a cada unidad nueva. Solo meses cuya fecha de cargo es a
+ * partir de cuotaAutomaticaDesde, para no cobrar meses anteriores al activarla.
+ */
+export async function generarCuotaAutomatica(c: Item, hoy = hoyMX()) {
+  if (!c.cuotaAutomatica || c.activo === false) return 0;
+  const periodo = hoy.slice(0, 7);
+  const cargo = fechaCargo(c, periodo);
+  if (hoy < cargo || cargo < (c.cuotaAutomaticaDesde ?? hoy)) return 0;
+  const { nuevas, vence } = await crearCuotas(c, periodo);
+  for (const x of nuevas) {
+    await put('Aviso', {
+      condominioId: c.id,
+      unidadId: x.unidadId,
+      tipo: 'PAGO',
+      titulo: `Tu ${String(x.concepto).toLowerCase()}: ${mxn(Number(x.monto) || 0)}`,
+      texto: `Ya está en tu estado de cuenta. Vence el ${fechaLarga(vence)}. Puedes ver los datos para pagar y subir tu comprobante en Finanzas.`,
+      leido: false,
+    });
+  }
+  return nuevas.length;
+}
+
 export const handler = async () => {
   const hoy = hoyMX();
-  const condos = (await scan('Condominio')).filter((c) => c.recargoActivo);
+  const todos = await scan('Condominio');
+  let cuotas = 0;
+  for (const c of todos.filter((x) => x.cuotaAutomatica)) {
+    try {
+      const n = await generarCuotaAutomatica(c, hoy);
+      cuotas += n;
+      if (n) console.log(`${c.nombre}: ${n} cuota(s) generada(s)`);
+    } catch (err) {
+      console.error(c.id, err);
+    }
+  }
+  const condos = todos.filter((c) => c.recargoActivo);
   let total = 0;
   for (const c of condos) {
     try {
@@ -94,5 +132,5 @@ export const handler = async () => {
       console.error(c.id, err);
     }
   }
-  return { hoy, recargos: total };
+  return { hoy, cuotas, recargos: total };
 };

@@ -61,7 +61,8 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
                 {c.direccion && <> · {c.direccion}</>}
               </p>
               <p className="small" style={{ margin: '0 0 12px' }}>
-                Cuota: <strong>{c.cuotaMensual ? `${money(c.cuotaMensual)} al mes` : 'sin definir'}</strong> · {(c.modulos ?? []).length} de{' '}
+                Cuota: <strong>{c.cuotaMensual ? `${money(c.cuotaMensual)} al mes` : 'sin definir'}</strong>
+                {c.cuotaAutomatica && ` (automática el día ${c.diaCargo ?? 1})`} · {(c.modulos ?? []).length} de{' '}
                 {MODULOS.length} servicios
               </p>
               <button
@@ -169,6 +170,8 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
     diaVencimiento: String(c.diaVencimiento ?? 10),
     recargoActivo: !!c.recargoActivo,
     recargoMonto: c.recargoMonto != null ? String(c.recargoMonto) : '',
+    cuotaAutomatica: !!c.cuotaAutomatica,
+    diaCargo: String(c.diaCargo ?? 1),
     banco: c.banco ?? '',
     beneficiario: c.beneficiario ?? '',
     clabe: c.clabe ?? '',
@@ -212,6 +215,10 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
       recargoMonto: f.recargoMonto === '' ? null : Number(f.recargoMonto),
       // Al activarlo, solo cuentan las cuotas que venzan desde hoy (no se cobran recargos de meses anteriores).
       recargoDesde: f.recargoActivo ? (c.recargoActivo && c.recargoDesde ? c.recargoDesde : hoy()) : null,
+      // Cuota automática: al activarla, se generan los meses cuya fecha de cargo sea a partir de hoy.
+      cuotaAutomatica: f.cuotaAutomatica,
+      diaCargo: Math.min(Math.max(Number(f.diaCargo) || 1, 1), 28),
+      cuotaAutomaticaDesde: f.cuotaAutomatica ? (c.cuotaAutomatica && c.cuotaAutomaticaDesde ? c.cuotaAutomaticaDesde : hoy()) : null,
     };
     const pagoTodo = { ...pago, datosPago: textoDatosPago(pago) };
     const servicios = { modulos: f.modulos, activo: f.activo };
@@ -228,6 +235,11 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
       async () => {
         if (!f.tipoUnidad && ver('general')) throw new Error('Indica si el condominio es de casas o de departamentos.');
         if (ver('cuotas') && f.recargoActivo && !(Number(f.recargoMonto) > 0)) throw new Error('Indica el monto del recargo por pago tardío.');
+        if (ver('cuotas') && f.cuotaAutomatica) {
+          if (!(Number(f.cuotaMensual) > 0)) throw new Error('Para generar la cuota automáticamente, indica la cuota mensual.');
+          if ((Number(f.diaCargo) || 1) > (Number(f.diaVencimiento) || 10))
+            throw new Error('El día en que se genera el cargo debe ser igual o anterior al día de vencimiento.');
+        }
         const r = c.id ? ok(await db.models.Condominio.update({ id: c.id, ...datos })) : ok(await db.models.Condominio.create(datos as never));
         id = r?.id ?? id;
       },
@@ -296,6 +308,25 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
               <Field label="Día de vencimiento" hint="Día del mes en que vence la cuota (1 a 28).">
                 <input type="number" min="1" max="28" value={f.diaVencimiento} onChange={set('diaVencimiento')} disabled={!puedePago} />
               </Field>
+            </div>
+            <div className="recargo">
+              <label className="check" style={{ fontWeight: 700 }}>
+                <input type="checkbox" checked={f.cuotaAutomatica} disabled={!puedePago} onChange={(e) => setF({ ...f, cuotaAutomatica: e.target.checked })} />
+                Generar la cuota automáticamente cada mes
+              </label>
+              <p className="small muted" style={{ margin: '4px 0 10px' }}>
+                Cada mes, el día que elijas, se carga la cuota de mantenimiento al estado de cuenta de cada casa o departamento (con vencimiento el día{' '}
+                {Math.min(Math.max(Number(f.diaVencimiento) || 10, 1), 28)}) y cada residente recibe un aviso. Nunca se duplica: si ya la generaste a mano, no se
+                vuelve a crear.
+                {c.cuotaAutomatica && c.cuotaAutomaticaDesde
+                  ? ` Activa desde el ${fecha(c.cuotaAutomaticaDesde)}.`
+                  : ' Al activarla, empieza en la siguiente fecha de cargo (no se cobran meses anteriores).'}
+              </p>
+              {f.cuotaAutomatica && (
+                <Field label="Día en que se genera el cargo" hint="Del 1 al 28; igual o antes del día de vencimiento.">
+                  <input type="number" min="1" max="28" required value={f.diaCargo} onChange={set('diaCargo')} disabled={!puedePago} style={{ maxWidth: 120 }} />
+                </Field>
+              )}
             </div>
             <div className="recargo">
               <label className="check" style={{ fontWeight: 700 }}>
@@ -411,7 +442,7 @@ function Extraordinarias() {
         )}
       </div>
       <p className="small muted" style={{ marginTop: 0 }}>
-        Se cargan al estado de cuenta de cada residente en cuanto las agregas. Las cuotas mensuales se generan en Finanzas › Generar cuotas del mes.
+        Se cargan al estado de cuenta de cada residente en cuanto las agregas. Las cuotas mensuales se generan solas si activas la cuota automática en Cuotas y pagos, o en Finanzas › Generar cuotas del mes.
       </p>
       {loading && !data ? (
         <Loading />

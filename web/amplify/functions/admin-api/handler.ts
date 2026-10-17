@@ -32,6 +32,7 @@ import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
 import { nombreAdjunto } from '../shared/comunicados';
+import { crearCuotas } from '../shared/cuotas';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
 import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
@@ -162,7 +163,7 @@ type Regla = {
   valores?: Record<string, string[]>; // valores permitidos al editar
 };
 // Datos bancarios y cuota del condominio: requieren el permiso «condominios.datosPago».
-const CAMPOS_PAGO = ['datosPago', 'banco', 'beneficiario', 'clabe', 'cuentaBancaria', 'referenciaPago', 'notasPago', 'cuotaMensual', 'diaVencimiento', 'recargoActivo', 'recargoMonto', 'recargoDesde'];
+const CAMPOS_PAGO = ['datosPago', 'banco', 'beneficiario', 'clabe', 'cuentaBancaria', 'referenciaPago', 'notasPago', 'cuotaMensual', 'diaVencimiento', 'recargoActivo', 'recargoMonto', 'recargoDesde', 'cuotaAutomatica', 'diaCargo', 'cuotaAutomaticaDesde'];
 
 const REGLAS: Record<string, Regla> = {
   Condominio: {
@@ -1401,34 +1402,13 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const c = await get('Condominio', { id: str(p.condominioId, 64) });
     if (!c) fail('Selecciona el condominio.');
     exigirCondo(yo, c!.id);
+    if (c!.cuotaAutomatica) fail('Este condominio genera sus cuotas automáticamente cada mes. Desactiva la cuota automática en Condominios › Cuotas y pagos para generarlas a mano.');
     const periodo = str(p.periodo, 7);
     if (!/^\d{4}-\d{2}$/.test(periodo)) fail('Periodo no válido (AAAA-MM).');
-    const dia = String(Math.min(Math.max(Number(c!.diaVencimiento) || 10, 1), 28)).padStart(2, '0');
-    const vence = /^\d{4}-\d{2}-\d{2}$/.test(p.vence) ? p.vence : `${periodo}-${dia}`;
-    // Cuota única del condominio; las unidades anteriores a esa configuración conservan su cuota propia.
-    const cuotaCondo = Number(c!.cuotaMensual) > 0 ? Number(c!.cuotaMensual) : 0;
-    const concepto = str(p.concepto, 120) || `Cuota de mantenimiento ${periodo}`;
-    const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id);
-    let creados = 0;
-    let omitidos = 0;
-    for (const u of unidades) {
-      const monto = cuotaCondo || u.cuota;
-      if (!(monto > 0)) {
-        omitidos++;
-        continue;
-      }
-      try {
-        await put(
-          'Cargo',
-          { id: `${u.id}#${periodo}#cuota`, condominioId: c!.id, unidadId: u.id, concepto, periodo, monto, vence, estado: 'PENDIENTE' },
-          { ifNotExists: 'id' },
-        );
-        creados++;
-      } catch (err: any) {
-        if (err?.name !== 'ConditionalCheckFailedException') throw err;
-        omitidos++;
-      }
-    }
+    const { creados, omitidos } = await crearCuotas(c!, periodo, {
+      vence: /^\d{4}-\d{2}-\d{2}$/.test(p.vence) ? p.vence : undefined,
+      concepto: str(p.concepto, 120),
+    });
     return { creados, omitidos };
   },
 

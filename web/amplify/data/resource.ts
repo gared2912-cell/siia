@@ -51,6 +51,10 @@ const schema = a
         recargoActivo: a.boolean(),
         recargoMonto: a.float(),
         recargoDesde: a.date(), // solo cuotas que vencen a partir de esta fecha (cuando se activó)
+        // Cuota automática: cada mes, el día diaCargo (1 a 28), se genera la cuota de mantenimiento de todas las unidades
+        cuotaAutomatica: a.boolean(),
+        diaCargo: a.integer(),
+        cuotaAutomaticaDesde: a.date(), // solo meses cuya fecha de cargo es a partir de esta fecha (cuando se activó)
         // Archivos importantes: [{ slot: 'reglamento' | 'doc1' | 'doc2', titulo, path, nombre, tamano, subido }]
         documentos: a.json(),
         telefonoCaseta: a.string(),

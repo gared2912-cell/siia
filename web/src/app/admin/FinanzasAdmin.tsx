@@ -96,12 +96,24 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
           </button>
         )}
         {vista === 'ingresos' && tiene('finanzas.generarCuotas') && (
-          <button className="btn-app" onClick={() => setGenerar(true)}>
+          // Con la cuota automática activa (Condominios › Cuotas y pagos) no se generan a mano, para no duplicar ni confundir.
+          <button
+            className="btn-app"
+            onClick={() => setGenerar(true)}
+            disabled={!!condo?.cuotaAutomatica}
+            title={condo?.cuotaAutomatica ? 'Las cuotas se generan automáticamente cada mes' : undefined}
+          >
             <Icon name="money" />
             Generar cuotas del mes
           </button>
         )}
       </PageHead>
+      {vista === 'ingresos' && tiene('finanzas.generarCuotas') && condo?.cuotaAutomatica && (
+        <div className="alert small">
+          Las cuotas de mantenimiento se generan automáticamente el día {condo.diaCargo ?? 1} de cada mes, por eso «Generar cuotas del mes» está desactivado. Para
+          generarlas a mano, desactiva la cuota automática en Condominios › Cuotas y pagos.
+        </div>
+      )}
       <div className="vistas" role="tablist">
         {(
           [
