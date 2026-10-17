@@ -88,16 +88,16 @@ export function Inicio({ perfil, go, has }: ModProps) {
               </button>
             )}
           </div>
-          {r.avisos.length ? (
+          {avisos.avisos.some((a) => !a.leido) ? (
             <ul className="list avisos-lista">
-              {avisos.avisos.slice(0, 8).map((a) => (
+              {avisos.avisos.filter((a) => !a.leido).slice(0, 8).map((a) => (
                 <li key={a.id} className={a.leido ? '' : 'no-leido'}>
                   <ItemAviso item={itemDeAviso(a, avisos.abrir)} />
                 </li>
               ))}
             </ul>
           ) : (
-            <Empty icon="bell">Sin avisos por ahora.</Empty>
+            <Empty icon="bell">No tienes avisos nuevos.</Empty>
           )}
         </section>
 

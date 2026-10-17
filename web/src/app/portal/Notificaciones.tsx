@@ -2,14 +2,14 @@
 // cuando llega algo nuevo (comprobante recibido, pago aprobado, visitas, paquetería…).
 // El contador suma los avisos sin leer y los mensajes de chat que el residente aún no abre; ese total
 // también va al icono de la app instalada.
-// Tocar un aviso lo marca como leído y lleva a la sección donde se atiende; los avisos con imagen o sin
+// Tocar un aviso lo marca como leído (desaparece de la campana y de la bandeja del teléfono) y lleva a la sección donde se atiende; los avisos con imagen o sin
 // sección (aviso de servicios, alertas de caseta) se abren completos, con la imagen en grande.
 // La notificación push abre /portal/#aviso/<id> y hace lo mismo.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { portal } from '../api';
 import { Icon, Modal, VerImagen, fechaHora, usePoll, useToast } from '../ui';
 import { useInsigniaApp } from '../AppMovil';
-import { Campana as CampanaBase, type ItemCampana } from '../Campana';
+import { Campana as CampanaBase, cerrarNotificaciones, type ItemCampana } from '../Campana';
 
 export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string; leido?: boolean; createdAt: string; imagen?: string };
 export type ChatSinLeer = { ADMIN: number; CASETA: number };
@@ -84,6 +84,7 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
 
   const leerTodo = useCallback(async () => {
     setEstado((e) => ({ ...e, sinLeer: 0, avisos: e.avisos.map((a) => ({ ...a, leido: true })) }));
+    cerrarNotificaciones((tag) => tag.startsWith('aviso-'));
     await portal('inicio.leerAvisos').catch(() => undefined);
     refrescar();
   }, [refrescar]);
@@ -93,6 +94,7 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
       setEstado((e) => ({ ...e, sinLeer: Math.max(0, e.sinLeer - 1), avisos: e.avisos.map((x) => (x.id === a.id ? { ...x, leido: true } : x)) }));
       portal('inicio.leerAviso', { id: a.id }).catch(() => undefined);
     }
+    cerrarNotificaciones((tag) => tag === `aviso-${a.id}`);
     const destino = DESTINO[a.tipo ?? ''];
     if (destino && !a.imagen) {
       location.hash = `/${destino.key}`;
@@ -187,7 +189,8 @@ export function Campana() {
         nuevo: true,
         abrir: () => (location.hash = `/chat/${c}`),
       })),
-    ...avisos.map((a) => itemDeAviso(a, abrir)),
+    // Solo lo que falta por ver: al abrirlo desaparece
+    ...avisos.filter((a) => !a.leido).map((a) => itemDeAviso(a, abrir)),
   ];
   return (
     <CampanaBase

@@ -158,10 +158,11 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     };
   },
 
-  // Campana: avisos de la unidad + mensajes de chat que este residente aún no ve
+  // Campana: avisos de la unidad que faltan por ver (al verlos desaparecen) + mensajes de chat que este residente aún no ve
   async 'inicio.avisos'({ condominio, unidad, perfil }) {
     const [avisos, chat] = await Promise.all([byIndex('Aviso', 'byUnidad', 'unidadId', unidad!.id), chatSinLeer(perfil, condominio, unidad!.id)]);
-    return { sinLeer: avisos.filter((a) => !a.leido).length, avisos: avisos.sort(newest).slice(0, 25).map(sinPrivados), chat };
+    const sinLeer = avisos.filter((a) => !a.leido);
+    return { sinLeer: sinLeer.length, avisos: sinLeer.sort(newest).slice(0, 50).map(sinPrivados), chat };
   },
 
   async 'inicio.leerAvisos'({ unidad }) {

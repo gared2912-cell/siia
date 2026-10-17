@@ -70,7 +70,8 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   const [base, sub] = cur.split('/');
   const actual = nav.some((n) => n.key === base) ? base : 'escanear';
 
-  // Campana: respuestas de residentes a llegadas sin pase y chats por responder; cada renglón lleva a donde se atiende.
+  // Campana: respuestas de residentes a llegadas sin pase y chats por responder; cada renglón lleva a donde se atiende
+  // y, una vez visto, desaparece.
   const avisos: ItemCampana[] = vistos([
     ...(panel.data?.solicitudes ?? [])
       .filter((v) => v.estado === 'AUTORIZADA' || v.estado === 'RECHAZADA')

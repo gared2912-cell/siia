@@ -4,6 +4,7 @@ import { ChatBox, type Msg } from '../ChatBox';
 import { PageHead, Seg } from '../ui';
 import type { ModProps } from './PortalApp';
 import { useAvisos } from './Notificaciones';
+import { cerrarNotificaciones } from '../Campana';
 
 /** `inicial`: canal con el que abre (campana o notificación push: #chat/CASETA). */
 export function Chat({ perfil, has, inicial }: ModProps & { inicial?: string }) {
@@ -36,6 +37,7 @@ export function Chat({ perfil, has, inicial }: ModProps & { inicial?: string }) 
             // Abrir la conversación la marca como leída en el servidor; se actualizan campana y contadores.
             const r = await portal<Msg[]>('chat.mensajes', { canal });
             if (chat[canal]) refrescar();
+            cerrarNotificaciones((tag) => tag.startsWith('chat-') && tag.endsWith(`#${canal}`));
             return r;
           }}
           enviar={async (texto, imagen) => portal('chat.enviar', { canal, texto, imagenPath: imagen ? await subirArchivo(imagen, 'chat') : undefined })}

@@ -1,6 +1,6 @@
 // Campana del panel: lo pendiente de atender en el condominio seleccionado (comprobantes, reservas,
 // mascotas, incidentes nuevos, solicitudes de acceso y chats por responder). Cada renglón lleva a la
-// sección donde se atiende y deja de contar en el número; desaparece de la lista cuando ya se atendió.
+// sección donde se atiende y, una vez visto, desaparece de la campana.
 import { useMemo } from 'react';
 import { all, db, type Schema } from '../api';
 import { money, useLoad, usePoll } from '../ui';
@@ -55,7 +55,7 @@ export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensaj
     return vistos(out.sort((a, b) => String(b.fecha ?? '').localeCompare(String(a.fecha ?? ''))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datos.data, mensajes, id, vistos]);
-  const total = items.filter((i) => i.nuevo).length;
+  const total = items.length;
   useInsigniaApp(total);
 
   return <Campana total={total} items={items} vacio="No hay pendientes en este condominio." />;

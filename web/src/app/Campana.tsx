@@ -1,5 +1,6 @@
 // Campana de notificaciones común (residentes, caseta y administración): botón con contador y lista
-// desplegable. Cada elemento se puede tocar y lleva a donde se atiende (sección o aviso completo).
+// desplegable. Cada elemento se puede tocar y lleva a donde se atiende (sección o aviso completo); una vez visto
+// desaparece de la lista y de la bandeja de notificaciones del teléfono.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon, fechaHora } from './ui';
 
@@ -67,10 +68,19 @@ export function Campana({ total, items, encabezado, vacio = 'Sin notificaciones.
   );
 }
 
-// ---------- Revisado (caseta y administración) ----------
-// Sus pendientes se quitan solos cuando se atienden; mientras tanto, lo que ya se revisó deja de contar en la
-// campana. Se recuerda en este dispositivo: id → momento en que se revisó. Si el pendiente cambia después
-// (p. ej. otro mensaje en el mismo chat, con `fecha` más reciente), vuelve a contar.
+/** Cierra las notificaciones del sistema (bandeja del teléfono) que ya se vieron en la app, según su `tag`. */
+export async function cerrarNotificaciones(coincide: (tag: string) => boolean) {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    for (const n of (await reg?.getNotifications()) ?? []) if (n.tag && coincide(n.tag)) n.close();
+  } catch {
+    /* sin service worker: no hay notificaciones que cerrar */
+  }
+}
+
+// ---------- Visto (caseta y administración) ----------
+// Lo que ya se revisó desaparece de la campana. Se recuerda en este dispositivo: id → momento en que se vio.
+// Si el pendiente cambia después (p. ej. otro mensaje en el mismo chat, con `fecha` más reciente), vuelve a aparecer.
 const EVENTO = 'siia-vistos';
 const leerVistos = (clave: string): Record<string, string> => {
   try {
@@ -93,9 +103,12 @@ export function marcarVisto(clave: string, id: string, fecha?: string) {
     /* sin almacenamiento local: solo dura esta sesión */
   }
   window.dispatchEvent(new CustomEvent(EVENTO, { detail: { clave, id, en: v[id] } }));
+  // También sale de la bandeja del teléfono (tags del notificador: chat-<condo>#<unidad>#<canal>, pago-<id>, acceso-<condo>…)
+  const unidad = id.startsWith('chat-') ? id.slice(5) : '';
+  cerrarNotificaciones((tag) => (unidad ? tag.startsWith('chat-') && tag.includes(`#${unidad}#`) : id.startsWith('sol-') ? tag.startsWith('acceso-') : tag === id));
 }
 
-/** Aplica lo revisado a los renglones: tocar uno lo marca y solo los no revisados quedan como nuevos. */
+/** Quita de la lista lo ya visto; tocar un renglón lo marca como visto. */
 export function useVistos(clave: string) {
   const [vistos, setVistos] = useState(() => leerVistos(clave));
   useEffect(() => {
@@ -108,11 +121,9 @@ export function useVistos(clave: string) {
   }, [clave]);
   return useCallback(
     (items: ItemCampana[]): ItemCampana[] =>
-      items.map((i) => {
-        const visto = vistos[i.id];
-        const revisado = !!visto && (!i.fecha || visto >= i.fecha);
-        return { ...i, nuevo: i.nuevo && !revisado, abrir: () => (marcarVisto(clave, i.id, i.fecha), i.abrir()) };
-      }),
+      items
+        .filter((i) => !(vistos[i.id] && (!i.fecha || vistos[i.id] >= i.fecha)))
+        .map((i) => ({ ...i, abrir: () => (marcarVisto(clave, i.id, i.fecha), i.abrir()) })),
     [vistos, clave],
   );
 }
