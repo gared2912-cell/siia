@@ -166,7 +166,9 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
     ...(has('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: chatSinLeer }] : []),
     ...(has('mascotas') ? [{ key: 'mascotas', label: 'Mascotas', icon: 'paw' }] : []),
   ];
-  const actual = nav.some((n) => n.key === cur) ? cur : 'inicio';
+  // «chat/CASETA» abre el chat en ese canal (campana o notificación push)
+  const [base, sub] = cur.split('/');
+  const actual = nav.some((n) => n.key === base) ? base : 'inicio';
   const props = { perfil, go, has };
 
   return (
@@ -186,7 +188,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
       {actual === 'amenidades' && <Amenidades {...props} />}
       {actual === 'incidentes' && <Incidentes {...props} />}
       {actual === 'comunicados' && <Comunicados {...props} />}
-      {actual === 'chat' && <Chat {...props} />}
+      {actual === 'chat' && <Chat key={cur} {...props} inicial={sub} />}
       {actual === 'mascotas' && <Mascotas {...props} />}
       {nav.length === 1 && (
         <div className="alert" style={{ marginTop: 16 }}>

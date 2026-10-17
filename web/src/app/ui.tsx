@@ -251,6 +251,23 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
+/** Imagen en pantalla completa (avisos con imagen); se cierra al tocarla o con Escape. */
+export function VerImagen({ src, alt = '', onClose }: { src: string; alt?: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="ver-imagen" role="dialog" aria-modal="true" aria-label={alt || 'Imagen'} onClick={onClose}>
+      <img src={src} alt={alt} />
+      <button className="icon-btn ver-imagen-cerrar" onClick={onClose} aria-label="Cerrar">
+        <Icon name="close" />
+      </button>
+    </div>
+  );
+}
+
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="fld">

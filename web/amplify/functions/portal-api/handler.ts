@@ -170,6 +170,13 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     return { ok: true };
   },
 
+  // Tocar un aviso en la campana o en la notificación push lo marca como leído
+  async 'inicio.leerAviso'({ unidad, p }) {
+    const a = await get('Aviso', { id: str(p.id, 64) });
+    if (a && a.unidadId === unidad!.id && !a.leido) await update('Aviso', { id: a.id }, { leido: true });
+    return { ok: true };
+  },
+
   // ----- Finanzas -----
   async 'finanzas.estadoCuenta'({ unidad, condominio, perfil, email }) {
     const [cargos, pagos] = await Promise.all([

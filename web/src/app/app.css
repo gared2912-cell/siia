@@ -1058,7 +1058,51 @@ table.tbl {
   border-bottom: 1px solid var(--line);
 }
 .campana-lista > li {
+  padding: 0;
+}
+.avisos-lista > li {
+  padding: 0;
+}
+.avisos-lista > li.no-leido {
+  background: var(--mint-wash);
+  border-radius: 10px;
+}
+/* Renglón tocable de una notificación: lleva a donde se atiende */
+.aviso-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 48px;
   padding: 10px 14px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.aviso-item:hover {
+  background: rgb(0 167 167 / 0.06);
+}
+.aviso-item:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+.aviso-item .list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.aviso-texto {
+  overflow-wrap: anywhere;
+}
+.aviso-ir {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 8px;
+  color: var(--muted);
 }
 .campana-lista > li.no-leido {
   background: var(--mint-wash);
@@ -1838,4 +1882,57 @@ table.tbl {
   object-fit: cover;
   border-radius: 10px;
   margin: 6px 0;
+}
+
+/* Aviso completo (modal) con la imagen en grande */
+.aviso-completo h3 {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  color: var(--slate);
+}
+.aviso-completo-img {
+  display: block;
+  width: 100%;
+  margin: 12px 0 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: center;
+  cursor: zoom-in;
+}
+.aviso-completo-img img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  margin-bottom: 6px;
+}
+.aviso-completo .row-actions {
+  margin-top: 16px;
+}
+
+/* Imagen en pantalla completa */
+.ver-imagen {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgb(15 17 28 / 0.92);
+  cursor: zoom-out;
+}
+.ver-imagen img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.ver-imagen-cerrar {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 10px;
+  color: #fff;
+  background: rgb(255 255 255 / 0.14);
 }

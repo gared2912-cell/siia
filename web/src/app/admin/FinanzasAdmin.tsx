@@ -15,7 +15,8 @@ type SaldoMensual = Schema['SaldoMensual']['type'];
 // Finanzas en tres vistas: Ingresos (comprobantes, pagos, cargos y saldos por unidad), Egresos (gastos del
 // condominio con evidencia) y Balance mensual (saldo inicial, ingresos por tipo, egresos y Excel del mes).
 
-export function FinanzasAdmin() {
+/** `inicio`: subpestaña de Ingresos con la que abre (notificación de comprobante → «Por aprobar»). */
+export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const { condo, etiqueta, unidades, puede, tiene } = useAdmin();
   const id = condo!.id;
   const gestiona = puede('finanzas', 'editar');
@@ -31,7 +32,7 @@ export function FinanzasAdmin() {
     return { pagos, cargos, egresos, saldos, reservas };
   }, [id]);
   const [vista, setVista] = useState<'ingresos' | 'egresos' | 'balance'>('ingresos');
-  const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos' | 'amenidades'>('residentes');
+  const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos' | 'amenidades'>(inicio ?? 'residentes');
   const [generar, setGenerar] = useState(false);
   const [cobranza, setCobranza] = useState(false);
   const [cargo, setCargo] = useState(false);

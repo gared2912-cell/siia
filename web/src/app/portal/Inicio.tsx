@@ -1,6 +1,7 @@
-import { useAvisos } from './Notificaciones';
+import { itemDeAviso, useAvisos } from './Notificaciones';
+import { ItemAviso } from '../Campana';
 import { portal } from '../api';
-import { Badge, Empty, ErrorBox, Icon, Loading, MODULOS, PageHead, fecha, fechaHora, money, useLoad } from '../ui';
+import { Badge, Empty, ErrorBox, Icon, Loading, MODULOS, PageHead, fecha, money, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 type Resumen = {
@@ -88,17 +89,10 @@ export function Inicio({ perfil, go, has }: ModProps) {
             )}
           </div>
           {r.avisos.length ? (
-            <ul className="list">
-              {r.avisos.map((a) => (
-                <li key={a.id}>
-                  <div className="tile-icon" style={{ width: 34, height: 34 }}>
-                    <Icon name={a.tipo === 'CASETA' || a.tipo === 'VISITA' ? 'shield' : a.tipo === 'PAGO' ? 'money' : 'bell'} />
-                  </div>
-                  <div className="list-main">
-                    <strong>{a.titulo}</strong> {!a.leido && <Badge estado="PENDIENTE">Nuevo</Badge>}
-                    {a.texto && <div className="small">{a.texto}</div>}
-                    <div className="list-sub">{fechaHora(a.createdAt)}</div>
-                  </div>
+            <ul className="list avisos-lista">
+              {avisos.avisos.slice(0, 8).map((a) => (
+                <li key={a.id} className={a.leido ? '' : 'no-leido'}>
+                  <ItemAviso item={itemDeAviso(a, avisos.abrir)} />
                 </li>
               ))}
             </ul>

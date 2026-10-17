@@ -5,8 +5,9 @@ import { PageHead, Seg } from '../ui';
 import type { ModProps } from './PortalApp';
 import { useAvisos } from './Notificaciones';
 
-export function Chat({ perfil, has }: ModProps) {
-  const [canal, setCanal] = useState<'ADMIN' | 'CASETA'>('ADMIN');
+/** `inicial`: canal con el que abre (campana o notificación push: #chat/CASETA). */
+export function Chat({ perfil, has, inicial }: ModProps & { inicial?: string }) {
+  const [canal, setCanal] = useState<'ADMIN' | 'CASETA'>(inicial === 'CASETA' && has('visitas') ? 'CASETA' : 'ADMIN');
   const tel = perfil.condominio?.telefonoCaseta;
   const { chat, refrescar } = useAvisos();
   const etiqueta = (c: 'ADMIN' | 'CASETA', t: string) => (chat[c] ? `${t} (${chat[c]})` : t);

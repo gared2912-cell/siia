@@ -11,6 +11,9 @@ import type { Visita } from '../portal/Visitas';
 import { useInsigniaApp } from '../AppMovil';
 import { comprimirImagen, mensajeErrorCamara, pedirCamara } from '../camara';
 import { RegistroVigilancia } from './Vigilancia';
+import { Campana, marcarVisto, useVistos, type ItemCampana } from '../Campana';
+
+const VISTOS_CASETA = 'siia-vistos-caseta';
 
 type V = Visita & { unidad: string; estacionamiento?: Estacionamiento };
 
@@ -49,19 +52,12 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   const esperando = (panel.data?.solicitudes ?? []).some((v) => v.estado === 'POR_AUTORIZAR');
   usePoll(() => panel.reload(true), esperando ? 6000 : 30000, mods.includes('visitas'));
   const porAtender = (panel.data?.solicitudes ?? []).filter((v) => v.estado === 'AUTORIZADA').length;
-  // Conversaciones cuyo último mensaje es de un residente (menú Chat e icono de la app)
+  // Conversaciones cuyo último mensaje es de un residente (menú Chat)
   const conChat = mods.includes('visitas') && mods.includes('chat');
   const hilos = useLoad(() => (conChat ? portal<Hilo[]>('caseta.hilos') : Promise.resolve([] as Hilo[])), [conChat]);
   usePoll(() => hilos.reload(true), 15000, conChat);
   const porResponder = (hilos.data ?? []).filter((h) => h.ultimo.autorRol === 'RESIDENTE').length;
-  useInsigniaApp(porResponder);
-
-  if (!mods.includes('visitas'))
-    return (
-      <div className="auth-screen">
-        <div className="panel auth-card">La administración aún no habilita el módulo de visitas y caseta para este condominio.</div>
-      </div>
-    );
+  const vistos = useVistos(VISTOS_CASETA);
 
   const nav: NavItem[] = [
     { key: 'escanear', label: 'Escanear pase', icon: 'qr', count: porAtender },
@@ -70,10 +66,51 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
     { key: 'vigilancia', label: 'Registro de vigilancia', icon: 'shield' },
     ...(mods.includes('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: porResponder }] : []),
   ];
-  const actual = nav.some((n) => n.key === cur) ? cur : 'escanear';
+  // «chat/<unidad>» abre esa conversación (campana o notificación push)
+  const [base, sub] = cur.split('/');
+  const actual = nav.some((n) => n.key === base) ? base : 'escanear';
+
+  // Campana: respuestas de residentes a llegadas sin pase y chats por responder; cada renglón lleva a donde se atiende.
+  const avisos: ItemCampana[] = vistos([
+    ...(panel.data?.solicitudes ?? [])
+      .filter((v) => v.estado === 'AUTORIZADA' || v.estado === 'RECHAZADA')
+      .map((v) => ({
+        id: `sol-${v.id}-${v.estado}`,
+        icono: 'shield',
+        titulo: `${v.estado === 'AUTORIZADA' ? 'Autorizado' : 'Rechazado'}: ${v.nombre}`,
+        texto: `${v.unidad} · ${v.estado === 'AUTORIZADA' ? 'registra la entrada' : 'no autorizó el acceso'}`,
+        nuevo: true,
+        abrir: () => go('escanear'),
+      })),
+    ...(panel.data?.solicitudes ?? [])
+      .filter((v) => v.estado === 'POR_AUTORIZAR')
+      .map((v) => ({ id: `sol-${v.id}`, icono: 'shield', titulo: `Esperando respuesta: ${v.nombre}`, texto: v.unidad, abrir: () => go('escanear') })),
+    ...(hilos.data ?? [])
+      .filter((h) => h.ultimo.autorRol === 'RESIDENTE')
+      .map((h) => ({
+        id: `chat-${h.unidadId}`,
+        icono: 'chat',
+        titulo: `Mensaje de ${h.unidad}`,
+        texto: h.ultimo.texto || '📷 Foto',
+        fecha: h.ultimo.createdAt,
+        nuevo: true,
+        abrir: () => go(`chat/${h.unidadId}`),
+      })),
+  ]);
+  const sinRevisar = avisos.filter((a) => a.nuevo).length;
+  // El icono de la app lleva el mismo número que la campana
+  useInsigniaApp(sinRevisar);
+
+  if (!mods.includes('visitas'))
+    return (
+      <div className="auth-screen">
+        <div className="panel auth-card">La administración aún no habilita el módulo de visitas y caseta para este condominio.</div>
+      </div>
+    );
+
 
   return (
-    <Shell api="portal" nav={nav} current={actual} onNav={go} title={`Caseta · ${perfil.condominio!.nombre}`} subtitle={perfil.perfil?.nombre ?? perfil.email} user={perfil.email}>
+    <Shell api="portal" nav={nav} current={actual} onNav={go} title={`Caseta · ${perfil.condominio!.nombre}`} subtitle={perfil.perfil?.nombre ?? perfil.email} user={perfil.email} actions={<Campana total={sinRevisar} items={avisos} vacio="Sin pendientes." />}>
       {panel.error && <ErrorBox error={panel.error} retry={panel.reload} />}
       {!!panel.data?.extraviadas.length && (
         <div className="alert error" style={{ marginBottom: 16 }}>
@@ -102,7 +139,7 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
           <Loading />
         ))}
       {actual === 'vigilancia' && <RegistroVigilancia miNombre={perfil.perfil?.nombre ?? ''} />}
-      {actual === 'chat' && <ChatCaseta unidades={panel.data?.unidades ?? []} hilos={hilos} />}
+      {actual === 'chat' && <ChatCaseta key={cur} inicial={sub} unidades={panel.data?.unidades ?? []} hilos={hilos} />}
     </Shell>
   );
 }
@@ -529,8 +566,12 @@ function Solicitudes({ lista, est, onCambio }: { lista: V[]; est?: Estacionamien
   );
 }
 
-function ChatCaseta({ unidades, hilos }: { unidades: Panel['unidades']; hilos: { data?: Hilo[]; reload: (silencioso?: boolean) => void } }) {
-  const [unidadId, setUnidadId] = useState('');
+function ChatCaseta({ unidades, hilos, inicial }: { unidades: Panel['unidades']; hilos: { data?: Hilo[]; reload: (silencioso?: boolean) => void }; inicial?: string }) {
+  const [unidadId, setUnidadId] = useState(inicial ?? '');
+  // Abrir la conversación la marca como revisada en la campana
+  useEffect(() => {
+    if (unidadId) marcarVisto(VISTOS_CASETA, `chat-${unidadId}`);
+  }, [unidadId, hilos.data]);
   return (
     <div className="stack">
       <PageHead icon="chat" title="Chat con residentes" />

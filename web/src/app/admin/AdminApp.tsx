@@ -6,7 +6,6 @@ import { adminCall, all, db, grupos, type Schema } from '../api';
 import { alcanza, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 import { Acceso, Shell, useHashNav, type NavItem } from '../Shell';
 import { ErrorBox, Field, Icon, Loading, ToastProvider, useLoad, usePoll } from '../ui';
-import { useInsigniaApp } from '../AppMovil';
 import { Panel } from './Panel';
 import { Administradores } from './Administradores';
 import { Condominios } from './Condominios';
@@ -14,6 +13,7 @@ import { FinanzasAdmin } from './FinanzasAdmin';
 import { ComunicadosAdmin, EncuestasAdmin, ChatAdmin } from './Comunicacion';
 import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, MascotasAdmin } from './Operacion';
 import { ResidentesRapido } from './ResidentesRapido';
+import { CampanaAdmin } from './CampanaAdmin';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -112,13 +112,19 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   const visible = (k: string) => k === 'panel' || puede(k) || (k === 'condominios' && puede('usuarios'));
   const secciones = SECCIONES.filter((s) => (s.soloSuper ? mios.superadmin : visible(s.key)));
   const condos = useLoad(() => all<Condominio>((o) => db.models.Condominio.list(o)));
+  // Una notificación push abre /admin/?c=<condominio>#/sección: ese condominio queda seleccionado.
   const [condoId, setCondoIdState] = useState<string>(() => {
+    const desdeAviso = new URLSearchParams(location.search).get('c');
     try {
-      return localStorage.getItem(LS) ?? '';
+      if (desdeAviso) localStorage.setItem(LS, desdeAviso);
+      return desdeAviso ?? localStorage.getItem(LS) ?? '';
     } catch {
-      return '';
+      return desdeAviso ?? '';
     }
   });
+  useEffect(() => {
+    if (location.search) history.replaceState(null, '', location.pathname + location.hash);
+  }, []);
   const setCondoId = (id: string) => {
     setCondoIdState(id);
     try {
@@ -160,7 +166,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     tiene,
   };
 
-  // Conversaciones del condominio cuyo último mensaje es de un residente (menú Chat e icono de la app)
+  // Conversaciones del condominio cuyo último mensaje es de un residente (menú Chat; el icono de la app lleva el número de la campana)
   const veChat = !!condo && puede('chat');
   const mensajes = useLoad(
     () => (veChat ? all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: condo!.id }, o)) : Promise.resolve([])),
@@ -168,7 +174,6 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   );
   usePoll(() => mensajes.reload(true), 30000, veChat);
   const chatPorResponder = useMemo(() => porResponder(mensajes.data ?? [], 'ADMIN'), [mensajes.data]);
-  useInsigniaApp(chatPorResponder);
   const nav = secciones.map((s) => (s.key === 'chat' ? { ...s, count: chatPorResponder } : s));
 
   // «sección/subsección» abre una parte concreta (p. ej. condominios/residentes, acceso directo desde el Panel).
@@ -189,6 +194,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
         title="Administración SIIA"
         subtitle={condo?.nombre ?? 'Sin condominio seleccionado'}
         user={`${yo} · ${mios.rol}`}
+        actions={condo && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
       >
         {condos.error && <ErrorBox error={condos.error} retry={condos.reload} />}
         {!sec.global && lista.length > 0 && (
@@ -225,10 +231,10 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'panel' && (rapido ? <ResidentesRapido go={go} /> : <Panel go={go} />)}
             {actual === 'administradores' && <Administradores />}
             {actual === 'condominios' && <Condominios key={cur} inicio={sub === 'residentes' ? 'residentes' : undefined} />}
-            {actual === 'finanzas' && <FinanzasAdmin />}
+            {actual === 'finanzas' && <FinanzasAdmin key={cur} inicio={sub === 'revision' ? 'revision' : undefined} />}
             {actual === 'comunicados' && <ComunicadosAdmin />}
             {actual === 'encuestas' && <EncuestasAdmin />}
-            {actual === 'chat' && <ChatAdmin onCambio={() => mensajes.reload(true)} />}
+            {actual === 'chat' && <ChatAdmin key={cur} inicial={sub} onCambio={() => mensajes.reload(true)} />}
             {actual === 'incidentes' && <IncidentesAdmin />}
             {actual === 'mantenimientos' && <MantenimientosAdmin />}
             {actual === 'amenidades' && <AmenidadesAdmin />}

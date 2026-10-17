@@ -73,6 +73,8 @@ async function enviarAResidentes(condominioId: string, unidadId: string, categor
 
 const etiqueta = async (unidadId?: string) => (unidadId ? ((await get('Unidad', { id: unidadId }))?.etiqueta ?? '') : '');
 const nombreCondo = async (id: string) => (await get('Condominio', { id }))?.nombre ?? '';
+/** Sección del panel con el condominio ya seleccionado (?c=), para administradores de varios condominios. */
+const panel = (condominioId: string, seccion: string) => `/admin/?c=${encodeURIComponent(condominioId)}#/${seccion}`;
 const corto = (s: string, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 async function procesar(modelo: string, r: Item): Promise<number> {
@@ -81,8 +83,8 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviarAResidentes(r.condominioId, r.unidadId, categoriaDeAviso(r.tipo), {
         title: r.titulo,
         body: r.texto ? corto(r.texto) : undefined,
-        // Una solicitud de acceso abre Visitas para autorizarla ahí mismo
-        url: r.tipo === 'ACCESO' ? '/portal/#visitas' : '/portal/#inicio',
+        // Abre el aviso: lo marca como leído y lleva a su sección (una solicitud de acceso, a Visitas para autorizarla)
+        url: `/portal/#aviso/${r.id}`,
         tag: `aviso-${r.id}`,
         // Imagen grande en la notificación (aviso de servicios); Android la muestra, iPhone solo el texto
         ...(r.imagen ? { image: r.imagen } : {}),
@@ -91,19 +93,19 @@ async function procesar(modelo: string, r: Item): Promise<number> {
     case 'Mensaje': {
       const texto = corto(r.texto ?? '');
       if (r.autorRol === 'RESIDENTE' && r.canal === 'CASETA') {
-        return enviar(await vigilantes(r.condominioId), 'chat', { title: `Mensaje de ${r.autorNombre ?? 'un residente'}`, body: texto, url: '/portal/#chat', tag: `chat-${r.hilo}` });
+        return enviar(await vigilantes(r.condominioId), 'chat', { title: `Mensaje de ${r.autorNombre ?? 'un residente'}`, body: texto, url: `/portal/#chat/${r.unidadId}`, tag: `chat-${r.hilo}` });
       }
       if (r.autorRol === 'RESIDENTE') {
         const condo = await nombreCondo(r.condominioId);
         return enviar(await administradores(r.condominioId, 'chat'), 'chat', {
           title: `Mensaje de ${r.autorNombre ?? 'un residente'}`,
           body: `${condo}: ${texto}`,
-          url: '/admin/#chat',
+          url: panel(r.condominioId, `chat/${r.unidadId}`),
           tag: `chat-${r.hilo}`,
         });
       }
       const de = r.canal === 'CASETA' ? 'la caseta' : 'la administración';
-      return enviarAResidentes(r.condominioId, r.unidadId, 'chat', { title: `Mensaje de ${de}`, body: texto, url: '/portal/#chat', tag: `chat-${r.hilo}` });
+      return enviarAResidentes(r.condominioId, r.unidadId, 'chat', { title: `Mensaje de ${de}`, body: texto, url: `/portal/#chat/${r.canal === 'CASETA' ? 'CASETA' : 'ADMIN'}`, tag: `chat-${r.hilo}` });
     }
 
     case 'Pago': {
@@ -112,7 +114,7 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviar(await administradores(r.condominioId, 'pagos'), 'pagos', {
         title: 'Comprobante por aprobar',
         body: `${condo} · ${unidad} · ${mxn(r.monto ?? 0)}`,
-        url: '/admin/#finanzas',
+        url: panel(r.condominioId, 'finanzas/revision'),
         tag: `pago-${r.id}`,
       });
     }
@@ -122,7 +124,7 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviar(await administradores(r.condominioId, 'incidentes'), 'incidentes', {
         title: `Incidente: ${corto(r.titulo ?? '', 60)}`,
         body: `${condo} · ${unidad}${r.categoria ? ` · ${r.categoria}` : ''}`,
-        url: '/admin/#incidentes',
+        url: panel(r.condominioId, 'incidentes'),
         tag: `incidente-${r.id}`,
       });
     }
@@ -133,7 +135,7 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviar(await administradores(r.condominioId, 'reservas'), 'reservas', {
         title: `Reserva por aprobar: ${amenidad?.nombre ?? 'amenidad'}`,
         body: `${condo} · ${unidad} · ${r.fecha} ${r.horaInicio}–${r.horaFin}`,
-        url: '/admin/#amenidades',
+        url: panel(r.condominioId, 'amenidades'),
         tag: `reserva-${r.id}`,
       });
     }
@@ -144,7 +146,7 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       return enviar(await administradores(r.condominioId, 'mascotas'), 'mascotas', {
         title: `Mascota por validar: ${r.nombre}`,
         body: `${condo} · ${unidad}`,
-        url: '/admin/#mascotas',
+        url: panel(r.condominioId, 'mascotas'),
         tag: `mascota-${r.id}`,
       });
     }

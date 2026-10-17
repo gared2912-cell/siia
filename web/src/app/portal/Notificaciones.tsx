@@ -2,26 +2,60 @@
 // cuando llega algo nuevo (comprobante recibido, pago aprobado, visitas, paquetería…).
 // El contador suma los avisos sin leer y los mensajes de chat que el residente aún no abre; ese total
 // también va al icono de la app instalada.
+// Tocar un aviso lo marca como leído y lleva a la sección donde se atiende; los avisos con imagen o sin
+// sección (aviso de servicios, alertas de caseta) se abren completos, con la imagen en grande.
+// La notificación push abre /portal/#aviso/<id> y hace lo mismo.
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { portal } from '../api';
-import { Icon, fechaHora, usePoll, useToast } from '../ui';
+import { Icon, Modal, VerImagen, fechaHora, usePoll, useToast } from '../ui';
 import { useInsigniaApp } from '../AppMovil';
+import { Campana as CampanaBase, type ItemCampana } from '../Campana';
 
 export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string; leido?: boolean; createdAt: string; imagen?: string };
 export type ChatSinLeer = { ADMIN: number; CASETA: number };
 type Estado = { sinLeer: number; avisos: Aviso[]; chat: ChatSinLeer };
 /** `total`: avisos sin leer + mensajes de chat sin leer (campana e icono de la app). */
-type Ctx = Estado & { total: number; chatSinLeer: number; refrescar: () => void; leerTodo: () => Promise<void> };
+type Ctx = Estado & { total: number; chatSinLeer: number; refrescar: () => void; leerTodo: () => Promise<void>; abrir: (a: Aviso) => void };
 
 const SIN_CHAT: ChatSinLeer = { ADMIN: 0, CASETA: 0 };
-const AvisosCtx = createContext<Ctx>({ sinLeer: 0, avisos: [], chat: SIN_CHAT, total: 0, chatSinLeer: 0, refrescar: () => {}, leerTodo: async () => {} });
+const AvisosCtx = createContext<Ctx>({ sinLeer: 0, avisos: [], chat: SIN_CHAT, total: 0, chatSinLeer: 0, refrescar: () => {}, leerTodo: async () => {}, abrir: () => {} });
 export const useAvisos = () => useContext(AvisosCtx);
+
+/** Sección del portal donde se atiende cada tipo de aviso. Sin sección, el aviso se muestra completo. */
+const DESTINO: Record<string, { key: string; label: string }> = {
+  PAGO: { key: 'finanzas', label: 'Ir a Finanzas' },
+  VISITA: { key: 'visitas', label: 'Ir a Visitas' },
+  ACCESO: { key: 'visitas', label: 'Autorizar en Visitas' },
+  RESERVA: { key: 'amenidades', label: 'Ir a Reservas' },
+  INCIDENTE: { key: 'incidentes', label: 'Ir a Incidentes' },
+  MASCOTA: { key: 'mascotas', label: 'Ir a Mascotas' },
+  COMUNICADO: { key: 'comunicados', label: 'Ir a Comunicados' },
+  ENCUESTA: { key: 'comunicados', label: 'Ir a Comunicados' },
+};
+
+export const ICONO_AVISO: Record<string, string> = {
+  PAGO: 'money',
+  CASETA: 'shield',
+  VISITA: 'shield',
+  ACCESO: 'shield',
+  SERVICIO: 'shield',
+  RESERVA: 'calendar',
+  INCIDENTE: 'alert',
+  MASCOTA: 'paw',
+  COMUNICADO: 'megaphone',
+  ENCUESTA: 'vote',
+};
+
+const avisoDeHash = () => decodeURIComponent(location.hash.match(/aviso\/([^/?]+)/)?.[1] ?? '');
 
 export function AvisosProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const [estado, setEstado] = useState<Estado>({ sinLeer: 0, avisos: [], chat: SIN_CHAT });
+  const [listo, setListo] = useState(false);
+  const [abierto, setAbierto] = useState<Aviso | null>(null);
   const vistos = useRef<Set<string> | null>(null);
   const chatAntes = useRef<ChatSinLeer | null>(null);
+  const buscado = useRef('');
 
   const refrescar = useCallback(async () => {
     try {
@@ -43,6 +77,8 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
       setEstado(r);
     } catch {
       /* sin conexión: se reintenta en el siguiente ciclo */
+    } finally {
+      setListo(true);
     }
   }, [toast]);
 
@@ -52,100 +88,118 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
     refrescar();
   }, [refrescar]);
 
+  const abrir = useCallback((a: Aviso) => {
+    if (!a.leido) {
+      setEstado((e) => ({ ...e, sinLeer: Math.max(0, e.sinLeer - 1), avisos: e.avisos.map((x) => (x.id === a.id ? { ...x, leido: true } : x)) }));
+      portal('inicio.leerAviso', { id: a.id }).catch(() => undefined);
+    }
+    const destino = DESTINO[a.tipo ?? ''];
+    if (destino && !a.imagen) {
+      location.hash = `/${destino.key}`;
+      return;
+    }
+    setAbierto(a);
+    if (avisoDeHash()) location.hash = '/inicio';
+  }, []);
+
   useEffect(() => {
     refrescar();
   }, [refrescar]);
   usePoll(refrescar, 30000);
 
+  // Notificación push tocada: #aviso/<id>. Si el aviso acaba de llegar y aún no está en la lista, se vuelve a consultar una vez.
+  useEffect(() => {
+    const ver = () => {
+      const id = avisoDeHash();
+      if (!id || !listo) return;
+      const a = estado.avisos.find((x) => x.id === id);
+      if (a) abrir(a);
+      else if (buscado.current !== id) {
+        buscado.current = id;
+        refrescar();
+      } else location.hash = '/inicio';
+    };
+    ver();
+    window.addEventListener('hashchange', ver);
+    return () => window.removeEventListener('hashchange', ver);
+  }, [listo, estado.avisos, abrir, refrescar]);
+
   const chatSinLeer = estado.chat.ADMIN + estado.chat.CASETA;
   const total = estado.sinLeer + chatSinLeer;
   useInsigniaApp(total);
 
-  return <AvisosCtx.Provider value={{ ...estado, total, chatSinLeer, refrescar, leerTodo }}>{children}</AvisosCtx.Provider>;
+  return (
+    <AvisosCtx.Provider value={{ ...estado, total, chatSinLeer, refrescar, leerTodo, abrir }}>
+      {children}
+      {abierto && <AvisoCompleto aviso={abierto} onClose={() => setAbierto(null)} />}
+    </AvisosCtx.Provider>
+  );
 }
 
-const ICONO: Record<string, string> = { PAGO: 'money', CASETA: 'shield', VISITA: 'shield', RESERVA: 'calendar', INCIDENTE: 'alert', MASCOTA: 'paw', COMUNICADO: 'megaphone', ENCUESTA: 'vote' };
+/** Aviso completo: imagen en grande (se puede ver en pantalla completa), texto y botón a su sección. */
+function AvisoCompleto({ aviso: a, onClose }: { aviso: Aviso; onClose: () => void }) {
+  const [grande, setGrande] = useState(false);
+  const destino = DESTINO[a.tipo ?? ''];
+  return (
+    <Modal title="Notificación" onClose={onClose}>
+      <div className="aviso-completo">
+        <h3>{a.titulo}</h3>
+        <div className="list-sub">{fechaHora(a.createdAt)}</div>
+        {a.imagen && (
+          <button className="aviso-completo-img" onClick={() => setGrande(true)} aria-label="Ver la imagen en pantalla completa">
+            <img src={a.imagen} alt="" />
+            <span className="small muted">Toca la imagen para verla en pantalla completa</span>
+          </button>
+        )}
+        {a.texto && <p className="pre">{a.texto}</p>}
+        <div className="row-actions">
+          {destino && (
+            <button className="btn-app" onClick={() => (onClose(), (location.hash = `/${destino.key}`))}>
+              {destino.label}
+              <Icon name="arrow" />
+            </button>
+          )}
+          <button className={`btn-app ${destino ? 'secondary' : ''}`} onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+      </div>
+      {grande && a.imagen && <VerImagen src={a.imagen} alt={a.titulo} onClose={() => setGrande(false)} />}
+    </Modal>
+  );
+}
+
+/** Aviso como renglón tocable (campana e Inicio). */
+export function itemDeAviso(a: Aviso, abrir: (a: Aviso) => void): ItemCampana {
+  return { id: a.id, icono: ICONO_AVISO[a.tipo ?? ''] ?? 'bell', titulo: a.titulo, texto: a.texto, fecha: a.createdAt, imagen: a.imagen, nuevo: !a.leido, abrir: () => abrir(a) };
+}
 
 export function Campana() {
-  const { sinLeer, total, chat, chatSinLeer, avisos, leerTodo } = useAvisos();
-  const [abierto, setAbierto] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!abierto) return;
-    const fuera = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setAbierto(false);
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setAbierto(false);
-    document.addEventListener('mousedown', fuera);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('mousedown', fuera);
-      document.removeEventListener('keydown', esc);
-    };
-  }, [abierto]);
-
+  const { sinLeer, total, chat, avisos, leerTodo, abrir } = useAvisos();
+  const items: ItemCampana[] = [
+    ...(['ADMIN', 'CASETA'] as const)
+      .filter((c) => chat[c] > 0)
+      .map((c) => ({
+        id: `chat-${c}`,
+        icono: 'chat',
+        titulo: `${chat[c] === 1 ? '1 mensaje nuevo' : `${chat[c]} mensajes nuevos`} de ${c === 'ADMIN' ? 'la administración' : 'la caseta'}`,
+        texto: 'Toca para abrir el chat.',
+        nuevo: true,
+        abrir: () => (location.hash = `/chat/${c}`),
+      })),
+    ...avisos.map((a) => itemDeAviso(a, abrir)),
+  ];
   return (
-    <div className="campana" ref={ref}>
-      <button
-        className="icon-btn"
-        onClick={() => setAbierto(!abierto)}
-        aria-label={total ? `Notificaciones: ${total} sin leer` : 'Notificaciones'}
-        aria-expanded={abierto}
-      >
-        <Icon name="bell" />
-        {total > 0 && <span className="campana-n">{total > 99 ? '99+' : total}</span>}
-      </button>
-      {abierto && (
-        <div className="campana-panel" role="dialog" aria-label="Notificaciones">
-          <div className="campana-head">
-            <strong>Notificaciones</strong>
-            {sinLeer > 0 && (
-              <button className="linklike" onClick={leerTodo}>
-                Marcar todo como leído
-              </button>
-            )}
-          </div>
-          {chatSinLeer > 0 && (
-            <ul className="list campana-lista">
-              {(['ADMIN', 'CASETA'] as const)
-                .filter((c) => chat[c] > 0)
-                .map((c) => (
-                  <li key={c} className="no-leido" style={{ cursor: 'pointer' }} onClick={() => (setAbierto(false), (location.hash = '/chat'))}>
-                    <span className="tile-icon" style={{ width: 32, height: 32 }}>
-                      <Icon name="chat" />
-                    </span>
-                    <div className="list-main">
-                      <strong>
-                        {chat[c] === 1 ? '1 mensaje nuevo' : `${chat[c]} mensajes nuevos`} de {c === 'ADMIN' ? 'la administración' : 'la caseta'}
-                      </strong>
-                      <div className="small">Toca para abrir el chat.</div>
-                    </div>
-                  </li>
-                ))}
-            </ul>
-          )}
-          {avisos.length ? (
-            <ul className="list campana-lista">
-              {avisos.map((a) => (
-                <li key={a.id} className={a.leido ? '' : 'no-leido'}>
-                  <span className="tile-icon" style={{ width: 32, height: 32 }}>
-                    <Icon name={ICONO[a.tipo ?? ''] ?? 'bell'} />
-                  </span>
-                  <div className="list-main">
-                    <strong>{a.titulo}</strong>
-                    {a.imagen && <img className="aviso-imagen" src={a.imagen} alt="" loading="lazy" />}
-                    {a.texto && <div className="small">{a.texto}</div>}
-                    <div className="list-sub">{fechaHora(a.createdAt)}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            !chatSinLeer && <p className="muted small" style={{ padding: 16, margin: 0 }}>
-              Sin notificaciones.
-            </p>
-          )}
-        </div>
-      )}
-    </div>
+    <CampanaBase
+      total={total}
+      items={items}
+      encabezado={
+        sinLeer > 0 && (
+          <button className="linklike" onClick={leerTodo}>
+            Marcar todo como leído
+          </button>
+        )
+      }
+    />
   );
 }

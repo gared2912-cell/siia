@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { descargarReporteEncuesta } from './excel';
+import { marcarVisto } from '../Campana';
+import { VISTOS_ADMIN } from './CampanaAdmin';
 
 type Comunicado = Schema['Comunicado']['type'];
 type Encuesta = Schema['Encuesta']['type'];
@@ -292,12 +294,17 @@ function NuevaEncuesta({ onClose, onDone }: { onClose: () => void; onDone: () =>
 }
 
 // ---------- Chat con residentes ----------
-export function ChatAdmin({ onCambio }: { onCambio?: () => void }) {
+/** `inicial`: conversación que abre (unidad), desde la campana o la notificación push. */
+export function ChatAdmin({ onCambio, inicial }: { onCambio?: () => void; inicial?: string }) {
   const { condo, unidades, etiqueta } = useAdmin();
   const cid = condo!.id;
   const hilos = useLoad(() => all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: cid }, o)), [cid]);
   usePoll(() => hilos.reload(true), 15000);
-  const [unidadId, setUnidadId] = useState('');
+  const [unidadId, setUnidadId] = useState(inicial ?? '');
+  // Abrir la conversación la marca como revisada en la campana
+  useEffect(() => {
+    if (unidadId) marcarVisto(VISTOS_ADMIN, `chat-${unidadId}`);
+  }, [unidadId, hilos.data]);
 
   const recientes = useMemo(() => {
     const m = new Map<string, Mensaje>();
