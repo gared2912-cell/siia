@@ -19,6 +19,79 @@ export type Amenidad = {
 type Reserva = { id: string; amenidadId: string; fecha: string; horaInicio: string; horaFin: string; invitados?: number; estado: string; nota?: string; limitePago?: string };
 type Doc = { slot: string; titulo: string };
 type Ocupado = { horaInicio: string; horaFin: string; estado: string; por: string | null };
+type OcupadoMes = Ocupado & { fecha: string };
+
+const DIAS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const iso = (a: number, m: number, d: number) => `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+const moverMes = (mes: string, n: number) => {
+  const [a, m] = mes.split('-').map(Number);
+  const d = new Date(a, m - 1 + n, 1);
+  return iso(d.getFullYear(), d.getMonth() + 1, 1).slice(0, 7);
+};
+
+/** Calendario del mes: los días con reservas van en rojo; al tocar un día se elige esa fecha. */
+function Calendario({ amenidadId, fecha: elegida, onElegir }: { amenidadId: string; fecha: string; onElegir: (f: string) => void }) {
+  const hoyStr = hoy();
+  const [mes, setMes] = useState(elegida.slice(0, 7));
+  const { data, loading } = useLoad(() => portal<OcupadoMes[]>('amenidades.calendario', { amenidadId, mes }), [mes]);
+  const conReserva = new Set((data ?? []).map((r) => r.fecha));
+  const [a, m] = mes.split('-').map(Number);
+  const vacios = (new Date(a, m - 1, 1).getDay() + 6) % 7; // la semana empieza en lunes
+  const dias = new Date(a, m, 0).getDate();
+  const titulo = new Date(a, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+
+  return (
+    <div className="cal">
+      <div className="cal-cab">
+        <button type="button" className="icon-btn" onClick={() => setMes(moverMes(mes, -1))} disabled={mes <= hoyStr.slice(0, 7)} aria-label="Mes anterior">
+          <Icon name="chevron-left" />
+        </button>
+        <strong>
+          {titulo.charAt(0).toUpperCase() + titulo.slice(1)}
+          {loading && <span className="muted small"> · consultando…</span>}
+        </strong>
+        <button type="button" className="icon-btn" onClick={() => setMes(moverMes(mes, 1))} aria-label="Mes siguiente">
+          <Icon name="chevron-right" />
+        </button>
+      </div>
+      <div className="cal-grid" role="grid">
+        {DIAS.map((d, i) => (
+          <span key={i} className="cal-dia-sem">
+            {d}
+          </span>
+        ))}
+        {Array.from({ length: vacios }, (_, i) => (
+          <span key={`v${i}`} />
+        ))}
+        {Array.from({ length: dias }, (_, i) => {
+          const f = iso(a, m, i + 1);
+          const ocupado = conReserva.has(f);
+          return (
+            <button
+              key={f}
+              type="button"
+              className={`cal-dia${ocupado ? ' ocupado' : ''}${f === elegida ? ' elegido' : ''}${f === hoyStr ? ' hoy' : ''}`}
+              disabled={f < hoyStr}
+              onClick={() => onElegir(f)}
+              aria-pressed={f === elegida}
+              aria-label={`${i + 1}${ocupado ? ', con reservas' : ''}`}
+            >
+              {i + 1}
+            </button>
+          );
+        })}
+      </div>
+      <div className="cal-leyenda small muted">
+        <span>
+          <i className="cal-punto ocupado" /> Con reservas
+        </span>
+        <span>
+          <i className="cal-punto elegido" /> Día elegido
+        </span>
+      </div>
+    </div>
+  );
+}
 
 /** Abre un documento de amenidades (reglamento o términos) en otra pestaña. */
 async function abrirDocumento(slot: string) {
@@ -288,17 +361,15 @@ function Reservar({
   const total = sel.reduce((s, a) => s + (a.costo ?? 0), 0);
   const aprobacion = total === 0 && sel.some((a) => a.requiereAprobacion);
 
-  const ocupado = (a: Amenidad) => {
-    const o = ocup.data?.[a.id];
-    if (ocup.loading && !o) return 'consultando…';
-    const txt = (x: Ocupado) => `${x.horaInicio}–${x.horaFin}${x.por ? ` (${x.por})` : ''}`;
-    const apartado = (o ?? []).filter((x) => x.estado === 'APROBADA');
-    const espera = (o ?? []).filter((x) => x.estado !== 'APROBADA');
-    if (!apartado.length && !espera.length) return 'disponible todo el día';
-    return [apartado.length && `reservado ${apartado.map(txt).join(', ')}`, espera.length && `apartado en espera de pago ${espera.map(txt).join(', ')}`]
-      .filter(Boolean)
-      .join(' · ');
-  };
+  // Horarios ocupados del día elegido y la primera hora libre después de la última reserva
+  const mostrar = sel.length ? sel : [principal];
+  const ocupadosDe = (a: Amenidad) => ocup.data?.[a.id] ?? [];
+  const ultimaFin = mostrar
+    .flatMap(ocupadosDe)
+    .map((x) => x.horaFin)
+    .sort()
+    .pop();
+  const libreDesde = ultimaFin && ultimaFin < (cierra ?? '23:59') ? ultimaFin : undefined;
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
@@ -350,17 +421,38 @@ function Reservar({
             {a.reglas}
           </div>
         ))}
-        <Field label="Fecha">
-          <input required type="date" min={hoy()} value={f.fecha} onChange={set('fecha')} />
-        </Field>
-        <div className="small">
-          <strong>Ocupado ese día</strong>
-          {(sel.length ? sel : [principal]).map((a) => (
-            <div key={a.id}>
-              {(sel.length > 1 || conSecciones) && `${a.nombre}: `}
-              {ocupado(a)}
-            </div>
-          ))}
+        <Calendario amenidadId={principal.id} fecha={f.fecha} onElegir={(d) => setF({ ...f, fecha: d })} />
+        <div className="cal-detalle">
+          <strong className="cal-detalle-fecha">{fecha(f.fecha, { weekday: 'long', day: 'numeric', month: 'long' })}</strong>
+          {mostrar.map((a) => {
+            const o = ocupadosDe(a);
+            return (
+              <div key={a.id} className="cal-detalle-am">
+                {(mostrar.length > 1 || conSecciones) && <span className="small muted">{a.nombre}</span>}
+                {ocup.loading && !ocup.data ? (
+                  <span className="small muted">Consultando…</span>
+                ) : o.length ? (
+                  <div className="cal-horas">
+                    {o.map((x, i) => (
+                      <span key={i} className="cal-hora">
+                        <Icon name="clock" />
+                        {x.horaInicio}–{x.horaFin}
+                        {x.por && <em> · {x.por}</em>}
+                        {x.estado !== 'APROBADA' && <em> · en espera</em>}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="badge ok">Disponible todo el día</span>
+                )}
+              </div>
+            );
+          })}
+          {libreDesde && f.horaInicio !== libreDesde && (
+            <button type="button" className="btn-app sm secondary" onClick={() => setF({ ...f, horaInicio: libreDesde, horaFin: '' })}>
+              Reservar a partir de las {libreDesde}
+            </button>
+          )}
         </div>
         <div className="form-2">
           <Field label="Desde">

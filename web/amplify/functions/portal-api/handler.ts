@@ -424,6 +424,25 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       .sort((a, b) => a.horaInicio.localeCompare(b.horaInicio));
   },
 
+  // Calendario del mes: horarios apartados por día (desde hoy) de la amenidad, la amenidad completa y sus secciones.
+  // No dice qué unidad reservó.
+  async 'amenidades.calendario'({ condominio, p }) {
+    const am = await get('Amenidad', { id: str(p.amenidadId, 64) });
+    if (!am || am.condominioId !== condominio.id) fail('Amenidad no encontrada.');
+    const hoy = hoyMX();
+    const mes = /^\d{4}-\d{2}$/.test(p.mes) ? p.mes : hoy.slice(0, 7);
+    const todas = await byIndex('Amenidad', 'byCondominio', 'condominioId', condominio.id);
+    const ids = relacionadas(am!, todas);
+    const reservas = (await Promise.all(ids.map((id) => byIndex('Reserva', 'byAmenidad', 'amenidadId', id)))).flat();
+    const nombre = (id: string) => todas.find((a) => a.id === id)?.nombre ?? '';
+    const delMes = reservas.filter((r) => r.fecha?.startsWith(mes) && r.fecha >= hoy && ACTIVAS.includes(r.estado));
+    const vigentes = [];
+    for (const r of delMes) if (!(await vencerSiCorresponde(r))) vigentes.push(r);
+    return vigentes
+      .map((r) => ({ fecha: r.fecha, horaInicio: r.horaInicio, horaFin: r.horaFin, estado: r.estado, por: r.amenidadId === am!.id ? null : nombre(r.amenidadId) }))
+      .sort((a, b) => (a.fecha + a.horaInicio).localeCompare(b.fecha + b.horaInicio));
+  },
+
   // Reserva una amenidad, o una o varias secciones de la misma amenidad (una reserva por sección).
   async 'amenidades.reservar'({ condominio, unidad, sub, p }) {
     const pedidas: string[] = Array.isArray(p.amenidadIds) ? p.amenidadIds.map((x: unknown) => str(x, 64)) : [str(p.amenidadId, 64)];

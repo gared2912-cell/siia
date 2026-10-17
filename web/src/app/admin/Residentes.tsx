@@ -539,7 +539,7 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
               )}
             </p>
             <div className="table-wrap" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
-              <table className="tbl">
+              <table className="tbl tbl-tarjetas">
                 <thead>
                   <tr>
                     <th>Fila</th>
@@ -553,17 +553,17 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
                 <tbody>
                   {filas.map((f) => (
                     <tr key={f.linea} style={!f.cambios.length && !f.error ? { opacity: 0.6 } : undefined}>
-                      <td>{f.linea}</td>
-                      <td>
+                      <td data-label="Fila">{f.linea}</td>
+                      <td className="tt-titulo">
                         <strong>{f.etiqueta || '—'}</strong>
                       </td>
-                      <td>
+                      <td data-label="Residente">
                         {f.nombre || '—'}
                         {f.telefono && <div className="list-sub">{f.telefono}</div>}
                       </td>
-                      <td style={{ overflowWrap: 'anywhere' }}>{f.correo || '—'}</td>
-                      <td>{f.fechaEntrega ? fecha(f.fechaEntrega) : '—'}</td>
-                      <td>{estado(f)}</td>
+                      <td data-label="Correo" style={{ overflowWrap: 'anywhere' }}>{f.correo || '—'}</td>
+                      <td data-label="Entrega">{f.fechaEntrega ? fecha(f.fechaEntrega) : '—'}</td>
+                      <td data-label="Qué cambia">{estado(f)}</td>
                     </tr>
                   ))}
                 </tbody>

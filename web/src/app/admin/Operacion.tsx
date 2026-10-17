@@ -327,7 +327,7 @@ export function MantenimientosAdmin() {
         <section className="panel">
           {lista.length ? (
             <div className="table-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-tarjetas">
                 <thead>
                   <tr>
                     <th>Fecha</th>
@@ -341,17 +341,17 @@ export function MantenimientosAdmin() {
                 <tbody>
                   {lista.map((m) => (
                     <tr key={m.id}>
-                      <td>{fecha(m.fecha)}</td>
-                      <td>
+                      <td data-label="Fecha">{fecha(m.fecha)}</td>
+                      <td className="tt-titulo">
                         <strong>{m.titulo}</strong>
                         {m.area && <div className="small muted">{m.area}</div>}
                       </td>
-                      <td>{etiquetaEstado(m.tipo)}</td>
-                      <td>{m.proveedor ?? '—'}</td>
-                      <td>
+                      <td data-label="Tipo">{etiquetaEstado(m.tipo)}</td>
+                      <td data-label="Proveedor">{m.proveedor ?? '—'}</td>
+                      <td data-label="Estado">
                         <Badge estado={m.estado} />
                       </td>
-                      <td>
+                      <td className="tt-acciones">
                         {gestiona && (
                           <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
                             <button className="linklike" onClick={() => setEditar(m)}>
@@ -804,7 +804,7 @@ function BitacoraVisitas() {
         <section className="panel">
           {lista.length ? (
             <div className="table-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-tarjetas">
                 <thead>
                   <tr>
                     <th>Nombre</th>
@@ -818,17 +818,17 @@ function BitacoraVisitas() {
                 <tbody>
                   {lista.map((v) => (
                     <tr key={v.id}>
-                      <td>
+                      <td className="tt-titulo">
                         <strong>{v.nombre}</strong>
                         <div className="small muted">
                           {v.origen === 'CASETA' ? 'Registrada en caseta' : `Pase ${v.codigo ?? ''}`} {v.placas && `· ${v.placas}`}
                         </div>
                       </td>
-                      <td>{etiqueta(v.unidadId)}</td>
-                      <td>{etiquetaEstado(v.tipo)}</td>
-                      <td>{v.entradaEn ? fechaHora(v.entradaEn) : '—'}</td>
-                      <td>{v.salidaEn ? fechaHora(v.salidaEn) : '—'}</td>
-                      <td>
+                      <td data-label="Unidad">{etiqueta(v.unidadId)}</td>
+                      <td data-label="Tipo">{etiquetaEstado(v.tipo)}</td>
+                      <td data-label="Entrada">{v.entradaEn ? fechaHora(v.entradaEn) : '—'}</td>
+                      <td data-label="Salida">{v.salidaEn ? fechaHora(v.salidaEn) : '—'}</td>
+                      <td data-label="Estado">
                         <Badge estado={v.estado} />
                       </td>
                     </tr>

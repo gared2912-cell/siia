@@ -248,7 +248,7 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
         <section className="panel">
           <h2>Historial del fondo</h2>
           <div className="table-wrap">
-            <table className="tbl">
+            <table className="tbl tbl-tarjetas">
               <thead>
                 <tr>
                   <th>Mes</th>
@@ -264,15 +264,15 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
                   .slice(0, 12)
                   .map((x) => (
                     <tr key={x.periodo} style={x.periodo === mes ? { fontWeight: 700 } : undefined}>
-                      <td>{mesCorto(x.periodo)}</td>
-                      <td className="num">{money(x.inicial)}</td>
-                      <td className="num" style={{ color: 'var(--teal-dark)' }}>
+                      <td className="tt-titulo">{mesCorto(x.periodo)}</td>
+                      <td className="num" data-label="Saldo anterior">{money(x.inicial)}</td>
+                      <td className="num" data-label="Ingresos" style={{ color: 'var(--teal-dark)' }}>
                         {money(x.ingresos)}
                       </td>
-                      <td className="num" style={{ color: x.gastos ? 'var(--danger)' : undefined }}>
+                      <td className="num" data-label="Gastos" style={{ color: x.gastos ? 'var(--danger)' : undefined }}>
                         {money(x.gastos)}
                       </td>
-                      <td className="num">{money(x.final)}</td>
+                      <td className="num" data-label="Saldo">{money(x.final)}</td>
                     </tr>
                   ))}
               </tbody>

@@ -90,32 +90,22 @@ export function Finanzas(_: ModProps) {
       <section className="panel">
         <h2>Cargos</h2>
         {r.cargos.length ? (
-          <div className="table-wrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Concepto</th>
-                  <th>Vence</th>
-                  <th className="num">Monto</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {r.cargos.map((c) => (
-                  <tr key={c.id}>
-                    <td>{c.concepto}</td>
-                    <td>{fecha(c.vence)}</td>
-                    <td className="num">{money(c.monto)}</td>
-                    <td>
-                      <Badge estado={c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'VENCIDO' : c.estado}>
-                        {c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'Vencido' : undefined}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="cargos">
+            {r.cargos.map((c) => (
+              <li key={c.id} className="cargo">
+                <div className="cargo-main">
+                  <strong>{c.concepto}</strong>
+                  {c.vence && <span className="cargo-vence">Vence {fecha(c.vence)}</span>}
+                </div>
+                <div className="cargo-lado">
+                  <span className="cargo-monto">{money(c.monto)}</span>
+                  <Badge estado={c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'VENCIDO' : c.estado}>
+                    {c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'Vencido' : undefined}
+                  </Badge>
+                </div>
+              </li>
+            ))}
+          </ul>
         ) : (
           <Empty icon="money">Aún no hay cargos registrados.</Empty>
         )}

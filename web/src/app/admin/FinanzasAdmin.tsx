@@ -184,7 +184,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
         <section className="panel">
           {procesados.length ? (
             <div className="table-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-tarjetas">
                 <thead>
                   <tr>
                     <th>Folio</th>
@@ -198,14 +198,14 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                 <tbody>
                   {procesados.map((p) => (
                     <tr key={p.id}>
-                      <td>{p.folio ?? '—'}</td>
-                      <td>{etiqueta(p.unidadId)}</td>
-                      <td>{fecha(p.fecha)}</td>
-                      <td className="num">{money(p.monto)}</td>
-                      <td>
+                      <td data-label="Folio">{p.folio ?? '—'}</td>
+                      <td className="tt-titulo">{etiqueta(p.unidadId)}</td>
+                      <td data-label="Fecha">{fecha(p.fecha)}</td>
+                      <td className="num" data-label="Monto">{money(p.monto)}</td>
+                      <td data-label="Estado">
                         <Badge estado={p.estado} />
                       </td>
-                      <td>
+                      <td className="tt-acciones">
                         <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
                           <Archivo path={p.comprobantePath} origen={{ model: 'Pago', id: p.id }} label="Comprobante" />
                           {p.estado === 'VALIDADO' && (
@@ -241,7 +241,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
           </div>
           {cargosVista.length ? (
             <div className="table-wrap">
-              <table className="tbl">
+              <table className="tbl tbl-tarjetas">
                 <thead>
                   <tr>
                     <th>Unidad</th>
@@ -258,15 +258,15 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                     const vencido = c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr;
                     return (
                       <tr key={c.id}>
-                        <td>{etiqueta(c.unidadId)}</td>
-                        <td>{c.concepto}</td>
-                        <td className="small">{etiquetaIngreso(tipoDeCargo(c))}</td>
-                        <td>{fecha(c.vence)}</td>
-                        <td className="num">{money(c.monto)}</td>
-                        <td>
+                        <td className="tt-titulo">{etiqueta(c.unidadId)}</td>
+                        <td data-label="Concepto">{c.concepto}</td>
+                        <td className="small" data-label="Tipo">{etiquetaIngreso(tipoDeCargo(c))}</td>
+                        <td data-label="Vence">{fecha(c.vence)}</td>
+                        <td className="num" data-label="Monto">{money(c.monto)}</td>
+                        <td data-label="Estado">
                           <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
                         </td>
-                        <td>
+                        <td className="tt-acciones">
                           {gestiona && c.estado === 'PENDIENTE' && (
                             <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => cancelarCargo(c)}>
                               Cancelar
@@ -288,7 +288,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       {vista === 'ingresos' && tab === 'saldos' && (
         <section className="panel">
           <div className="table-wrap">
-            <table className="tbl">
+            <table className="tbl tbl-tarjetas">
               <thead>
                 <tr>
                   <th>Unidad</th>
@@ -300,10 +300,10 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
               <tbody>
                 {saldos.map(({ u, saldo, vencido }) => (
                   <tr key={u.id}>
-                    <td>{u.etiqueta}</td>
-                    <td>{u.propietario ?? '—'}</td>
-                    <td className="num">{money(saldo)}</td>
-                    <td className="num" style={{ color: vencido ? 'var(--danger)' : undefined }}>
+                    <td className="tt-titulo">{u.etiqueta}</td>
+                    <td data-label="Propietario">{u.propietario ?? '—'}</td>
+                    <td className="num" data-label="Saldo">{money(saldo)}</td>
+                    <td className="num" data-label="Vencido" style={{ color: vencido ? 'var(--danger)' : undefined }}>
                       {money(vencido)}
                     </td>
                   </tr>

@@ -253,7 +253,7 @@ function ImportarAccesos({
                   {leido.cambios.length} acceso(s) cambian: <strong>{susp} a Suspendido</strong> y <strong>{leido.cambios.length - susp} a Activado</strong>.
                 </div>
                 <div className="table-wrap">
-                  <table className="tbl">
+                  <table className="tbl tbl-tarjetas">
                     <thead>
                       <tr>
                         <th>Casa</th>
@@ -265,10 +265,10 @@ function ImportarAccesos({
                     <tbody>
                       {leido.cambios.map((c) => (
                         <tr key={c.accesoId}>
-                          <td>{c.unidad}</td>
-                          <td>{c.residente}</td>
-                          <td>{c.acceso}</td>
-                          <td>
+                          <td className="tt-titulo">{c.unidad}</td>
+                          <td data-label="Residente">{c.residente}</td>
+                          <td data-label="Acceso">{c.acceso}</td>
+                          <td data-label="Cambio">
                             <span className={`pill sm ${c.estado === 'SUSPENDIDO' ? 'mal' : 'ok'}`}>{c.estado === 'SUSPENDIDO' ? 'Suspendido' : 'Activado'}</span>
                           </td>
                         </tr>

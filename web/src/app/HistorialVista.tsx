@@ -57,7 +57,7 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
         </div>
         {h.vencido > 0 && <div className="alert error small">De este saldo, {money(h.vencido)} ya pasó su fecha límite de pago.</div>}
         <div className="table-wrap">
-          <table className="tbl">
+          <table className="tbl tbl-tarjetas">
             <thead>
               <tr>
                 <th>Periodo</th>
@@ -73,15 +73,15 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
               {h.filas.length ? (
                 h.filas.map((x) => (
                   <tr key={x.c.id}>
-                    <td>{mes(x.c.periodo)}</td>
-                    <td>{x.c.concepto}</td>
-                    <td>{fecha(x.c.vence)}</td>
-                    <td className="num">{money(x.c.monto)}</td>
-                    <td>
+                    <td data-label="Periodo">{mes(x.c.periodo)}</td>
+                    <td className="tt-titulo">{x.c.concepto}</td>
+                    <td data-label="Vence">{fecha(x.c.vence)}</td>
+                    <td className="num" data-label="Monto">{money(x.c.monto)}</td>
+                    <td data-label="Estado">
                       <span className={`pill ${ESTADO[x.clave].clase}`}>{ESTADO[x.clave].texto}</span>
                     </td>
-                    <td>{x.pagadoEl ? fecha(x.pagadoEl) : '—'}</td>
-                    <td>{x.p?.folio ?? '—'}</td>
+                    <td data-label="Pagado el">{x.pagadoEl ? fecha(x.pagadoEl) : '—'}</td>
+                    <td data-label="Recibo">{x.p?.folio ?? '—'}</td>
                   </tr>
                 ))
               ) : (
