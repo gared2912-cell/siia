@@ -23,7 +23,7 @@ const nombreTipoUnidad = (t?: string | null) => (t === 'DEPARTAMENTO' ? 'Departa
 /** `inicio`: abre directo la ficha del condominio seleccionado en esa pestaña (acceso directo del Panel). */
 export function Condominios({ inicio }: { inicio?: Tab } = {}) {
   const { condos, condo, setCondoId, puede, tiene } = useAdmin();
-  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (inicio || condos.length === 1 ? 'ficha' : 'lista'));
+  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (inicio ? 'ficha' : 'lista'));
   const [tab, setTab] = useState<Tab>(inicio ?? 'general');
   const alta = puede('condominios', 'editar') && tiene('condominios.alta');
 
@@ -91,7 +91,7 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
 }
 
 function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; onBack: () => void }) {
-  const { condo, condos, unidades, puede, superadmin } = useAdmin();
+  const { condo, unidades, puede, superadmin } = useAdmin();
   const c = condo!;
   const tabs: [Tab, string][] = [
     ...(puede('condominios') ? [['general', 'Datos generales'] as [Tab, string]] : []),
@@ -104,13 +104,11 @@ function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; on
 
   return (
     <div className="stack">
-      {condos.length > 1 && (
-        <div>
-          <button className="linklike" onClick={onBack}>
-            <Icon name="back" /> Todos los condominios
-          </button>
-        </div>
-      )}
+      <div>
+        <button className="linklike" onClick={onBack}>
+          <Icon name="back" /> Todos los condominios
+        </button>
+      </div>
       <PageHead
         icon="building"
         title={c.nombre}
