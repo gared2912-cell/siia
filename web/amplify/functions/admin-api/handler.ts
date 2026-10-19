@@ -1102,7 +1102,10 @@ async function enviarAccesos(userId: string) {
   if (u.UserStatus !== 'FORCE_CHANGE_PASSWORD') {
     await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: userId, Password: temporal(), Permanent: false }));
   }
-  await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: userId, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
+  // El reenvío (AdminCreateUser) exige el correo como usuario; con el sub Cognito responde «Username should be an email».
+  const email = u.UserAttributes?.find((a) => a.Name === 'email')?.Value;
+  if (!email) fail('La cuenta no tiene correo registrado.');
+  await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: email, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
 }
 
 /**
