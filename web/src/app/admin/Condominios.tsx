@@ -9,6 +9,8 @@ import { Residentes } from './Residentes';
 import { Documentos } from './Documentos';
 import { CatalogoAmenidades } from './Operacion';
 import { TipoIngreso } from './FinanzasAdmin';
+import { Firma } from './Firma';
+import { AdminsCondominio } from './AdminsCondominio';
 
 type Cargo = Schema['Cargo']['type'];
 type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
@@ -89,7 +91,7 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
 }
 
 function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; onBack: () => void }) {
-  const { condo, condos, unidades, puede } = useAdmin();
+  const { condo, condos, unidades, puede, superadmin } = useAdmin();
   const c = condo!;
   const tabs: [Tab, string][] = [
     ...(puede('condominios') ? [['general', 'Datos generales'] as [Tab, string]] : []),
@@ -114,10 +116,12 @@ function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; on
         title={c.nombre}
         sub={`${c.tipo ?? 'Sin tipo'} · ${nombreTipoUnidad(c.tipoUnidad)} · ${unidades.length} unidades${c.activo === false ? ' · portal inactivo' : ''}`}
       />
+      <Firma item={c} alta="Dado de alta por" />
       <Seg value={actual} onChange={setTab} options={tabs} />
       {actual === 'general' && (
         <>
           <DatosCondominio key={`g${c.id}`} c={c} seccion="general" />
+          {superadmin && <AdminsCondominio key={`a${c.id}`} />}
           <Documentos />
         </>
       )}

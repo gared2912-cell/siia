@@ -12,6 +12,8 @@ export type DatosHistorial = {
   cargos: CargoHistorial[];
   pagos: PagoHistorial[];
   hoy: string; // AAAA-MM-DD (hora de México)
+  /** Administrador que lo descarga desde el panel (en el portal del residente no se pone). */
+  generadoPor?: string;
 };
 
 import type { CellHookData } from 'jspdf-autotable';
@@ -223,6 +225,7 @@ export async function construirHistorial(d: DatosHistorial, logoPng?: string) {
       { maxWidth: W - 2 * M },
     );
     doc.text(`SIIA · soluciones inmobiliarias · siia.casa`, M, H - 6.5);
+    if (d.generadoPor) doc.text(`Generado por ${d.generadoPor}`, W / 2, H - 6.5, { align: 'center' });
     doc.text(`Página ${i} de ${paginas}`, W - M, H - 6.5, { align: 'right' });
   }
   return doc;

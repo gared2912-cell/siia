@@ -5,6 +5,7 @@ import { ComunicadoCompleto, TarjetaComunicado, type Adjunto } from '../Comunica
 import { nombreAdjunto } from '../../../amplify/functions/shared/comunicados';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
+import { Firma, leerFirma } from './Firma';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { descargarReporteEncuesta } from './excel';
 import { marcarVisto } from '../Campana';
@@ -97,7 +98,14 @@ function ComunicadoAdmin({ c, acciones }: { c: Comunicado; acciones: React.React
   const adjuntos = archivos.data?.adjuntos ?? [];
   return (
     <>
-      <TarjetaComunicado c={datos} urls={urls} adjuntos={adjuntos} onAbrir={() => setAbierto(true)} acciones={acciones || undefined} />
+      <TarjetaComunicado
+        c={datos}
+        urls={urls}
+        adjuntos={adjuntos}
+        onAbrir={() => setAbierto(true)}
+        acciones={acciones || undefined}
+        firma={<Firma item={c} alta="Publicado por" altaAntes={c.autor} />}
+      />
       {abierto && <ComunicadoCompleto c={datos} urls={urls} adjuntos={adjuntos} onClose={() => setAbierto(false)} />}
     </>
   );
@@ -256,7 +264,7 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
 
 // ---------- Encuestas ----------
 export function EncuestasAdmin() {
-  const { condo, unidades, puede } = useAdmin();
+  const { condo, unidades, puede, firmaReporte } = useAdmin();
   const gestiona = puede('encuestas', 'editar');
   const [descargando, setDescargando] = useState<string | null>(null);
   const { data, error, loading, reload } = useLoad(async () => {
@@ -287,6 +295,7 @@ export function EncuestasAdmin() {
       try {
         const nombres = await adminCall<Record<string, { nombre: string | null; email: string | null }>>('encuestas.votantes', { encuestaId: e.id });
         await descargarReporteEncuesta({
+          generadoPor: firmaReporte,
           condominio: condo!.nombre,
           pregunta: e.pregunta,
           descripcion: e.descripcion,
@@ -335,6 +344,7 @@ export function EncuestasAdmin() {
               </div>
             </div>
             {e.descripcion && <p className="small pre">{e.descripcion}</p>}
+            <Firma item={e} alta="Creada por" cambio={e.estado === 'CERRADA' ? 'Cerrada por' : undefined} />
             {e.estado === 'CERRADA' && (
               <div className="row-actions" style={{ marginBottom: 8 }}>
                 <button className="btn-app sm secondary" disabled={descargando === e.id} onClick={() => excel(e, votos)}>
@@ -511,7 +521,8 @@ export function ChatUnidad({ unidadId, onEnviado }: { unidadId: string; onEnviad
               ({
                 id: m.id,
                 texto: m.texto,
-                autorNombre: m.autorNombre ?? '',
+                // Entre administradores se ve quién escribió; el residente solo ve «Administración SIIA».
+                autorNombre: (m.autorRol === 'ADMIN' && leerFirma(m.firma)?.nombre) || m.autorNombre || '',
                 autorRol: m.autorRol ?? '',
                 createdAt: m.createdAt,
                 imagenUrl: (m as Mensaje & { imagenUrl?: string }).imagenUrl,

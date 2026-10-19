@@ -8,6 +8,8 @@
 import { byIndex, hoyMX, put, scan, type Item } from '../shared/db';
 import { crearCuotas, fechaCargo } from '../shared/cuotas';
 import { enviarCorreo } from '../shared/correo';
+import { SISTEMA, firmarComo, tomarCambios } from '../shared/firma';
+import { guardarActividad } from '../shared/actividad';
 
 const PORTAL = process.env.PORTAL_URL ?? 'https://staging.siia.casa/portal/';
 const fechaLarga = (iso: string) => {
@@ -109,6 +111,8 @@ export async function generarCuotaAutomatica(c: Item, hoy = hoyMX()) {
 }
 
 export const handler = async () => {
+  // Lo que se genere o cancele queda firmado como «SIIA (automático)» y en el registro de actividad.
+  firmarComo(SISTEMA);
   const hoy = hoyMX();
   const todos = await scan('Condominio');
   let cuotas = 0;
@@ -132,5 +136,6 @@ export const handler = async () => {
       console.error(c.id, err);
     }
   }
+  await guardarActividad('auto.cuotas', SISTEMA, tomarCambios()).catch((e) => console.error('actividad', e));
   return { hoy, cuotas, recargos: total };
 };

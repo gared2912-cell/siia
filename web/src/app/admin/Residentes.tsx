@@ -2,6 +2,7 @@
 // y las solicitudes de acceso. Alta uno por uno o masiva con el machote de Excel.
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
+import { Firma } from './Firma';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, errMsg, fecha, useAction, useLoad } from '../ui';
 import { claveUnidad, etiquetaUnidad, prefijoUnidad } from '../../../amplify/functions/shared/unidades';
 import { useAdmin, type Unidad } from './AdminApp';
@@ -173,6 +174,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
             {p.estado === 'PENDIENTE' && p.unidadSolicitada && ` · solicitó: ${p.unidadSolicitada}`}
           </div>
           {p.nota && <div className="small">{p.nota}</div>}
+          <Firma item={p} alta="Alta por" />
         </div>
         {acciones(p)}
       </div>

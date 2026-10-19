@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { adminCall, type Schema } from '../api';
 import { Empty, Field, Icon, Modal, fecha, hoy, money, periodoActual, useAction } from '../ui';
+import { Firma } from './Firma';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
 import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
@@ -93,7 +94,7 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
                       <VerEvidencia key={ev.path} egresoId={e.id} ev={ev} />
                     ))}
                   </div>
-                  {(e.registradoPorNombre || e.registradoPor) && <div className="small muted">Registrado por {e.registradoPorNombre || e.registradoPor}</div>}
+                  <Firma item={e} altaAntes={e.registradoPorNombre || e.registradoPor} />
                 </div>
                 {gestiona && (
                   <div className="row-actions">
@@ -248,7 +249,7 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
 
 // ---------- Balance mensual ----------
 export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload: () => void }) {
-  const { condo, unidades, puede } = useAdmin();
+  const { condo, unidades, puede, firmaReporte } = useAdmin();
   const gestiona = puede('finanzas', 'editar');
   const [mes, setMes] = useState(periodoActual());
   const [saldo, setSaldo] = useState(false);
@@ -259,7 +260,7 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
   const excel = () =>
     run(async () => {
       const { descargarReporteFinanzas } = await import('./reporteFinanzas');
-      await descargarReporteFinanzas({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy() });
+      await descargarReporteFinanzas({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy(), generadoPor: firmaReporte });
     }, 'Estado financiero descargado');
 
   return (

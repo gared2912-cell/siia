@@ -34,7 +34,20 @@ export const PORC = '0.0%';
 export const FECHA = 'dd/mm/yyyy';
 export const FUENTE = 'Calibri';
 
-export type OpcionesReporte = { condominio: string; periodo: string; datos: DatosFinanzas; unidades: Unidad[]; hoy: string };
+export type OpcionesReporte = { condominio: string; periodo: string; datos: DatosFinanzas; unidades: Unidad[]; hoy: string; generadoPor?: string };
+
+/** Firma del reporte: «Generado por <administrador> · fecha» al final de cada hoja y como autor del archivo. */
+export function firmarLibro(wb: import('exceljs').Workbook, generadoPor?: string) {
+  if (!generadoPor) return;
+  const cuando = new Date().toLocaleString('es-MX', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  wb.creator = `${generadoPor} · SIIA`;
+  wb.lastModifiedBy = generadoPor;
+  wb.eachSheet((ws) => {
+    const fila = ws.getRow(ws.rowCount + 2);
+    fila.getCell(1).value = `Generado por ${generadoPor} · ${cuando}`;
+    fila.getCell(1).font = { name: FUENTE, size: 8, italic: true, color: argb(C.gris) };
+  });
+}
 /** Imágenes ya listas en base64 (PNG): logotipo y gráficas. */
 export type Imagenes = { logo?: string; grafica?: string; distribucion?: string };
 
@@ -596,6 +609,7 @@ export async function construirReporte(o: OpcionesReporte, img: Imagenes) {
     { label: 'Total de egresos', col: 8, valor: b.totalEgresos },
   );
 
+  firmarLibro(wb, o.generadoPor);
   return wb;
 }
 

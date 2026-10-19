@@ -14,12 +14,15 @@ export function TarjetaComunicado({
   adjuntos = [],
   onAbrir,
   acciones,
+  firma,
 }: {
   c: ComunicadoDatos;
   urls: string[];
   adjuntos?: Adjunto[];
   onAbrir: () => void;
   acciones?: ReactNode;
+  /** Solo en el panel: quién lo publicó o modificó. Los residentes ven «Administración». */
+  firma?: ReactNode;
 }) {
   const mas = urls.length - 3;
   return (
@@ -31,7 +34,7 @@ export function TarjetaComunicado({
         </span>
         <span className="small muted">
           {fecha(c.createdAt, { day: 'numeric', month: 'long', year: 'numeric' })}
-          {c.autor && ` · ${c.autor}`}
+          {!firma && ` · ${c.autor || 'Administración'}`}
         </span>
         <span className="comunicado-resumen">{c.cuerpo}</span>
         {urls.length > 0 && (
@@ -55,6 +58,7 @@ export function TarjetaComunicado({
           <Icon name="arrow" />
         </span>
       </button>
+      {firma}
       {acciones && <div className="row-actions comunicado-acciones">{acciones}</div>}
     </article>
   );
@@ -71,7 +75,7 @@ export function ComunicadoCompleto({ c, urls, adjuntos = [], onClose }: { c: Com
         </h3>
         <p className="small muted">
           {fecha(c.createdAt, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-          {c.autor && ` · ${c.autor}`}
+          {` · ${c.autor || 'Administración'}`}
         </p>
         <p className="pre">{c.cuerpo}</p>
         {adjuntos.length > 0 && (

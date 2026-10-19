@@ -19,6 +19,9 @@ const schema = a
     // Rol de administración: qué secciones y acciones puede usar un ADMIN (ver shared/permisos.ts).
     RolAdmin: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         nombre: a.string().required(),
         descripcion: a.string(),
         permisos: a.json(), // { secciones: { finanzas: 'editar' | 'ver' | 'ninguno', … }, extras: ['finanzas.validarPagos', …] }
@@ -27,6 +30,9 @@ const schema = a
 
     Condominio: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         nombre: a.string().required(),
         tipo: a.string(),
         direccion: a.string(),
@@ -68,6 +74,9 @@ const schema = a
 
     Unidad: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         etiqueta: a.string().required(), // Casa 12, Depto 3B…
         cuota: a.float(), // histórico: la cuota vigente es Condominio.cuotaMensual
@@ -80,6 +89,9 @@ const schema = a
 
     Perfil: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         userId: a.id().required(), // sub de Cognito
         email: a.string().required(),
         nombre: a.string(),
@@ -109,6 +121,9 @@ const schema = a
 
     Cargo: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         unidadId: a.id().required(),
         concepto: a.string().required(),
@@ -127,6 +142,9 @@ const schema = a
 
     Pago: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         unidadId: a.id().required(),
         userId: a.id(),
@@ -150,6 +168,9 @@ const schema = a
     // Gasto del condominio con su evidencia: [{ path, nombre, tipo, tamano }] (1 a 5 archivos PDF o imagen).
     Egreso: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         fecha: a.date().required(),
         categoria: a.string().required(),
@@ -170,6 +191,9 @@ const schema = a
     // es el saldo final del mes anterior.
     SaldoMensual: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         periodo: a.string().required(),
         saldoInicial: a.float().required(),
@@ -181,6 +205,9 @@ const schema = a
 
     Comunicado: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         titulo: a.string().required(),
         cuerpo: a.string().required(),
@@ -196,6 +223,9 @@ const schema = a
 
     Encuesta: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         pregunta: a.string().required(),
         descripcion: a.string(),
@@ -221,6 +251,9 @@ const schema = a
     // hilo = condominioId#unidadId#CANAL (ADMIN | CASETA)
     Mensaje: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         unidadId: a.id().required(),
         canal: a.enum(['ADMIN', 'CASETA']),
@@ -240,6 +273,9 @@ const schema = a
 
     Incidente: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         unidadId: a.id().required(),
         userId: a.id(),
@@ -264,6 +300,9 @@ const schema = a
 
     Mantenimiento: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         titulo: a.string().required(),
         tipo: a.enum(['PREVENTIVO', 'CORRECTIVO']),
@@ -278,6 +317,9 @@ const schema = a
 
     Amenidad: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         nombre: a.string().required(),
         descripcion: a.string(),
@@ -298,6 +340,9 @@ const schema = a
 
     Reserva: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         amenidadId: a.id().required(),
         unidadId: a.id().required(),
@@ -390,6 +435,9 @@ const schema = a
 
     Mascota: a
       .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
         condominioId: a.id().required(),
         unidadId: a.id().required(),
         userId: a.id(),
@@ -419,6 +467,23 @@ const schema = a
         plataforma: a.string(),
       })
       .secondaryIndexes((i) => [i('userId').name('byUser').queryField('dispositivosPorUsuario')])
+      .authorization(admin),
+
+    // Registro de actividad de la administración (solo lo consulta el SUPERADMIN, vía admin-api).
+    // condominioId = 'GLOBAL' para cuentas de administración y roles. Ver shared/firma.ts.
+    Actividad: a
+      .model({
+        condominioId: a.string().required(),
+        fecha: a.datetime().required(),
+        porId: a.string(),
+        porNombre: a.string(),
+        porEmail: a.string(),
+        porRol: a.string(),
+        accion: a.string().required(),
+        resumen: a.string(),
+        cambios: a.json(), // [{ modelo, op, id, etiqueta, campos: [{ campo, antes, despues }] }]
+      })
+      .secondaryIndexes((i) => [i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('actividadPorCondominio')])
       .authorization(admin),
 
     // API para residentes y vigilantes (validada en la Lambda portal-api)

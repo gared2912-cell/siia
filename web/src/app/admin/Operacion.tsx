@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { adminCall, all, db, ok, urlArchivoAdmin, type Schema } from '../api';
+import { Firma } from './Firma';
 import {
   Archivo,
   Badge,
@@ -358,6 +359,7 @@ export function MantenimientosAdmin() {
                       <td data-label="Proveedor">{m.proveedor ?? '—'}</td>
                       <td data-label="Estado">
                         <Badge estado={m.estado} />
+                        <Firma item={{ ...m, estado: undefined }} />
                       </td>
                       <td className="tt-acciones">
                         {gestiona && (
@@ -517,6 +519,7 @@ export function AmenidadesAdmin() {
                     {r.invitados ? ` · ${r.invitados} invitados` : ''}
                   </div>
                   {r.nota && <div className="small">{r.nota}</div>}
+                  <Firma item={r} alta={false} />
                 </div>
                 {gestiona && r.estado === 'SOLICITADA' && (
                   <div className="row-actions">
@@ -609,6 +612,7 @@ export function CatalogoAmenidades() {
               {secciones(a.id).length ? 'Completa: ' : ''}
               {datos(a)}
             </p>
+            <Firma item={a} alta="Creada por" />
             {secciones(a.id).length > 0 && (
               <ul className="list" style={{ marginBottom: 8 }}>
                 {secciones(a.id).map((x) => (
@@ -902,6 +906,7 @@ export function MascotasAdmin() {
                     </div>
                     <div className="list-sub">Vacuna antirrábica: {fecha(m.vacunaAntirrabica)}</div>
                     {m.notas && <div className="small">{m.notas}</div>}
+                    <Firma item={m} alta={false} />
                   </div>
                   {puede('mascotas', 'editar') && m.estado === 'PENDIENTE' && (
                     <div className="row-actions">

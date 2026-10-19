@@ -5,7 +5,7 @@
 //    total que debe. ExcelJS se carga solo al descargar.
 import type { Workbook, Worksheet } from 'exceljs';
 import type { Schema } from '../api';
-import { C, FECHA, FUENTE, PESOS, PORC, argb, bordeAbajo, bordeArriba, estilo, fechaXls, logoBase64 } from './reporteFinanzas';
+import { C, FECHA, FUENTE, PESOS, PORC, argb, bordeAbajo, bordeArriba, estilo, fechaXls, firmarLibro, logoBase64 } from './reporteFinanzas';
 import { fechaIngreso, nombreMes, redondear } from './balance';
 
 type Pago = Schema['Pago']['type'];
@@ -22,6 +22,7 @@ export type OpcionesCobranza = {
   cargos: Cargo[];
   pagos: Pago[];
   contactos: Record<string, Contacto[]>;
+  generadoPor?: string;
 };
 
 const dias = (desde: string, hasta: string) => Math.max(0, Math.round((Date.parse(`${hasta}T12:00:00Z`) - Date.parse(`${desde}T12:00:00Z`)) / 86400000));
@@ -381,6 +382,7 @@ export async function construirCobranza(o: OpcionesCobranza, logo?: string) {
   ws2.autoFilter = { from: { row: ini2 - 1, column: 1 }, to: { row: r - 1, column: n3 } };
   ws2.pageSetup.printTitlesRow = `${ini2 - 1}:${ini2 - 1}`;
   ws.pageSetup.printTitlesRow = `${inicio - 1}:${inicio - 1}`;
+  firmarLibro(wb, o.generadoPor);
   return wb;
 }
 

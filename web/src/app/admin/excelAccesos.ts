@@ -20,10 +20,11 @@ const FILA_ENC = 6;
 export type FilaAccesos = { u: Unidad; p?: Perfil; vencido: number | null };
 const textoAcceso = (tipo: string, codigo: string) => `${tipo} · ${codigo}`;
 
-export async function descargarExcelAccesos(o: { condominio: string; hoy: string; filas: FilaAccesos[] }) {
+export async function descargarExcelAccesos(o: { condominio: string; hoy: string; filas: FilaAccesos[]; generadoPor?: string }) {
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'SIIA · soluciones inmobiliarias';
+  // Este archivo se vuelve a importar: la firma va solo en las propiedades del archivo, no como fila.
+  wb.creator = o.generadoPor ? `${o.generadoPor} · SIIA` : 'SIIA · soluciones inmobiliarias';
   const ws = wb.addWorksheet(HOJA, {
     views: [{ state: 'frozen', ySplit: FILA_ENC, xSplit: 2, showGridLines: false }],
     properties: { tabColor: argb(C.tealOscuro) },

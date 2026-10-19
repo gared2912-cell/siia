@@ -1061,6 +1061,33 @@ table.tbl {
 .muted {
   color: var(--muted);
 }
+/* Registro de actividad (superadministrador) */
+.actividad-detalle {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+  display: grid;
+  gap: 10px;
+}
+.actividad-campos {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+/* Firma de la administración: quién registró o modificó (pequeña, como marca de agua) */
+.firma {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--muted);
+  opacity: 0.85;
+  font-style: italic;
+}
 .small {
   font-size: 0.85rem;
 }

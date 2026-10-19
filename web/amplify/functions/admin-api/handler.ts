@@ -20,7 +20,7 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
@@ -36,6 +36,8 @@ import { crearCuotas } from '../shared/cuotas';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
 import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
+import { guardarActividad } from '../shared/actividad';
+import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -58,6 +60,7 @@ const ES_ADMIN = (rol?: string | null) => rol === 'ADMIN' || rol === 'SUPERADMIN
 type Yo = {
   sub: string;
   email: string;
+  nombre: string;
   superadmin: boolean;
   permisos: Permisos;
   condos: '*' | Set<string>;
@@ -68,17 +71,19 @@ async function cargarYo(identity: any): Promise<Yo> {
   const grupos: string[] = identity?.groups ?? identity?.claims?.['cognito:groups'] ?? [];
   const sub: string = identity?.sub;
   const email = identity?.claims?.email || (await emailDe(sub).catch(() => sub));
+  const perfil = sub ? await get('Perfil', { userId: sub }) : undefined;
+  const nombre = perfil?.nombre || email;
   if (grupos.includes('SUPERADMIN')) {
-    return { sub, email, superadmin: true, permisos: TODOS_LOS_PERMISOS, condos: '*', rolNombre: 'Superadministrador' };
+    return { sub, email, nombre, superadmin: true, permisos: TODOS_LOS_PERMISOS, condos: '*', rolNombre: 'Superadministrador' };
   }
   if (!grupos.includes('ADMIN')) fail('Acceso solo para administradores.');
-  const perfil = await get('Perfil', { userId: sub });
   if (!perfil || perfil.estado !== 'APROBADO' || perfil.rol !== 'ADMIN') fail('Tu cuenta de administración no está activa.');
   const rol = perfil!.rolAdminId ? await get('RolAdmin', { id: perfil!.rolAdminId }) : undefined;
   const lista: string[] = (perfil!.condominiosAdmin ?? []).filter(Boolean);
   return {
     sub,
     email,
+    nombre,
     superadmin: false,
     permisos: rol ? normalizarPermisos(rol.permisos) : SIN_PERMISOS,
     condos: lista.includes('*') ? '*' : new Set(lista),
@@ -385,7 +390,9 @@ async function db(p: Item, yo: Yo) {
         autorNombre: 'Administración SIIA',
       });
     }
+    if (MODELOS_FIRMADOS.has(m)) input.firma = selloFirma();
     const creado = resultado(await M.create(input));
+    registrarCambio(m, 'alta', undefined, creado);
     // Un ADMIN con condominios específicos queda asignado al condominio que creó.
     if (m === 'Condominio' && yo.condos !== '*' && creado?.id) {
       await update('Perfil', { userId: yo.sub }, { condominiosAdmin: [...yo.condos, creado.id] });
@@ -401,10 +408,20 @@ async function db(p: Item, yo: Yo) {
     if (op === 'delete') {
       exigir(yo, regla!.seccion, 'editar');
       if (!regla!.borrar) fail('Operación no permitida.');
-      return resultado(await M.delete({ id }));
+      const borrado = resultado(await M.delete({ id }));
+      registrarCambio(m, 'baja', actual, undefined);
+      return borrado;
     }
     if (!regla!.editar) fail('Operación no permitida.');
     soloCampos(input, regla!.editar!, ['id']);
+    // Firma de quien modifica y su registro en la actividad (solo si cambia algo de verdad).
+    const actualizar = async (x: Item) => {
+      const { id: _id, ...campos } = x;
+      const relevante = cambioRelevante(campos) && MODELOS_FIRMADOS.has(m);
+      const r = resultado(await M.update(relevante ? { ...x, firmaCambio: selloFirma() } : x));
+      if (relevante) registrarCambio(m, 'cambio', actual, x);
+      return r;
+    };
     // Solo cuentan los campos que realmente cambian ('' = vacío; activo es true por defecto).
     const norm = (campo: string, v: unknown) =>
       JSON.stringify(campo === 'activo' ? v !== false : v === '' || v == null || (Array.isArray(v) && !v.length) ? null : v);
@@ -425,10 +442,10 @@ async function db(p: Item, yo: Yo) {
       const nota = 'nota' in input ? input.nota : undefined;
       const c = await confirmarReserva(actual!);
       if (!c.ok) fail(`Ese horario ya está apartado por una reserva de ${c.nombre}.`);
-      return resultado(await M.update({ id: actual!.id, ...(nota !== undefined ? { nota } : {}) }));
+      return actualizar({ id: actual!.id, ...(nota !== undefined ? { nota } : {}) });
     }
     if (m === 'Reserva' && (input.estado === 'RECHAZADA' || input.estado === 'CANCELADA')) await cancelarCargoReserva(actual!.id);
-    return resultado(await M.update(input));
+    return actualizar(input);
   }
 
   fail('Operación no permitida.');
@@ -1244,6 +1261,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     exigir(yo, 'usuarios', 'editar');
     if (perfil.estado !== 'APROBADO') fail('Solo se reenvía el acceso a usuarios autorizados.');
     await enviarAccesos(perfil.userId);
+    anotar('Perfil', perfil, 'acceso', 'Se reenvió el acceso por correo');
     return { ok: true, email: perfil.email };
   },
 
@@ -1265,6 +1283,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       throw err;
     }
     await cerrarSesiones(perfil.userId);
+    anotar('Perfil', perfil, 'acceso', 'Se asignó una contraseña nueva');
     return { ok: true, email: perfil.email };
   },
 
@@ -1530,17 +1549,99 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async hoy() {
     return { hoy: hoyMX() };
   },
+
+  // ----- registro de actividad y administradores por condominio (solo superadministrador) -----
+  async 'actividad.lista'(p, yo) {
+    exigirSuper(yo);
+    const condominioId = p.condominioId === 'GLOBAL' ? 'GLOBAL' : str(p.condominioId, 64);
+    if (!condominioId) fail('Elige un condominio.');
+    const desde = fechaValida(p.desde) || hoyMX(new Date(Date.now() - 30 * 86400000));
+    const hasta = fechaValida(p.hasta) || hoyMX();
+    // Fechas en hora de México (UTC-6): el día completo de «hasta».
+    const ini = new Date(`${desde}T00:00:00-06:00`).toISOString();
+    const fin = new Date(`${hasta}T23:59:59.999-06:00`).toISOString();
+    const items: Item[] = [];
+    let ExclusiveStartKey: Item | undefined;
+    do {
+      const r = await ddb.send(
+        new QueryCommand({
+          TableName: table('Actividad'),
+          IndexName: 'byCondominio',
+          KeyConditionExpression: 'condominioId = :c AND fecha BETWEEN :a AND :b',
+          ExpressionAttributeValues: { ':c': condominioId, ':a': ini, ':b': fin },
+          ScanIndexForward: false,
+          ExclusiveStartKey,
+        }),
+      );
+      items.push(...(r.Items ?? []));
+      ExclusiveStartKey = r.LastEvaluatedKey;
+    } while (ExclusiveStartKey && items.length < 2000);
+    return items.map(({ cambios, __typename, ...x }) => {
+      let c: unknown = cambios;
+      for (let k = 0; k < 2 && typeof c === 'string'; k++) c = JSON.parse(c as string);
+      return { ...x, cambios: Array.isArray(c) ? c : [] };
+    });
+  },
+
+  async 'condominios.administradores'(p, yo) {
+    exigirSuper(yo);
+    const condominioId = str(p.condominioId, 64);
+    const [perfiles, roles] = await Promise.all([scan('Perfil'), scan('RolAdmin')]);
+    return perfiles
+      .filter((x) => x.rol === 'ADMIN' && x.estado !== 'RECHAZADO')
+      .map((x) => {
+        const lista: string[] = (x.condominiosAdmin ?? []).filter(Boolean);
+        return {
+          userId: x.userId,
+          nombre: x.nombre ?? null,
+          email: x.email,
+          estado: x.estado,
+          rol: roles.find((r) => r.id === x.rolAdminId)?.nombre ?? 'Sin rol',
+          todos: lista.includes('*'),
+          asignado: lista.includes('*') || lista.includes(condominioId),
+          condominios: lista.includes('*') ? null : lista.length,
+        };
+      })
+      .sort((a, b) => String(a.nombre || a.email).localeCompare(String(b.nombre || b.email)));
+  },
+
+  async 'condominios.asignarAdmin'(p, yo) {
+    exigirSuper(yo);
+    const condominioId = str(p.condominioId, 64);
+    const condo = await get('Condominio', { id: condominioId });
+    if (!condo) fail('Condominio no encontrado.');
+    const perfil = await perfilDe(str(p.userId, 64));
+    if (perfil.rol !== 'ADMIN') fail('Solo se asignan condominios a cuentas de administrador.');
+    const lista: string[] = (perfil.condominiosAdmin ?? []).filter(Boolean);
+    if (lista.includes('*')) fail('Este administrador tiene «Todos los condominios». Cámbialo desde Administradores.');
+    const nueva = p.asignar ? [...new Set([...lista, condominioId])] : lista.filter((x) => x !== condominioId);
+    // Su permiso se lee en cada petición: el cambio aplica de inmediato, sin cerrar su sesión.
+    await update('Perfil', { userId: perfil.userId }, { condominiosAdmin: nueva });
+    // También en la actividad del condominio (la cuenta del administrador va al registro GLOBAL).
+    anotar('Condominio', condo!, 'administradores', `${p.asignar ? 'Asignó' : 'Quitó'} a ${perfil.nombre || perfil.email}`);
+    return { ok: true, condominios: nueva };
+  },
 };
 
 export const handler = async (event: AppSyncResolverEvent<{ action: string; payload?: unknown }>) => {
   const action = String(event.arguments.action ?? '');
+  let yo: Yo | undefined;
+  firmarComo(null);
   try {
-    const yo = await cargarYo(event.identity as any);
+    yo = await cargarYo(event.identity as any);
     if (!Object.hasOwn(acciones, action)) fail('Acción no válida.');
-    return await acciones[action](parsePayload(event.arguments.payload), yo);
+    // Todo lo que se guarde en esta petición lleva la firma de quien la hace.
+    firmarComo({ id: yo.sub, nombre: yo.nombre, email: yo.email, rol: yo.superadmin ? 'SUPERADMIN' : 'ADMIN' });
+    const r = await acciones[action](parsePayload(event.arguments.payload), yo);
+    // Los administradores ven quién hizo cada cosa por su nombre; el correo, solo el superadministrador.
+    return yo.superadmin ? r : sinCorreos(r);
   } catch (err) {
     if (err instanceof ApiError) return { error: err.message };
     console.error(action, err);
     return { error: 'Ocurrió un error. Intenta de nuevo.' };
+  } finally {
+    // Aun si la acción falló a la mitad, lo que sí se guardó queda en la actividad.
+    if (yo) await guardarActividad(action, { id: yo.sub, nombre: yo.nombre, email: yo.email, rol: yo.superadmin ? 'SUPERADMIN' : 'ADMIN' }, tomarCambios()).catch((e) => console.error('actividad', e));
+    firmarComo(null);
   }
 };

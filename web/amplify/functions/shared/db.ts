@@ -11,6 +11,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { randomUUID, randomInt } from 'node:crypto';
+import { cambioRelevante, firmado, registrarCambio, selloFirma } from './firma';
 
 export const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -37,7 +38,14 @@ export async function put(model: string, item: Item, opts: { ifNotExists?: strin
   const base = model === 'Perfil' ? {} : { id: randomUUID() };
   // Sin atributos nulos: un índice secundario no acepta claves nulas (p. ej. condominioId de un ADMIN).
   const limpio = Object.fromEntries(Object.entries(item).filter(([, v]) => v !== null));
-  const full = { ...base, createdAt: ts, ...limpio, updatedAt: ts, __typename: model };
+  // Firma de quien lo da de alta (administrador o tarea automática), si la petición tiene firmante.
+  // Si reemplaza un registro existente (misma llave), conserva la firma del alta y firma el cambio.
+  const llave = model === 'Perfil' ? { userId: item.userId } : { id: item.id };
+  const previo = firmado(model) && Object.values(llave)[0] ? await get(model, llave) : undefined;
+  const firma = !firmado(model) ? {} : previo ? { firma: previo.firma ?? null, firmaCambio: selloFirma() } : { firma: selloFirma() };
+  const full = Object.fromEntries(
+    Object.entries({ ...base, createdAt: previo?.createdAt ?? ts, ...limpio, ...firma, updatedAt: ts, __typename: model }).filter(([, v]) => v !== null),
+  );
   await ddb.send(
     new PutCommand({
       TableName: table(model),
@@ -45,12 +53,16 @@ export async function put(model: string, item: Item, opts: { ifNotExists?: strin
       ...(opts.ifNotExists ? { ConditionExpression: `attribute_not_exists(${opts.ifNotExists})` } : {}),
     }),
   );
+  registrarCambio(model, previo ? 'cambio' : 'alta', previo, full);
   return full;
 }
 
 /** `si`: condición extra de igualdad (p. ej. { estado: 'EN_REVISION' }) para cambios de estado sin carreras. */
 export async function update(model: string, key: Item, fields: Item, si: Item = {}): Promise<Item> {
-  const set = { ...fields, updatedAt: now() };
+  // Un cambio real de la administración (no marcas de lectura) lleva firma y queda en la actividad.
+  const firmar = firmado(model) && cambioRelevante(fields);
+  const antes = firmar ? await get(model, key) : undefined;
+  const set = { ...fields, ...(firmar ? { firmaCambio: selloFirma() } : {}), updatedAt: now() };
   const names: Record<string, string> = {};
   const values: Record<string, any> = {};
   const condiciones = ['attribute_exists(#pk)'];
@@ -84,11 +96,14 @@ export async function update(model: string, key: Item, fields: Item, si: Item = 
       ReturnValues: 'ALL_NEW',
     }),
   );
+  if (firmar) registrarCambio(model, 'cambio', antes, { ...(key as Item), ...fields });
   return r.Attributes as Item;
 }
 
 export async function remove(model: string, key: Item) {
+  const antes = firmado(model) ? await get(model, key) : undefined;
   await ddb.send(new DeleteCommand({ TableName: table(model), Key: key }));
+  if (antes) registrarCambio(model, 'baja', antes, undefined);
 }
 
 /** Consulta un índice secundario (todos los índices se llaman by<Campo>). */

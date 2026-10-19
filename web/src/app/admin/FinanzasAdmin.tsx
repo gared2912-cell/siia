@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
+import { Firma } from './Firma';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { BalanceMensual, EgresosAdmin } from './Egresos';
 import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
@@ -216,6 +217,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                       <td className="num" data-label="Monto">{money(p.monto)}</td>
                       <td data-label="Estado">
                         <Badge estado={p.estado} />
+                        <Firma
+                          item={p}
+                          alta={false}
+                          antes={{ verbo: p.estado === 'RECHAZADO' ? 'Rechazado por' : 'Aprobado por', por: p.validadoPor, en: p.validadoEn }}
+                        />
                       </td>
                       <td className="tt-acciones">
                         <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
@@ -271,7 +277,10 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                     return (
                       <tr key={c.id}>
                         <td className="tt-titulo">{etiqueta(c.unidadId)}</td>
-                        <td data-label="Concepto">{c.concepto}</td>
+                        <td data-label="Concepto">
+                          {c.concepto}
+                          <Firma item={c} alta="Generado por" />
+                        </td>
                         <td className="small" data-label="Tipo">{etiquetaIngreso(tipoDeCargo(c))}</td>
                         <td data-label="Vence">{fecha(c.vence)}</td>
                         <td className="num" data-label="Monto">{money(c.monto)}</td>
@@ -463,7 +472,7 @@ export function TipoIngreso({ value, onChange }: { value: string; onChange: (v: 
 
 /** Reporte de cobranza en Excel: pagados, por aprobar y sin pago del mes, morosos y estado por unidad. */
 function ReporteCobranza({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Cargo[]; onClose: () => void }) {
-  const { condo, unidades } = useAdmin();
+  const { condo, unidades, firmaReporte } = useAdmin();
   const [periodo, setPeriodo] = useState(periodoActual());
   const { run, busy } = useAction();
   async function descargar(e: React.FormEvent) {
@@ -482,6 +491,7 @@ function ReporteCobranza({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Ca
         cargos,
         pagos,
         contactos,
+        generadoPor: firmaReporte,
       });
     }, 'Reporte de cobranza descargado');
     if (okk) onClose();
@@ -507,7 +517,7 @@ function ReporteCobranza({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Ca
 
 /** Ingresos › Residentes: cada casa o departamento con su residente y su historial de pagos en PDF. */
 function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] }) {
-  const { condo, unidades } = useAdmin();
+  const { condo, unidades, firmaReporte } = useAdmin();
   const contactos = useLoad(
     () => adminCall<Record<string, { nombre: string | null; telefono: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }),
     [condo!.id],
@@ -533,6 +543,7 @@ function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] 
           cargos: cargos.filter((c) => c.unidadId === u.id),
           pagos: pagos.filter((p) => p.unidadId === u.id),
           hoy: hoy(),
+          generadoPor: firmaReporte,
         });
       } finally {
         setBajando(null);

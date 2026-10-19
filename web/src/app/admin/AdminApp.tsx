@@ -14,6 +14,7 @@ import { ComunicadosAdmin, EncuestasAdmin, ChatAdmin } from './Comunicacion';
 import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, MascotasAdmin } from './Operacion';
 import { ResidentesRapido } from './ResidentesRapido';
 import { CampanaAdmin } from './CampanaAdmin';
+import { Actividad } from './Actividad';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -30,6 +31,8 @@ type Ctx = {
   yo: string;
   /** Nombre del administrador de la sesión (o su correo si no tiene nombre). */
   yoNombre: string;
+  /** Cómo firma los reportes que descarga: «Nombre» o «Nombre (Superadmin)». */
+  firmaReporte: string;
   /** Permisos del administrador (el superadministrador puede todo). */
   superadmin: boolean;
   puede: (seccion: string, nivel?: Nivel) => boolean;
@@ -100,6 +103,7 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'amenidades', label: 'Amenidades', icon: 'calendar' },
   { key: 'visitas', label: 'Visitas', icon: 'qr' },
   { key: 'mascotas', label: 'Mascotas', icon: 'paw' },
+  { key: 'actividad', label: 'Actividad', icon: 'clock', soloSuper: true },
 ];
 
 const LS = 'siia-admin-condo';
@@ -161,6 +165,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     etiqueta: (id) => unidadesOrden.find((u) => u.id === id)?.etiqueta ?? '—',
     yo,
     yoNombre: mios.nombre || mios.email || yo,
+    firmaReporte: `${mios.nombre || mios.email || yo}${mios.superadmin ? ' (Superadmin)' : ''}`,
     superadmin: mios.superadmin,
     puede,
     tiene,
@@ -230,6 +235,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
           <>
             {actual === 'panel' && (rapido ? <ResidentesRapido go={go} /> : <Panel go={go} />)}
             {actual === 'administradores' && <Administradores />}
+            {actual === 'actividad' && <Actividad />}
             {actual === 'condominios' && <Condominios key={cur} inicio={sub === 'residentes' ? 'residentes' : undefined} />}
             {actual === 'finanzas' && <FinanzasAdmin key={cur} inicio={sub === 'revision' ? 'revision' : undefined} />}
             {actual === 'comunicados' && <ComunicadosAdmin />}

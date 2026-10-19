@@ -19,6 +19,7 @@ import {
   update,
   type Item,
 } from '../shared/db';
+import { sinFirmas } from '../shared/firma';
 import { emailDe } from '../shared/cognito';
 import { enviarAUsuario } from '../shared/push';
 import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../shared/finanzas';
@@ -1065,7 +1066,7 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     if (!sub) fail('Sesión no válida.');
 
     const email = async () => claimEmail || (await emailDe(sub));
-    if (action === 'perfil') return await perfilActual(sub, await email());
+    if (action === 'perfil') return sinFirmas(await perfilActual(sub, await email()));
 
     // A partir de aquí: solo usuarios aprobados de un condominio activo
     const perfil = await get('Perfil', { userId: sub });
@@ -1088,7 +1089,7 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
       const a = caseta[action];
       if (!a) fail('Acción no permitida.');
       if (!modulos.includes(a!.modulo)) fail('Este servicio no está habilitado para tu condominio.');
-      return await a!.fn(ctx);
+      return sinFirmas(await a!.fn(ctx));
     }
 
     if (perfil!.rol === 'RESIDENTE') {
@@ -1098,7 +1099,7 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
       if (modulo !== 'inicio' && !modulos.includes(modulo)) fail('Este servicio no está habilitado para tu condominio.');
       ctx.unidad = perfil!.unidadId ? await get('Unidad', { id: perfil!.unidadId }) : undefined;
       if (!ctx.unidad || ctx.unidad.condominioId !== condominio!.id) fail('Tu cuenta no tiene una unidad asignada.');
-      return await fn(ctx);
+      return sinFirmas(await fn(ctx));
     }
 
     fail('Acción no permitida.');

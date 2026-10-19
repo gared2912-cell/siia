@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { adminCall, db, ok, type Schema } from '../api';
 import { Archivo, Badge, Empty, Icon, Seg, fecha, fechaHora, hoy, money, periodoActual, useAction } from '../ui';
+import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
 import { EditarEgreso, Mes, VerEvidencia } from './Egresos';
 import { evidenciasDe, mesCorto, nombreMes, type DatosFinanzas } from './balance';
@@ -224,7 +225,7 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
                       <VerEvidencia key={ev.path} egresoId={e.id} ev={ev} />
                     ))}
                   </div>
-                  {(e.registradoPorNombre || e.registradoPor) && <div className="small muted">Registrado por {e.registradoPorNombre || e.registradoPor}</div>}
+                  <Firma item={e} altaAntes={e.registradoPorNombre || e.registradoPor} />
                 </div>
                 {gestiona && (
                   <div className="row-actions">

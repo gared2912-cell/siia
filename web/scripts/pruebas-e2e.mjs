@@ -56,7 +56,7 @@ const apis = await new AppSyncClient({}).send(new ListGraphqlApisCommand({}));
 const api = apis.graphqlApis.find((a) => a.uris?.GRAPHQL === outputs.data.url);
 const SUFIJO_TABLA = `-${api.apiId}-NONE`;
 const T = (m) => `${m}${SUFIJO_TABLA}`;
-const MODELOS = ['Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia'];
+const MODELOS = ['Actividad', 'Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia'];
 
 // ---------- utilidades ----------
 const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
@@ -191,6 +191,8 @@ async function limpiar() {
   const dispositivos = (await scanTodo('Dispositivo')).filter((d) => usuariosE2E.has(d.userId));
   await borrarItems('Dispositivo', dispositivos.map((d) => ({ id: d.id })));
   await borrarItems('Perfil', perfiles.map((p) => ({ userId: p.userId })));
+  const actividadGlobal = (await scanTodo('Actividad')).filter((x) => x.condominioId === 'GLOBAL' && String(x.porEmail ?? '').endsWith(`@${DOMINIO}`));
+  await borrarItems('Actividad', actividadGlobal.map((x) => ({ id: x.id })));
   const roles = (await scanTodo('RolAdmin')).filter((r) => String(r.nombre).startsWith('E2E '));
   await borrarItems('RolAdmin', roles.map((r) => ({ id: r.id })));
 
@@ -1213,6 +1215,81 @@ try {
     esperar(yo.condominios.includes(c.id), JSON.stringify(yo.condominios));
     return `${c.nombre}`;
   });
+  // =====================================================================
+  grupo('Firma de la administración y registro de actividad');
+  const firmaDe = (v) => {
+    let x = v;
+    for (let i = 0; i < 2 && typeof x === 'string'; i++) x = JSON.parse(x);
+    return x ?? null;
+  };
+  await prueba('Pago aprobado lleva la firma de la contadora (sin su correo)', async () => {
+    const pagos = await ok(ct.db('Pago', 'pagosPorCondominio', { args: { condominioId: X.robles } }));
+    const f = firmaDe(pagos.find((p) => p.id === X.pago1)?.firmaCambio);
+    esperar(f?.nombre === 'Contadora E2E', JSON.stringify(f));
+    esperar(!f.email, 'un administrador ve el correo de la firma');
+    return `Aprobado por ${f.nombre} · ${f.en}`;
+  });
+  await prueba('El superadministrador sí ve el correo en la firma', async () => {
+    const pagos = await ok(sa.db('Pago', 'pagosPorCondominio', { args: { condominioId: X.robles } }));
+    const f = firmaDe(pagos.find((p) => p.id === X.pago1)?.firmaCambio);
+    esperar(f?.email === E('contador'), JSON.stringify(f));
+    return f.email;
+  });
+  await prueba('Cuotas y comunicados firmados por quien los creó', async () => {
+    const cargos = await ok(sa.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.robles } }));
+    const cuota = cargos.find((c) => c.tipo === 'CUOTA' && firmaDe(c.firma));
+    esperar(firmaDe(cuota?.firma)?.nombre === 'Contadora E2E', JSON.stringify(cuota?.firma));
+    const coms = await ok(sa.db('Comunicado', 'comunicadosPorCondominio', { args: { condominioId: X.robles } }));
+    const c = firmaDe(coms.find((x) => x.id === X.comunicado)?.firma);
+    esperar(c?.nombre === 'Administrador General E2E' && c.rol === 'ADMIN', JSON.stringify(c));
+    return 'cuota: Contadora · comunicado: Administrador General';
+  });
+  await prueba('El residente no ve firmas ni nombres de la administración', async () => {
+    const respuestas = await Promise.all([
+      ok(r1.portal('inicio.resumen')),
+      ok(r1.portal('finanzas.estadoCuenta')),
+      ok(r1.portal('comunicados.lista')),
+    ]);
+    const texto = JSON.stringify(respuestas);
+    for (const prohibido of ['firma', 'Contadora E2E', 'Administrador General E2E', E('contador'), 'validadoPor'])
+      esperar(!texto.includes(prohibido), `el residente recibe «${prohibido}»`);
+    return 'solo «Administración»';
+  });
+  let actividad;
+  await prueba('Registro de actividad: quién aprobó, generó y eliminó, con lo que cambió', async () => {
+    actividad = await ok(sa.admin('actividad.lista', { condominioId: X.robles }));
+    const aprobado = actividad.find((e) => e.accion === 'validarPago' && e.cambios.some((c) => c.id === X.pago1 && c.campos.some((f) => f.campo === 'estado' && f.despues === 'VALIDADO')));
+    esperar(aprobado?.porNombre === 'Contadora E2E' && aprobado.porEmail === E('contador'), 'falta la aprobación del pago');
+    const cuotas = actividad.find((e) => e.accion === 'generarCargos');
+    esperar(cuotas && cuotas.cambios.filter((c) => c.op === 'alta').length === 7, `cuotas: ${cuotas?.cambios.length}`);
+    const baja = actividad.find((e) => e.accion === 'egresos.borrar' && e.cambios.some((c) => c.op === 'baja' && c.campos.some((f) => f.campo === 'monto')));
+    esperar(!!baja, 'falta la eliminación del egreso con su monto');
+    return `${actividad.length} entradas · «${aprobado.resumen}» · «${cuotas.resumen}»`;
+  });
+  await prueba('Las marcas de lectura no cuentan como cambios', async () => {
+    const solo = actividad.filter((e) => e.cambios.every((c) => c.campos.every((f) => /chatLeido|leido/i.test(f.campo))));
+    esperar(!solo.length, `entradas solo de lectura: ${solo.map((e) => e.accion).join(', ')}`);
+    return 'sin entradas de lectura';
+  });
+  await prueba('Solo el superadministrador ve la actividad', () => bloqueado(ag.admin('actividad.lista', { condominioId: X.robles })));
+  await prueba('Asignar y quitar administrador desde la ficha del condominio', async () => {
+    const antes = await ok(sa.admin('condominios.administradores', { condominioId: X.torre }));
+    esperar(antes.find((a) => a.userId === SUB.ct)?.asignado === false, 'la contadora ya tenía Torre Mirador');
+    await ok(sa.admin('condominios.asignarAdmin', { condominioId: X.torre, userId: SUB.ct, asignar: true }));
+    const con = await ok(ct.db('Condominio', 'list'));
+    esperar(con.some((c) => c.id === X.torre), 'no ve Torre Mirador tras asignarla');
+    await ok(sa.admin('condominios.asignarAdmin', { condominioId: X.torre, userId: SUB.ct, asignar: false }));
+    const sin = await ok(ct.db('Condominio', 'list'));
+    esperar(!sin.some((c) => c.id === X.torre), 'sigue viendo Torre Mirador');
+    await bloqueado(ct.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.torre } }));
+    const act = await ok(sa.admin('actividad.lista', { condominioId: X.torre }));
+    esperar(act.filter((e) => e.accion === 'condominios.asignarAdmin').length >= 2, 'no quedó en la actividad del condominio');
+    return 'asignada, vista, quitada y bloqueada al instante';
+  });
+  await prueba('Un administrador no puede asignarse condominios', () =>
+    bloqueado(ag.admin('condominios.asignarAdmin', { condominioId: X.torre, userId: SUB.ct, asignar: true })),
+  );
+
   await prueba('Los administradores no leen tablas ni archivos directo', async () => {
     const x = await gql(ag.tok, 'query{ listPagos(limit:1){ items{ id } } }');
     esperar(!!x.errors, 'listPagos permitido');

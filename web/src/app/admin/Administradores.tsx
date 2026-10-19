@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, type Schema } from '../api';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
+import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
 import { EXTRAS, NIVELES, SECCIONES_PERMISO, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 
@@ -250,6 +251,7 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
                     {p.email} · alta {fecha(p.createdAt)}
                   </div>
                   <div className="list-sub">{condosDe(p)}</div>
+                  <Firma item={p} alta="Alta por" />
                 </div>
                 <div className="row-actions">
                   <button className="btn-app sm secondary" onClick={() => setEditar(p)}>

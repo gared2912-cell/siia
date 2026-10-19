@@ -19,7 +19,7 @@ type Unidad = Schema['Unidad']['type'];
 type Cuenta = { status?: string };
 
 export function ResidentesRapido({ go }: { go: (k: string) => void }) {
-  const { condo, unidades, puede } = useAdmin();
+  const { condo, unidades, puede, firmaReporte } = useAdmin();
   const veChat = puede('chat');
   const veFinanzas = puede('finanzas');
   const cambiaContrasena = puede('usuarios', 'editar');
@@ -67,6 +67,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
       cargos: cargos.filter((c) => c.unidadId === u.id),
       pagos: pagos.filter((p) => p.unidadId === u.id),
       hoy: h,
+      generadoPor: firmaReporte,
     });
 
   // Excel de control de accesos: una fila por residente (o por casa sin residente), ordenado por casa.
@@ -76,6 +77,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
       await descargarExcelAccesos({
         condominio: condo!.nombre,
         hoy: h,
+        generadoPor: firmaReporte,
         filas: unidades.flatMap((u) => {
           const rs = perfiles.filter((p) => p.unidadId === u.id);
           const vencido = veFinanzas ? vencidoDe(u.id) : null;

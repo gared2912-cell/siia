@@ -130,6 +130,7 @@ export type ReporteEncuesta = {
   opciones: string[];
   unidades: { id: string; etiqueta: string }[];
   votos: { unidadId: string; opcion: string; createdAt: string; nombre?: string | null; email?: string | null }[];
+  generadoPor?: string;
 };
 
 /** Excel con el resultado (ganador y votos por opción), quién votó y por qué opción, y qué unidades no votaron. */
@@ -164,6 +165,9 @@ export async function descargarReporteEncuesta(r: ReporteEncuesta) {
     ['Opción', 'Votos', 'Porcentaje'],
     ...conteo.map((c) => [c.o, c.n, pct(c.n)]),
     ['Total', total, total ? 1 : 0],
+    ...(r.generadoPor
+      ? [[], [`Generado por ${r.generadoPor} · ${new Date().toLocaleString('es-MX', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`]]
+      : []),
   ]);
   const inicio = (r.descripcion ? 1 : 0) + (r.cierra ? 1 : 0) + 8;
   for (let k = 0; k <= conteo.length; k++) {
