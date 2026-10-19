@@ -3,7 +3,7 @@ import Base from '../layouts/Base.astro';
 import PageHero from '../components/PageHero.astro';
 import Icon from '../components/Icon.astro';
 import { photo } from '../data/images';
-import { propertyTypes, quoteNote, services, site } from '../data/site';
+import { propertyTypes, quoteNote, services, site, telefonosVisibles } from '../data/site';
 
 const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarrollador / constructora', 'Otro'];
 ---
@@ -25,7 +25,7 @@ const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarro
         class="card form quote__form"
         data-lead-form
         data-subject="Quiero cotizar la administración de mi condominio"
-        data-whatsapp={site.whatsapp}
+        data-whatsapp={site.mostrarWhatsapp ? site.whatsapp : undefined}
       >
         <h2 class="quote__title">1. Tu desarrollo</h2>
         <div class="form-row">
@@ -112,8 +112,13 @@ const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarro
         <label class="consent">
           <input type="checkbox" name="consentimiento" required />
           <span>
-            Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a> y autorizo que SIIA me contacte
-            para darle seguimiento a mi solicitud.
+            {
+              site.mostrarAviso ? (
+                <>Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a> y autorizo que SIIA me contacte para darle seguimiento a mi solicitud.</>
+              ) : (
+                'Autorizo que SIIA me contacte para darle seguimiento a mi solicitud.'
+              )
+            }
           </span>
         </label>
         <button class="btn" type="submit">Solicitar cotización <Icon name="arrow" /></button>
@@ -130,9 +135,9 @@ const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarro
           </ol>
         </div>
         <div class="card aside-contact">
-          <h2 class="quote__title">¿Prefieres llamarnos?</h2>
+          <h2 class="quote__title">{telefonosVisibles.length ? '¿Prefieres llamarnos?' : '¿Prefieres escribirnos?'}</h2>
           {
-            site.phones.map((p) => (
+            telefonosVisibles.map((p) => (
               <a href={`tel:${p.tel}`}>
                 <Icon name="phone" />
                 {p.label}

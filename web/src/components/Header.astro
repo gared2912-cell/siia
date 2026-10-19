@@ -1,7 +1,7 @@
 ---
 import Logo from './Logo.astro';
 import Icon from './Icon.astro';
-import { nav, site } from '../data/site';
+import { nav, site, telefonosVisibles } from '../data/site';
 
 const path = Astro.url.pathname.replace(/\/?$/, '/');
 const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWith(href));
@@ -11,7 +11,7 @@ const isActive = (href: string) => (href === '/' ? path === '/' : path.startsWit
   <div class="container topbar__inner">
     <div class="topbar__contact">
       {
-        site.phones.map((p) => (
+        telefonosVisibles.map((p) => (
           <a href={`tel:${p.tel}`}>
             <Icon name="phone" />
             {p.label}

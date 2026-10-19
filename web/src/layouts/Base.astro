@@ -26,7 +26,7 @@ const jsonLd = {
   url: 'https://siia.casa/',
   logo: new URL('/logo-siia.png', Astro.site).href,
   email: site.email,
-  telephone: site.phones.map((p) => p.tel),
+  telephone: site.mostrarTelefonos ? site.phones.map((p) => p.tel) : undefined,
   areaServed: site.coverage ?? undefined,
   hasOfferCatalog: {
     '@type': 'OfferCatalog',
@@ -78,7 +78,7 @@ const jsonLd = {
       <slot />
     </main>
     <Footer />
-    <WhatsAppFloat />
+    {site.mostrarWhatsapp && <WhatsAppFloat />}
 
     <script>
       // Animación sutil al hacer scroll (se omite con prefers-reduced-motion vía CSS)

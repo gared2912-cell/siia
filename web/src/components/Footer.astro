@@ -3,7 +3,7 @@ import { Image } from 'astro:assets';
 import Logo from './Logo.astro';
 import logoGedx from '../assets/marca/logo-gedx.webp';
 import Icon from './Icon.astro';
-import { nav, services, site } from '../data/site';
+import { nav, services, site, telefonosVisibles } from '../data/site';
 
 const year = new Date().getFullYear();
 ---
@@ -37,7 +37,7 @@ const year = new Date().getFullYear();
       <h2 class="footer__title">Contacto</h2>
       <ul class="footer__list footer__contact">
         {
-          site.phones.map((p) => (
+          telefonosVisibles.map((p) => (
             <li>
               <a href={`tel:${p.tel}`}>
                 <Icon name="phone" />
@@ -56,11 +56,15 @@ const year = new Date().getFullYear();
   <div class="footer__bottom">
     <div class="container footer__bottom-inner">
       <p>© {year} {site.legalName}. Todos los derechos reservados.</p>
-      <p>
-        <a href="/aviso-de-privacidad/">Aviso de privacidad</a>
-        <span aria-hidden="true">·</span>
-        <a href="/terminos-y-condiciones/">Términos y condiciones</a>
-      </p>
+      {
+        (site.mostrarAviso || site.mostrarTerminos) && (
+          <p>
+            {site.mostrarAviso && <a href="/aviso-de-privacidad/">Aviso de privacidad</a>}
+            {site.mostrarAviso && site.mostrarTerminos && <span aria-hidden="true">·</span>}
+            {site.mostrarTerminos && <a href="/terminos-y-condiciones/">Términos y condiciones</a>}
+          </p>
+        )
+      }
     </div>
     <p class="footer__powered">
       <a href="https://gedx.com.mx/" target="_blank" rel="noopener">

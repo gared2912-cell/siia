@@ -4,7 +4,7 @@ import PageHero from '../components/PageHero.astro';
 import Icon from '../components/Icon.astro';
 import LoginResidentes from '../app/LoginResidentes';
 import { photo } from '../data/images';
-import { appFeatures, site, waLink } from '../data/site';
+import { appFeatures, mailLink, site, waLink } from '../data/site';
 
 const portal = site.residentsPortalUrl;
 const quick = [
@@ -40,9 +40,11 @@ const quick = [
       ) : (
         <div class="btn-row portal-cta">
           <a
-            href={waLink('Hola SIIA, soy residente y quiero solicitar mi acceso a la app de mi condominio. Condominio: ___ · Casa/Depto: ___')}
+            href={site.mostrarWhatsapp
+              ? waLink('Hola SIIA, soy residente y quiero solicitar mi acceso a la app de mi condominio. Condominio: ___ · Casa/Depto: ___')
+              : mailLink('Solicitud de acceso a la app de mi condominio', 'Hola SIIA, soy residente y quiero solicitar mi acceso a la app de mi condominio.\n\nCondominio: ___\nCasa/Depto: ___')}
             class="btn btn--light"
-            target="_blank"
+            target={site.mostrarWhatsapp ? '_blank' : undefined}
             rel="noopener"
           >
             <Icon name="lock" />

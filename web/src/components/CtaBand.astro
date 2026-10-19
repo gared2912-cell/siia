@@ -1,6 +1,6 @@
 ---
 import Icon from './Icon.astro';
-import { waLink } from '../data/site';
+import { site, waLink } from '../data/site';
 
 interface Props {
   title?: string;
@@ -21,12 +21,16 @@ const {
       </div>
       <div class="btn-row">
         <a href="/cotizar/" class="btn btn--light">Cotizar administración <Icon name="arrow" /></a>
-        <a
-          href={waLink('Hola SIIA, me gustaría agendar un diagnóstico sin costo para mi condominio.')}
-          class="btn btn--outline-light"
-          target="_blank"
-          rel="noopener"><Icon name="whatsapp" />WhatsApp</a
-        >
+        {
+          site.mostrarWhatsapp && (
+            <a
+              href={waLink('Hola SIIA, me gustaría agendar un diagnóstico sin costo para mi condominio.')}
+              class="btn btn--outline-light"
+              target="_blank"
+              rel="noopener"><Icon name="whatsapp" />WhatsApp</a
+            >
+          )
+        }
       </div>
     </div>
   </div>

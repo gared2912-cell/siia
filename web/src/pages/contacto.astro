@@ -5,18 +5,22 @@ import Icon from '../components/Icon.astro';
 import { photo } from '../data/images';
 import { site, waLink } from '../data/site';
 
+const canales = [site.mostrarTelefonos && 'teléfono', site.mostrarWhatsapp && 'WhatsApp'].filter(Boolean);
+
 // Formulario clasificado (Propuesta, sección F). Se omiten "Informes de compra" y "Vendedor" (venta de propiedades en pausa).
 const reasons = ['Cotización de administración', 'Soy residente de un condominio SIIA', 'Soy proveedor', 'Otro'];
 ---
 
 <Base
   title="Contacto"
-  description="Contacta a SIIA por teléfono, WhatsApp o correo. Cotizaciones, atención a residentes, proveedores y reportes urgentes de mantenimiento."
+  description={`Contacta a SIIA por ${canales.length ? `${canales.join(', ')} o ` : ''}correo. Cotizaciones, atención a residentes, proveedores y reportes urgentes de mantenimiento.`}
 >
   <PageHero
     crumb="Contacto"
     title="Hablemos de tu condominio"
-    lead="Escríbenos o llámanos. Te atendemos de forma personalizada por WhatsApp, llamada o correo."
+    lead={canales.length
+      ? 'Escríbenos o llámanos. Te atendemos de forma personalizada por WhatsApp, llamada o correo.'
+      : 'Escríbenos y te atendemos de forma personalizada por correo.'}
     image={photo('atencion-clientes')}
   />
 
@@ -29,11 +33,15 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
             <span>Correo electrónico</span>
             <strong>{site.email}</strong>
           </a>
-          <a class="card info" href={waLink('Hola SIIA, me gustaría recibir información.')} target="_blank" rel="noopener">
-            <div class="icon-badge"><Icon name="whatsapp" /></div>
-            <span>WhatsApp</span>
-            <strong>Escríbenos</strong>
-          </a>
+          {
+            site.mostrarWhatsapp && (
+              <a class="card info" href={waLink('Hola SIIA, me gustaría recibir información.')} target="_blank" rel="noopener">
+                <div class="icon-badge"><Icon name="whatsapp" /></div>
+                <span>WhatsApp</span>
+                <strong>Escríbenos</strong>
+              </a>
+            )
+          }
         </div>
 
         {
@@ -46,7 +54,7 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
         }
       </div>
 
-      <form class="card form" data-lead-form data-subject="Tengo una consulta desde el sitio web" data-whatsapp={site.whatsapp}>
+      <form class="card form" data-lead-form data-subject="Tengo una consulta desde el sitio web" data-whatsapp={site.mostrarWhatsapp ? site.whatsapp : undefined}>
         <h2 class="h-small">Envíanos un mensaje</h2>
         <div class="field">
           <label for="motivo">Motivo de contacto *</label>
@@ -86,7 +94,11 @@ const reasons = ['Cotización de administración', 'Soy residente de un condomin
         </div>
         <label class="consent">
           <input type="checkbox" name="consentimiento" required />
-          <span>Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a>.</span>
+          <span>
+            {site.mostrarAviso
+              ? <>Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a>.</>
+              : 'Autorizo que SIIA use mis datos para responder mi mensaje.'}
+          </span>
         </label>
         <button class="btn" type="submit">Enviar mensaje <Icon name="arrow" /></button>
         <p class="form-status" role="status" hidden data-status></p>

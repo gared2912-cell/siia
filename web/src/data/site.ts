@@ -18,6 +18,13 @@ export const site = {
   ],
   // Número para el botón flotante y formularios (WhatsApp Business). PENDIENTE: confirmar número.
   whatsapp: '524461231669',
+  // Interruptores: por ahora no hay teléfonos de atención ni WhatsApp. Los datos de arriba se conservan;
+  // con false no se muestran en el sitio y los formularios se envían por correo. Poner true para volver a mostrarlos.
+  mostrarTelefonos: false,
+  mostrarWhatsapp: false,
+  // Aviso de privacidad y términos en revisión por el área legal: false = sin enlace en el pie, formularios ni sitemap.
+  mostrarAviso: false,
+  mostrarTerminos: false,
   // PENDIENTE: horario de atención (no viene en la presentación). null = no se muestra.
   schedule: null as string | null,
   // Portal de residentes propio (Amplify: Cognito + AppSync). El panel de administración vive en /admin/.
@@ -38,6 +45,12 @@ export const nav = [
 
 export const waLink = (text: string, number = site.whatsapp) =>
   `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+
+export const mailLink = (subject: string, body = '') =>
+  `mailto:${site.email}?subject=${encodeURIComponent(subject)}${body ? `&body=${encodeURIComponent(body)}` : ''}`;
+
+// Teléfonos visibles en el sitio (vacío mientras mostrarTelefonos = false).
+export const telefonosVisibles = site.mostrarTelefonos ? site.phones : [];
 
 // Propuesta de valor en 4 pilares (Propuesta, sección B)
 export const pillars = [

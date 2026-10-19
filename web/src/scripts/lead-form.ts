@@ -1,6 +1,6 @@
 // Envío de formularios de prospectos.
 // - Si el <form> tiene data-endpoint, se envía JSON por POST (p. ej. API Gateway/Lambda o Amplify, fase de integraciones).
-// - Si no, se abre WhatsApp con el mensaje ya redactado para que el prospecto lo envíe.
+// - Si no, se abre WhatsApp (si el <form> tiene data-whatsapp) o el correo con el mensaje ya redactado para que el prospecto lo envíe.
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
@@ -83,15 +83,24 @@ export function initLeadForms() {
           showStatus('¡Gracias! Recibimos tu información y un asesor de SIIA te contactará muy pronto.');
           return;
         } catch {
-          // Si el endpoint falla, se ofrece WhatsApp como respaldo.
+          // Si el endpoint falla, se ofrece WhatsApp o correo como respaldo.
         }
       }
 
       const text = [`Hola SIIA, ${subject.toLowerCase()}.`, '', ...lines].join('\n');
-      const url = `https://wa.me/${form.dataset.whatsapp}?text=${encodeURIComponent(text)}`;
-      window.open(url, '_blank', 'noopener');
+      if (form.dataset.whatsapp) {
+        const url = `https://wa.me/${form.dataset.whatsapp}?text=${encodeURIComponent(text)}`;
+        window.open(url, '_blank', 'noopener');
+        showStatus(
+          'Abrimos WhatsApp con tu mensaje listo. Solo presiona "Enviar" y un asesor de SIIA te responderá. Si no se abrió, escríbenos a info@siia.casa.',
+        );
+        return;
+      }
+      // Correo sin los asteriscos de negritas de WhatsApp.
+      const body = text.replace(/\*/g, '');
+      location.href = `mailto:info@siia.casa?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       showStatus(
-        'Abrimos WhatsApp con tu mensaje listo. Solo presiona "Enviar" y un asesor de SIIA te responderá. Si no se abrió, escríbenos a info@siia.casa.',
+        'Abrimos tu correo con el mensaje listo. Solo presiona "Enviar" y un asesor de SIIA te responderá. Si no se abrió, escríbenos a info@siia.casa.',
       );
     });
   });
