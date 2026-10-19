@@ -1,4 +1,5 @@
 import { defineAuth } from '@aws-amplify/backend';
+import { PORTAL_URL } from '../ambiente';
 
 // Cognito: inicio de sesión con correo. Los grupos definen el rol; un usuario sin grupo no ve nada.
 // SUPERADMIN → panel /admin completo, roles de administración y alta de administradores
@@ -8,7 +9,7 @@ import { defineAuth } from '@aws-amplify/backend';
 // Las cuentas solo las crea la administración (registro libre desactivado en backend.ts);
 // Cognito envía al usuario el correo de bienvenida con su contraseña temporal.
 
-const PORTAL = 'https://staging.siia.casa/portal/';
+const PORTAL = PORTAL_URL;
 
 const invitacion = (usuario: string, codigo: string) => `
 <div style="background:#f5f9fa;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;color:#3a3f55">

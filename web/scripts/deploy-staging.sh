@@ -7,6 +7,8 @@ set -euo pipefail
 export AWS_PROFILE="${AWS_PROFILE:-Gared}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AWS_PAGER=""
+# El backend arma la configuración de este ambiente (amplify/ambiente.ts).
+export SIIA_AMBIENTE="staging"
 BUCKET="staging.siia.casa"
 DISTRIBUTION_ID="E2ZVIOIQADE0ZZ"
 AMPLIFY_APP_ID="do7xm3gw1ryfq"

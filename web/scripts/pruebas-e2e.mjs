@@ -41,6 +41,12 @@ process.env.AWS_REGION ??= 'us-east-1';
 const CONSERVAR = process.argv.includes('--conservar');
 
 const outputs = JSON.parse(readFileSync(new URL('../amplify_outputs.json', import.meta.url), 'utf8'));
+// Solo en staging: crea y borra cuentas y datos de prueba. Nunca contra producción (siia.casa).
+const POOL_STAGING = 'us-east-1_wHDpkr5VO';
+if (outputs.custom?.ambiente === 'produccion' || outputs.auth?.user_pool_id !== POOL_STAGING) {
+  console.error('✘ Este script solo corre en staging. amplify_outputs.json apunta a otro ambiente; regenéralo con: npx ampx generate outputs --branch staging --app-id do7xm3gw1ryfq --out-dir .');
+  process.exit(1);
+}
 const POOL = outputs.auth.user_pool_id;
 const BUCKET = outputs.storage.bucket_name;
 const DOMINIO = 'e2e.siia.casa';

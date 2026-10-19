@@ -1,4 +1,5 @@
 import { defineFunction, secret } from '@aws-amplify/backend';
+import { SECRETO_VAPID } from '../../ambiente';
 
 export const notificador = defineFunction({
   name: 'siia-notificador',
@@ -7,5 +8,5 @@ export const notificador = defineFunction({
   memoryMB: 512,
   runtime: 22,
   resourceGroupName: 'data',
-  environment: { VAPID_PRIVATE_KEY: secret('VAPID_PRIVATE_KEY') },
+  environment: { VAPID_PRIVATE_KEY: secret(SECRETO_VAPID) },
 });

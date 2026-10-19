@@ -12,7 +12,8 @@
     "app-icons": "node scripts/app-icons.mjs",
     "demo:crear": "node scripts/demo-data.mjs",
     "demo:limpiar": "node scripts/demo-data.mjs --limpiar",
-    "pruebas:e2e": "node scripts/pruebas-e2e.mjs"
+    "pruebas:e2e": "node scripts/pruebas-e2e.mjs",
+    "deploy:produccion": "bash scripts/deploy-produccion.sh"
   },
   "dependencies": {
     "@astrojs/react": "^7.0.0",

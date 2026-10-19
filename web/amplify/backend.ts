@@ -11,6 +11,7 @@ import { portalApi } from './functions/portal-api/resource';
 import { notificador } from './functions/notificador/resource';
 import { recargos } from './functions/recargos/resource';
 import { reservasVencidas } from './functions/reservas-vencidas/resource';
+import { AMBIENTE, PORTAL_URL, SITIO, VAPID_PUBLICA } from './ambiente';
 
 const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas });
 
@@ -150,6 +151,13 @@ backend.recargos.resources.lambda.addToRolePolicy(
     resources: [`arn:aws:ses:${Stack.of(backend.recargos.resources.lambda).region}:${Stack.of(backend.recargos.resources.lambda).account}:identity/*`],
   }),
 );
+
+// ---------- ambiente (staging o producción) ----------
+// Cada ambiente tiene su llave pública VAPID y su dirección del portal (enlaces de correos y avisos).
+for (const fn of [backend.adminApi, backend.portalApi, backend.notificador]) fn.addEnvironment('VAPID_PUBLIC_KEY', VAPID_PUBLICA);
+backend.recargos.addEnvironment('PORTAL_URL', PORTAL_URL);
+// El sitio lee estos datos de amplify_outputs.json (y los scripts de prueba se niegan a correr en producción).
+backend.addOutput({ custom: { ambiente: AMBIENTE, sitio: SITIO, vapidPublica: VAPID_PUBLICA } });
 
 // ---------- notificaciones push ----------
 // El notificador escucha los registros nuevos de estas tablas (los streams ya existen en las tablas de Amplify).

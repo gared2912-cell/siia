@@ -15,7 +15,7 @@ let listo = false;
 function configurar() {
   if (listo) return;
   if (!process.env.VAPID_PRIVATE_KEY) throw new Error('Falta el secreto VAPID_PRIVATE_KEY');
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+  webpush.setVapidDetails(VAPID_SUBJECT, process.env.VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
   listo = true;
 }
 

@@ -5,7 +5,11 @@
 import { useEffect, useState } from 'react';
 import { adminCall, portal } from './api';
 import { Empty, ErrorBox, Icon, Loading, Modal, useAction, useLoad, useToast } from './ui';
-import { VAPID_PUBLIC_KEY, type Categoria } from '../../amplify/functions/shared/notificaciones';
+import { VAPID_PUBLIC_KEY as VAPID_STAGING, type Categoria } from '../../amplify/functions/shared/notificaciones';
+import outputs from '../../amplify_outputs.json';
+
+// Cada ambiente (staging / producción) tiene su llave pública VAPID; viene en amplify_outputs.json.
+const VAPID_PUBLIC_KEY = (outputs as { custom?: { vapidPublica?: string } }).custom?.vapidPublica || VAPID_STAGING;
 import { PermisoCamara } from './camara';
 
 export type ApiApp = 'portal' | 'admin';
