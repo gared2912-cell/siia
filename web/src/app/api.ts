@@ -7,6 +7,7 @@ import { I18n } from 'aws-amplify/utils';
 import { translations } from '@aws-amplify/ui-react';
 import outputs from '../../amplify_outputs.json';
 import type { Schema } from '../../amplify/data/resource';
+import './sesion';
 
 Amplify.configure(outputs);
 I18n.putVocabularies(translations);

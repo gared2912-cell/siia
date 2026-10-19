@@ -4,6 +4,7 @@ import '@aws-amplify/ui-react/styles.css';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './ui';
 import { camposAcceso } from './camposAcceso';
+import { SesionLista } from './sesion';
 import { AppYNotificaciones, SugerenciaApp, bajaDeEsteDispositivo, useSincronizarPush, type ApiApp } from './AppMovil';
 
 export function Acceso({
@@ -18,11 +19,19 @@ export function Acceso({
   children: ReactNode;
 }) {
   return (
-    <Authenticator.Provider>
-      <Puerta kicker={kicker} hideSignUp={hideSignUp} foot={foot}>
-        {children}
-      </Puerta>
-    </Authenticator.Provider>
+    <SesionLista
+      espera={
+        <div className="auth-screen">
+          <p className="muted">Conectando… revisa tu conexión a internet.</p>
+        </div>
+      }
+    >
+      <Authenticator.Provider>
+        <Puerta kicker={kicker} hideSignUp={hideSignUp} foot={foot}>
+          {children}
+        </Puerta>
+      </Authenticator.Provider>
+    </SesionLista>
   );
 }
 

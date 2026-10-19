@@ -6,6 +6,7 @@ import './amplify-auth.css';
 import './api';
 import { useEffect } from 'react';
 import { camposAcceso } from './camposAcceso';
+import { SesionLista } from './sesion';
 
 const PORTAL = '/portal/';
 
@@ -19,11 +20,13 @@ function AlPortal() {
 
 export default function LoginResidentes() {
   return (
-    <Authenticator.Provider>
-      <AlPortal />
-      <Authenticator hideSignUp loginMechanisms={['email']} formFields={camposAcceso}>
-        {() => <p className="login-res__entrando">Entrando al portal…</p>}
-      </Authenticator>
-    </Authenticator.Provider>
+    <SesionLista espera={<p className="login-res__entrando">Conectando…</p>}>
+      <Authenticator.Provider>
+        <AlPortal />
+        <Authenticator hideSignUp loginMechanisms={['email']} formFields={camposAcceso}>
+          {() => <p className="login-res__entrando">Entrando al portal…</p>}
+        </Authenticator>
+      </Authenticator.Provider>
+    </SesionLista>
   );
 }
