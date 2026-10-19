@@ -788,6 +788,9 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
   const valida = reglas.every(([, ok]) => ok);
   const { run, busy } = useAction();
   const nombre = p.nombre || p.email;
+  // Las cuentas de administración entran al panel; residentes y vigilantes, al portal.
+  const esAdmin = p.rol === 'ADMIN' || p.rol === 'SUPERADMIN';
+  const destino = esAdmin ? 'al panel de administración' : 'al portal';
   const aviso = sinPrimerIngreso ? '' : ' Su contraseña actual dejará de funcionar.';
 
   const reenviar = async () => {
@@ -809,13 +812,13 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
     }
   };
   const tel = (p.telefono ?? '').replace(/\D/g, '');
-  const mensaje = `Hola ${p.nombre ?? ''}. Tus datos para entrar al portal SIIA (${location.origin}/portal/):\nUsuario: ${p.email}\nContraseña: ${generada}`;
+  const mensaje = `Hola ${p.nombre ?? ''}. Tus datos para entrar ${destino} SIIA (${location.origin}/${esAdmin ? 'admin' : 'portal'}/):\nUsuario: ${p.email}\nContraseña: ${generada}`;
 
   return (
     <Modal title={`Contraseña de ${nombre}`} onClose={onClose}>
       {generada ? (
         <div className="form">
-          <p style={{ margin: 0 }}>Comparte estos datos con {nombre}. Es su contraseña definitiva para entrar al portal.</p>
+          <p style={{ margin: 0 }}>Comparte estos datos con {nombre}. Es su contraseña definitiva para entrar {destino}.</p>
           <div className="alert" style={{ display: 'grid', gap: 6 }}>
             <div>
               Usuario: <strong style={{ overflowWrap: 'anywhere' }}>{p.email}</strong>
@@ -848,7 +851,7 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
         </div>
       ) : escribir ? (
         <form className="form" onSubmit={guardar}>
-          <Field label={`Nueva contraseña para ${nombre}`} hint="Escríbela tal como se la vas a compartir. Será su contraseña para entrar al portal.">
+          <Field label={`Nueva contraseña para ${nombre}`} hint={`Escríbela tal como se la vas a compartir. Será su contraseña para entrar ${destino}.`}>
             <input
               autoFocus
               autoComplete="off"
@@ -891,7 +894,7 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
             <h3 style={{ fontSize: '1rem', marginTop: 0 }}>Generar contraseña</h3>
             <p className="small muted">
               Para quien no revisa o no tiene correo: tú escribes la contraseña, se la compartes (en persona o por WhatsApp) y con ella entra
-              directo al portal.
+              directo {destino}.
             </p>
             <button type="button" className="btn-app" disabled={busy} onClick={() => setEscribir(true)}>
               <Icon name="shield" />

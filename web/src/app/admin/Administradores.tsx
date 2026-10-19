@@ -5,6 +5,7 @@ import { adminCall, all, db, type Schema } from '../api';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
+import { Contrasena } from './Residentes';
 import { EXTRAS, NIVELES, SECCIONES_PERMISO, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 
 type Perfil = Schema['Perfil']['type'];
@@ -206,9 +207,12 @@ function EditarRol({ r, onClose, onDone }: { r: Partial<RolAdmin>; onClose: () =
 
 // ---------- cuentas de administración ----------
 function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void }) {
-  const { condos } = useAdmin();
+  const { condos, yo } = useAdmin();
   const perfiles = useLoad(() => all<Perfil>((o) => db.models.Perfil.list(o)));
+  const cuentas = useLoad(() => adminCall<Record<string, { status?: string }>>('estadoCuentas'));
   const [editar, setEditar] = useState<Perfil | 'nuevo' | null>(null);
+  const [contrasena, setContrasena] = useState<Perfil | null>(null);
+  const sinPrimerIngreso = (p: Perfil) => cuentas.data?.[p.userId]?.status === 'FORCE_CHANGE_PASSWORD';
   const admins = useMemo(
     () =>
       (perfiles.data ?? [])
@@ -247,6 +251,7 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
                 <div className="list-main">
                   <strong>{p.nombre || p.email}</strong> <Badge estado={p.estado} />{' '}
                   <Badge>{p.rol === 'SUPERADMIN' ? 'Superadministrador' : (roles.find((r) => r.id === p.rolAdminId)?.nombre ?? 'Sin rol')}</Badge>
+                  {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
                   <div className="list-sub">
                     {p.email} · alta {fecha(p.createdAt)}
                   </div>
@@ -257,6 +262,13 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
                   <button className="btn-app sm secondary" onClick={() => setEditar(p)}>
                     Cambiar rol y condominios
                   </button>
+                  {/* La propia contraseña se cambia con «¿Olvidaste tu contraseña?»: asignarla aquí cerraría tu sesión. */}
+                  {p.email !== yo && p.estado === 'APROBADO' && (
+                    <button className="btn-app sm secondary" onClick={() => setContrasena(p)}>
+                      <Icon name="shield" />
+                      Contraseña
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -265,9 +277,12 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
           <Empty icon="shield">Sin cuentas de administración.</Empty>
         )}
         <p className="small muted" style={{ margin: '12px 0 0' }}>
-          Para reenviar accesos, suspender o eliminar una cuenta de administración, búscala en Usuarios.
+          Con «Contraseña» reenvías el acceso a su correo con una contraseña temporal, o le asignas la contraseña que tú elijas.
         </p>
       </section>
+      {contrasena && (
+        <Contrasena p={contrasena} sinPrimerIngreso={sinPrimerIngreso(contrasena)} onClose={() => (setContrasena(null), cuentas.reload(true))} />
+      )}
       {editar && (
         <AsignarAdmin
           perfil={editar === 'nuevo' ? undefined : editar}
