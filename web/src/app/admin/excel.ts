@@ -2,28 +2,28 @@
 // Desde un condominio se descarga ya lleno con sus casas o departamentos y residentes actuales, para
 // modificarlo o agregar filas y volver a subirlo. SheetJS se carga solo al descargar o leer el archivo.
 
-export type FilaMachote = { linea: number; numero: string; nombre: string; telefono: string; correo: string; fechaEntrega: string };
+export type FilaMachote = { linea: number; numero: string; nombre: string; telefono: string; telefono2: string; correo: string; fechaEntrega: string };
 
-const COLUMNAS = ['Número de casa o departamento', 'Nombre del residente', 'Teléfono de contacto', 'Correo electrónico', 'Fecha de entrega'];
+const COLUMNAS = ['Número de casa o departamento', 'Nombre del residente', 'Teléfono de contacto', 'Teléfono 2', 'Correo electrónico', 'Fecha de entrega'];
 
-/** Fila del machote ya lleno: número, nombre, teléfono, correo y fecha de entrega (aaaa-mm-dd). */
-export type FilaActual = [string, string, string, string, string];
+/** Fila del machote ya lleno: número, nombre, teléfono, teléfono 2, correo y fecha de entrega (aaaa-mm-dd). */
+export type FilaActual = [string, string, string, string, string, string];
 
 export async function descargarMachote(actual?: { condominio: string; filas: FilaActual[] }) {
   const XLSX = await import('xlsx');
-  const filas = (actual?.filas ?? []).map(([n, nombre, tel, correo, f]) => {
+  const filas = (actual?.filas ?? []).map(([n, nombre, tel, tel2, correo, f]) => {
     const [a, m, d] = f.split('-').map(Number);
-    return [n, nombre, tel, correo, f ? new Date(a, m - 1, d) : ''];
+    return [n, nombre, tel, tel2, correo, f ? new Date(a, m - 1, d) : ''];
   });
   const hoja = XLSX.utils.aoa_to_sheet([COLUMNAS, ...filas], { cellDates: true, dateNF: 'dd/mm/yyyy' });
-  hoja['!cols'] = [{ wch: 30 }, { wch: 34 }, { wch: 22 }, { wch: 34 }, { wch: 18 }];
-  // Celdas de texto en número y teléfono (evita que Excel convierta «A-101» o quite ceros) y fecha dd/mm/aaaa.
+  hoja['!cols'] = [{ wch: 30 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 18 }];
+  // Celdas de texto en número y teléfonos (evita que Excel convierta «A-101» o quite ceros) y fecha dd/mm/aaaa.
   const ultima = filas.length + 1000;
   for (let r = filas.length + 1; r <= ultima; r++) {
-    for (const c of [0, 2]) hoja[XLSX.utils.encode_cell({ r, c })] = { t: 's', v: '', z: '@' };
-    hoja[XLSX.utils.encode_cell({ r, c: 4 })] = { t: 'z', z: 'dd/mm/yyyy' };
+    for (const c of [0, 2, 3]) hoja[XLSX.utils.encode_cell({ r, c })] = { t: 's', v: '', z: '@' };
+    hoja[XLSX.utils.encode_cell({ r, c: 5 })] = { t: 'z', z: 'dd/mm/yyyy' };
   }
-  hoja['!ref'] = `A1:E${ultima + 1}`;
+  hoja['!ref'] = `A1:F${ultima + 1}`;
 
   const instrucciones = XLSX.utils.aoa_to_sheet([
     ['Alta masiva de residentes · SIIA'],
@@ -33,7 +33,7 @@ export async function descargarMachote(actual?: { condominio: string; filas: Fil
     ['2. Número: como se identifica la unidad, por ejemplo 12, A-101 o Torre B 302. El portal le antepone «Casa» o «Depto» según el condominio.'],
     ['3. Si la fila trae correo, el residente recibe por correo su usuario y una contraseña temporal para entrar al portal.'],
     ['4. Si la fila no trae correo, solo se da de alta la casa o departamento (el residente se puede agregar después).'],
-    ['5. Si el número ya existe, no se duplica: se guardan los cambios (nombre, teléfono, correo, fecha de entrega). Las celdas vacías no borran datos.'],
+    ['5. Si el número ya existe, no se duplica: se guardan los cambios (nombre, teléfonos, correo, fecha de entrega). Las celdas vacías no borran datos.'],
     ['   Si cambias el correo de un residente, ese correo pasa a ser su usuario y le enviamos accesos nuevos.'],
     ['   Si un número aparece en más de una fila, esas filas no se toman en cuenta y esa casa o departamento no cambia.'],
     ['6. Fecha de entrega con formato día/mes/año (por ejemplo 15/03/2026). Es opcional.'],
@@ -41,11 +41,11 @@ export async function descargarMachote(actual?: { condominio: string; filas: Fil
     [],
     ['Ejemplo (no lo copies a la hoja «Residentes»):'],
     COLUMNAS,
-    ['A-101', 'Ana López Ruiz', '442 123 4567', 'ana.lopez@ejemplo.com', '15/03/2026'],
-    ['A-102', 'Juan Pérez Soto', '442 765 4321', 'juan.perez@ejemplo.com', '01/04/2026'],
-    ['A-103', '', '', '', '01/04/2026'],
+    ['A-101', 'Ana López Ruiz', '442 123 4567', '442 987 6543', 'ana.lopez@ejemplo.com', '15/03/2026'],
+    ['A-102', 'Juan Pérez Soto', '442 765 4321', '', 'juan.perez@ejemplo.com', '01/04/2026'],
+    ['A-103', '', '', '', '', '01/04/2026'],
   ]);
-  instrucciones['!cols'] = [{ wch: 30 }, { wch: 34 }, { wch: 22 }, { wch: 34 }, { wch: 18 }];
+  instrucciones['!cols'] = [{ wch: 30 }, { wch: 34 }, { wch: 22 }, { wch: 22 }, { wch: 34 }, { wch: 18 }];
 
   const libro = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(libro, hoja, 'Residentes');
@@ -94,9 +94,12 @@ export async function leerMachote(file: File): Promise<{ filas: FilaMachote[]; f
   };
   const cNumero = col(/numero|casa|depto|departamento|unidad/, 0);
   const cNombre = col(/nombre|residente/, 1);
-  const cTel = col(/tel|celular|movil/, 2);
-  const cCorreo = col(/correo|mail/, 3);
-  const cFecha = col(/fecha|entrega/, 4);
+  // «Teléfono 2» (o «otro teléfono») va aparte; los machotes anteriores no la traen y se leen igual.
+  const esTel2 = (c: string) => /(tel|celular|movil).*2|(otro|segundo).*(tel|celular|movil)/.test(c);
+  const cTel2 = enc.length ? enc.findIndex(esTel2) : 3;
+  const cTel = enc.length ? enc.findIndex((c, i) => i !== cTel2 && /tel|celular|movil/.test(c)) : 2;
+  const cCorreo = col(/correo|mail/, 4);
+  const cFecha = col(/fecha|entrega/, 5);
 
   const filas: FilaMachote[] = [];
   const fechasInvalidas: number[] = [];
@@ -111,6 +114,7 @@ export async function leerMachote(file: File): Promise<{ filas: FilaMachote[]; f
       numero: txt(cNumero),
       nombre: txt(cNombre),
       telefono: txt(cTel),
+      telefono2: txt(cTel2),
       correo: txt(cCorreo).toLowerCase(),
       fechaEntrega: fechaISO(r[cFecha]),
     };

@@ -96,6 +96,7 @@ const schema = a
         email: a.string().required(),
         nombre: a.string(),
         telefono: a.string(),
+        telefono2: a.string(), // segundo teléfono de contacto
         rol: a.ref('Rol'),
         estado: a.ref('EstadoPerfil'),
         condominioId: a.id(),

@@ -1091,6 +1091,7 @@ async function altaUsuario(p: Item, yo: Yo) {
     email,
     nombre,
     telefono: str(p.telefono, 20),
+    telefono2: str(p.telefono2, 20),
     estado: 'APROBADO',
     ...asignacion,
   });
@@ -1109,7 +1110,7 @@ async function enviarAccesos(userId: string) {
 }
 
 /**
- * Cambia nombre, teléfono o correo de un residente o vigilante. Los campos vacíos no se tocan.
+ * Cambia nombre, teléfonos o correo de un residente o vigilante. Los campos vacíos no se tocan.
  * Si cambia el correo, el nuevo correo pasa a ser su usuario y recibe accesos nuevos.
  */
 async function editarPersona(perfil: Item, p: Item, yo: Yo) {
@@ -1118,9 +1119,11 @@ async function editarPersona(perfil: Item, p: Item, yo: Yo) {
   const cambios: Item = {};
   const nombre = str(p.nombre, 120);
   const telefono = str(p.telefono, 20);
+  const telefono2 = str(p.telefono2, 20);
   const email = str(p.email, 200).toLowerCase();
   if (nombre && nombre !== perfil.nombre) cambios.nombre = nombre;
   if (telefono && telefono !== perfil.telefono) cambios.telefono = telefono;
+  if (telefono2 && telefono2 !== perfil.telefono2) cambios.telefono2 = telefono2;
   if (email && email !== perfil.email) {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('Correo no válido.');
     if (perfil.estado !== 'APROBADO' && perfil.estado !== 'SUSPENDIDO') fail('Autoriza la cuenta antes de cambiar su correo.');
@@ -1509,12 +1512,12 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
           const suyos = perfiles.filter((x) => x.rol === 'RESIDENTE' && x.unidadId === u!.id && x.estado !== 'RECHAZADO');
           const mismo = suyos.find((x) => x.email === email) ?? (suyos.length === 1 ? suyos[0] : undefined);
           if (mismo) {
-            const e = await editarPersona(mismo, { nombre: f.nombre, telefono: f.telefono, email }, yo);
+            const e = await editarPersona(mismo, { nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, email }, yo);
             r.cambios.push(...e.cambios);
           } else if (suyos.length) {
             fail('La unidad tiene varios residentes; cambia sus datos desde la lista.');
           } else {
-            perfiles.push(await altaUsuario({ email, nombre: f.nombre, telefono: f.telefono, rol: 'RESIDENTE', condominioId: c!.id, unidadId: u!.id }, yo));
+            perfiles.push(await altaUsuario({ email, nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, rol: 'RESIDENTE', condominioId: c!.id, unidadId: u!.id }, yo));
             r.acceso = true;
           }
         }

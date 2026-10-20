@@ -67,7 +67,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
             ? rs.some((p) => p.estado === 'SUSPENDIDO' || p.estado === 'RECHAZADO')
             : true,
     )
-    .filter(({ u, rs }) => !q || `${u.etiqueta} ${u.propietario ?? ''} ${rs.map((p) => `${p.nombre} ${p.email} ${p.telefono ?? ''}`).join(' ')}`.toLowerCase().includes(q));
+    .filter(({ u, rs }) => !q || `${u.etiqueta} ${u.propietario ?? ''} ${rs.map((p) => `${p.nombre} ${p.email} ${p.telefono ?? ''} ${p.telefono2 ?? ''}`).join(' ')}`.toLowerCase().includes(q));
 
   const recargar = () => {
     perfiles.reload(true);
@@ -86,7 +86,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
   const filasActuales = (): FilaActual[] =>
     unidades.map((u) => {
       const p = residentesDe(delCondo, u.id).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
-      return [u.etiqueta, p?.nombre ?? '', p?.telefono ?? '', p?.email ?? '', u.fechaEntrega ?? ''];
+      return [u.etiqueta, p?.nombre ?? '', p?.telefono ?? '', p?.telefono2 ?? '', p?.email ?? '', u.fechaEntrega ?? ''];
     });
 
   const sinTipo = !c.tipoUnidad;
@@ -171,6 +171,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
           <div className="list-sub" style={{ overflowWrap: 'anywhere' }}>
             {p.email}
             {p.telefono && ` · ${p.telefono}`}
+            {p.telefono2 && ` · ${p.telefono2}`}
             {p.estado === 'PENDIENTE' && p.unidadSolicitada && ` · solicitó: ${p.unidadSolicitada}`}
           </div>
           {p.nota && <div className="small">{p.nota}</div>}
@@ -329,7 +330,7 @@ async function importar(condominioId: string, filas: Omit<FilaMachote, 'linea'>[
 
 function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; onClose: () => void; onDone: () => void }) {
   const { condo, unidades } = useAdmin();
-  const [f, setF] = useState({ numero: '', nombre: '', telefono: '', correo: '', fechaEntrega: '' });
+  const [f, setF] = useState({ numero: '', nombre: '', telefono: '', telefono2: '', correo: '', fechaEntrega: '' });
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   const etiqueta = etiquetaUnidad(f.numero, condo!.tipoUnidad);
@@ -371,10 +372,13 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
           <Field label="Teléfono de contacto">
             <input type="tel" maxLength={20} value={f.telefono} onChange={set('telefono')} />
           </Field>
-          <Field label="Correo electrónico" hint="Le enviamos su usuario y una contraseña temporal.">
-            <input type="email" value={f.correo} onChange={set('correo')} />
+          <Field label="Teléfono 2">
+            <input type="tel" maxLength={20} value={f.telefono2} onChange={set('telefono2')} />
           </Field>
         </div>
+        <Field label="Correo electrónico" hint="Le enviamos su usuario y una contraseña temporal.">
+          <input type="email" value={f.correo} onChange={set('correo')} />
+        </Field>
         <p className="small muted" style={{ margin: 0 }}>
           Sin nombre ni correo solo se da de alta la {prefijoUnidad(condo!.tipoUnidad) === 'Depto' ? 'unidad' : 'casa'}; el residente se puede agregar después.
         </p>
@@ -408,7 +412,7 @@ function revisar(leidas: FilaMachote[], fechasInvalidas: number[], unidades: Uni
     if (f.correo && !correoValido(f.correo)) return { ...r, error: 'Correo no válido' };
     if (fechasInvalidas.includes(f.linea)) return { ...r, error: 'Fecha no válida (usa día/mes/año)' };
 
-    const envio = { numero: f.numero, nombre: '', telefono: '', correo: f.correo, fechaEntrega: '' };
+    const envio = { numero: f.numero, nombre: '', telefono: '', telefono2: '', correo: f.correo, fechaEntrega: '' };
     if (!u) r.cambios.push('unidad nueva');
     if (f.fechaEntrega && f.fechaEntrega !== (u?.fechaEntrega ?? '')) {
       envio.fechaEntrega = f.fechaEntrega;
@@ -431,11 +435,15 @@ function revisar(leidas: FilaMachote[], fechasInvalidas: number[], unidades: Uni
           envio.telefono = f.telefono;
           r.cambios.push('teléfono');
         }
+        if (f.telefono2 && digitos(f.telefono2) !== digitos(mismo.telefono2)) {
+          envio.telefono2 = f.telefono2;
+          r.cambios.push('teléfono 2');
+        }
       } else if (suyos.length) {
         return { ...r, error: 'La unidad tiene varios residentes; cámbialos desde la lista' };
       } else {
         if (otro(f.correo) || correosNuevos.has(f.correo)) return { ...r, error: 'Ya existe un usuario con ese correo' };
-        Object.assign(envio, { nombre: f.nombre, telefono: f.telefono });
+        Object.assign(envio, { nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2 });
         r.cambios.push('residente nuevo (se envían accesos)');
       }
       correosNuevos.add(f.correo);
@@ -520,7 +528,7 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
                   Descargar machote
                 </button>
               </li>
-              <li>Corrige lo que necesites y agrega filas nuevas: una sola fila por {tipo} (número, nombre del residente, teléfono, correo y fecha de entrega).</li>
+              <li>Corrige lo que necesites y agrega filas nuevas: una sola fila por {tipo} (número, nombre del residente, teléfono, teléfono 2, correo y fecha de entrega).</li>
               <li>Súbelo aquí. Te mostramos qué cambia antes de guardar; lo que no cambió no se toca.</li>
             </ol>
             <Field label="Archivo de Excel" hint="Formatos .xlsx, .xls o .csv.">
@@ -561,7 +569,7 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
                       </td>
                       <td data-label="Residente">
                         {f.nombre || '—'}
-                        {f.telefono && <div className="list-sub">{f.telefono}</div>}
+                        {(f.telefono || f.telefono2) && <div className="list-sub">{[f.telefono, f.telefono2].filter(Boolean).join(' · ')}</div>}
                       </td>
                       <td data-label="Correo" style={{ overflowWrap: 'anywhere' }}>{f.correo || '—'}</td>
                       <td data-label="Entrega">{f.fechaEntrega ? fecha(f.fechaEntrega) : '—'}</td>
@@ -629,16 +637,16 @@ function AgregarVigilante({ onClose, onDone }: { onClose: () => void; onDone: ()
   );
 }
 
-type DatosPersona = { nombre: string; telefono: string; email: string };
-const datosDe = (p: Perfil): DatosPersona => ({ nombre: p.nombre ?? '', telefono: p.telefono ?? '', email: p.email });
+type DatosPersona = { nombre: string; telefono: string; telefono2: string; email: string };
+const datosDe = (p: Perfil): DatosPersona => ({ nombre: p.nombre ?? '', telefono: p.telefono ?? '', telefono2: p.telefono2 ?? '', email: p.email });
 
-/** Guarda nombre, teléfono y correo si cambiaron. Si cambia el correo, el servidor envía accesos nuevos. */
+/** Guarda nombre, teléfonos y correo si cambiaron. Si cambia el correo, el servidor envía accesos nuevos. */
 async function guardarPersona(p: Perfil, d: DatosPersona) {
   const antes = datosDe(p);
   const cambia = (k: keyof DatosPersona) => d[k].trim() !== antes[k];
-  if (!cambia('nombre') && !cambia('telefono') && !cambia('email')) return false;
+  if (!cambia('nombre') && !cambia('telefono') && !cambia('telefono2') && !cambia('email')) return false;
   if (!d.email.trim()) throw new Error('El correo no puede quedar vacío.');
-  await adminCall('residentes.editar', { userId: p.userId, nombre: d.nombre, telefono: d.telefono, email: d.email });
+  await adminCall('residentes.editar', { userId: p.userId, nombre: d.nombre, telefono: d.telefono, telefono2: d.telefono2, email: d.email });
   return cambia('email');
 }
 
@@ -653,10 +661,13 @@ function CamposPersona({ d, onChange, disabled }: { d: DatosPersona; onChange: (
         <Field label="Teléfono">
           <input type="tel" maxLength={20} value={d.telefono} onChange={set('telefono')} disabled={disabled} />
         </Field>
-        <Field label="Correo electrónico" hint="Es su usuario. Si lo cambias, le enviamos accesos nuevos a ese correo.">
-          <input required type="email" value={d.email} onChange={set('email')} disabled={disabled} />
+        <Field label="Teléfono 2">
+          <input type="tel" maxLength={20} value={d.telefono2} onChange={set('telefono2')} disabled={disabled} />
         </Field>
       </div>
+      <Field label="Correo electrónico" hint="Es su usuario. Si lo cambias, le enviamos accesos nuevos a ese correo.">
+        <input required type="email" value={d.email} onChange={set('email')} disabled={disabled} />
+      </Field>
     </>
   );
 }
@@ -934,6 +945,7 @@ function AsignarUnidad({ perfil, onClose, onDone }: { perfil: Perfil; onClose: (
             </>
           )}
           {perfil.telefono && ` · Tel. ${perfil.telefono}`}
+          {perfil.telefono2 && ` · ${perfil.telefono2}`}
         </div>
         {perfil.estado !== 'APROBADO' && (
           <Field label="Rol">

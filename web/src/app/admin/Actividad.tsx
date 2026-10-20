@@ -16,7 +16,7 @@ const fechaHora = (d: string) =>
 
 // Nombres legibles de los campos más comunes (el resto se muestra tal cual).
 const CAMPOS: Record<string, string> = {
-  estado: 'Estado', monto: 'Monto', concepto: 'Concepto', nota: 'Nota', nombre: 'Nombre', email: 'Correo', telefono: 'Teléfono',
+  estado: 'Estado', monto: 'Monto', concepto: 'Concepto', nota: 'Nota', nombre: 'Nombre', email: 'Correo', telefono: 'Teléfono', telefono2: 'Teléfono 2',
   titulo: 'Título', cuerpo: 'Texto', fecha: 'Fecha', vence: 'Vence', unidadId: 'Unidad', condominiosAdmin: 'Condominios asignados',
   rolAdminId: 'Rol', rol: 'Tipo de cuenta', folio: 'Folio', cuotaMensual: 'Cuota mensual', diaVencimiento: 'Día de vencimiento',
   accesos: 'Accesos', documentos: 'Documentos', acceso: 'Acceso', administradores: 'Administradores', etiqueta: 'Unidad',
