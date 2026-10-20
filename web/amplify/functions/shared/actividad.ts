@@ -19,6 +19,7 @@ const NOMBRE_MODELO: Record<string, [string, string]> = {
   Amenidad: ['una amenidad', 'Amenidad'],
   Reserva: ['una reserva', 'Reserva'],
   Mascota: ['una mascota', 'Mascota'],
+  CorteAccesos: ['un corte de accesos', 'Corte de accesos'],
 };
 const VERBO = { alta: 'Dio de alta', cambio: 'Modificó', baja: 'Eliminó' } as const;
 const RESUMEN_ACCION: Record<string, string> = {
@@ -45,6 +46,7 @@ const RESUMEN_ACCION: Record<string, string> = {
   'accesos.agregar': 'Registró un acceso (tag o tarjeta)',
   'accesos.estados': 'Cambió el estado de accesos',
   'accesos.eliminar': 'Eliminó un acceso',
+  'cortes.crear': 'Hizo un corte de accesos por morosidad',
   'documentos.guardar': 'Subió un documento del condominio',
   'documentos.quitar': 'Quitó un documento del condominio',
   'roles.guardar': 'Guardó un rol de administración',

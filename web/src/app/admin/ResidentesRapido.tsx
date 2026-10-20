@@ -8,6 +8,7 @@ import { useAdmin } from './AdminApp';
 import { ChatUnidad } from './Comunicacion';
 import { Contrasena } from './Residentes';
 import { ControlAccesos, ListaAccesos } from './ControlAccesos';
+import { RegistroActivaciones } from './RegistroActivaciones';
 import { HistorialVista } from '../HistorialVista';
 import type { DatosHistorial } from '../historialPdf';
 import type { CambioAcceso } from './excelAccesos';
@@ -23,6 +24,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
   const veChat = puede('chat');
   const veFinanzas = puede('finanzas');
   const cambiaContrasena = puede('usuarios', 'editar');
+  const veUsuarios = puede('usuarios');
   const cid = condo!.id;
   const datos = useLoad(async () => {
     const [perfiles, cuentas, cargos, pagos] = await Promise.all([
@@ -44,8 +46,10 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
   const [accesos, setAccesos] = useState<{ p: Perfil; unidad: string } | null>(null);
   const [historial, setHistorial] = useState<DatosHistorial | null>(null);
   const [importar, setImportar] = useState(false);
+  const [registro, setRegistro] = useState(false);
   const { run, busy } = useAction();
 
+  if (registro) return <RegistroActivaciones puedeCortar={cambiaContrasena} onBack={() => (setRegistro(false), datos.reload(true))} />;
   const titulo = condo!.tipoUnidad === 'DEPARTAMENTO' ? 'Departamentos' : condo!.tipoUnidad === 'CASA' ? 'Casas' : 'Unidades';
   if (datos.loading && !datos.data) return <Loading />;
   if (datos.error) return <ErrorBox error={datos.error} retry={datos.reload} />;
@@ -102,6 +106,12 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
           <button className="btn-app secondary" onClick={() => setImportar(true)}>
             <Icon name="upload" />
             Importar información
+          </button>
+        )}
+        {veUsuarios && (
+          <button className="btn-app secondary" onClick={() => setRegistro(true)}>
+            <Icon name="clock" />
+            Registro de activaciones
           </button>
         )}
       </PageHead>

@@ -30,6 +30,9 @@ export type Acceso = {
   estado?: EstadoAcceso; // sin estado = ACTIVO
   estadoEn?: string;
   estadoPor?: string;
+  // Suspendido por un corte de morosidad (Registro de activaciones): al pagar, el siguiente corte lo marca por activar.
+  motivo?: 'MOROSIDAD';
+  corte?: number;
 };
 export const ETIQUETA_ESTADO_ACCESO: Record<EstadoAcceso, string> = { ACTIVO: 'Activado', SUSPENDIDO: 'Suspendido' };
 export const estadoDeAcceso = (a: Acceso): EstadoAcceso => (a.estado === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'ACTIVO');

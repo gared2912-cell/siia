@@ -35,8 +35,9 @@ import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../sh
 import { nombreAdjunto } from '../shared/comunicados';
 import { crearCuotas } from '../shared/cuotas';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
-import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
-import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
+import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo, estadoDeAcceso } from '../shared/accesos';
+import { MIN_CUOTAS_DEFECTO, jsonCorte, type AccesoCorte, type Corte, type CriterioCorte, type EstadoCorte, type FilaCorte, type ResumenCorte } from '../shared/cortes';
+import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL, tipoDeCargo } from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
 import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
@@ -578,6 +579,26 @@ async function condominioFinanzas(p: Item, yo: Yo, nivel: Nivel) {
   return c!;
 }
 
+async function condominioCortes(p: Item, yo: Yo) {
+  const c = await get('Condominio', { id: str(p.condominioId, 64) });
+  if (!c) fail('Selecciona el condominio.');
+  exigirCondo(yo, c!.id);
+  return c!;
+}
+const corteDe = (i: Item): Corte => ({
+  id: i.id,
+  condominioId: i.condominioId,
+  numero: i.numero,
+  fecha: i.fecha,
+  porNombre: i.porNombre ?? null,
+  criterio: jsonCorte(i.criterio, { tipos: [], extraordinarios: false, minCuotas: MIN_CUOTAS_DEFECTO }),
+  resumen: jsonCorte(i.resumen, { morosos: 0, monto: 0, porDesactivar: 0, porActivar: 0, desactivados: 0, aplicados: 0 }),
+  filas: jsonCorte<FilaCorte[]>(i.filas, []),
+});
+/** Cortes del condominio, del más reciente al más antiguo. */
+const cortesDe = async (condominioId: string) =>
+  (await byIndex('CorteAccesos', 'byCondominio', 'condominioId', condominioId)).map(corteDe).sort((a, b) => b.numero - a.numero);
+
 const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // URL firmada para subir un archivo de evidencia del egreso (PDF o imagen, 10 MB, 10 minutos).
   async 'egresos.subirEvidencia'(p, yo) {
@@ -740,7 +761,8 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
         const c = lista.find((x) => x.accesoId === a.id);
         if (!c || (a.estado ?? 'ACTIVO') === c.estado) return a;
         aplicados++;
-        return { ...a, estado: c.estado, estadoEn: ts, estadoPor: yo.email };
+        // Un cambio a mano deja de ser «por morosidad»: el corte ya no lo reactiva solo.
+        return { ...a, estado: c.estado, estadoEn: ts, estadoPor: yo.email, motivo: undefined, corte: undefined };
       });
       await update('Perfil', { userId }, { accesos: JSON.stringify(accesos) });
     }
@@ -755,6 +777,149 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     const accesos = accesosDe(perfil!.accesos).filter((a) => a.id !== str(p.accesoId, 64));
     await update('Perfil', { userId: perfil!.userId }, { accesos: JSON.stringify(accesos) });
     return { accesos };
+  },
+
+  // Registro de activaciones: cortes de accesos por morosidad (ver shared/cortes.ts).
+  async 'cortes.lista'(p, yo) {
+    exigir(yo, 'usuarios', 'ver');
+    const c = await condominioCortes(p, yo);
+    const [cortes, perfiles] = await Promise.all([cortesDe(c.id), byIndex('Perfil', 'byCondominio', 'condominioId', c.id)]);
+    // Tipos de acceso registrados en el condominio (para elegir cuáles se desactivan)
+    const tipos = [...new Set(perfiles.flatMap((x) => accesosDe(x.accesos).map((a) => a.tipo)))].sort(
+      (a, b) => TIPOS_ACCESO.indexOf(a) - TIPOS_ACCESO.indexOf(b),
+    );
+    return { cortes: cortes.map(({ filas, ...x }) => x), tipos };
+  },
+
+  // Corte y los dos anteriores, para volver a descargar su Excel tal como salió.
+  async 'cortes.ver'(p, yo) {
+    exigir(yo, 'usuarios', 'ver');
+    const c = await condominioCortes(p, yo);
+    const cortes = await cortesDe(c.id);
+    const i = cortes.findIndex((x) => x.id === str(p.id, 64));
+    if (i < 0) fail('Corte no encontrado.');
+    return { corte: cortes[i], previos: cortes.slice(i + 1, i + 3) };
+  },
+
+  async 'cortes.crear'(p, yo) {
+    exigir(yo, 'usuarios', 'editar');
+    const c = await condominioCortes(p, yo);
+    const tiposValidos = new Set(TIPOS_ACCESO);
+    const criterio: CriterioCorte = {
+      tipos: [...new Set((Array.isArray(p.tipos) ? p.tipos : []).map((t: unknown) => str(t, 60)).filter((t: string) => tiposValidos.has(t)))] as string[],
+      extraordinarios: p.extraordinarios === true,
+      minCuotas: Math.min(12, Math.max(1, Math.round(Number(p.minCuotas) || MIN_CUOTAS_DEFECTO))),
+    };
+    const [anteriores, perfilesTodos, cargos, unidades] = await Promise.all([
+      cortesDe(c.id),
+      byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
+      byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
+      byIndex('Unidad', 'byCondominio', 'condominioId', c.id),
+    ]);
+    const previo = anteriores[0];
+    const numero = (previo?.numero ?? 0) + 1;
+    const fecha = now();
+    const residentes = perfilesTodos.filter((x) => x.rol === 'RESIDENTE' && (x.estado === 'APROBADO' || x.estado === 'SUSPENDIDO'));
+
+    // 1. El corte anterior se da por hecho: lo marcado para el técnico queda aplicado en SIIA.
+    //    Si alguien cambió ese acceso a mano después del corte, se respeta su cambio.
+    let aplicados = 0;
+    const pendientes = new Map<string, EstadoCorte>();
+    for (const f of previo?.filas ?? []) for (const a of f.accesos) if (a.estado === 'POR_DESACTIVAR' || a.estado === 'POR_ACTIVAR') pendientes.set(a.id, a.estado);
+    for (const r of residentes) {
+      const accesos = accesosDe(r.accesos);
+      let cambio = false;
+      const nuevos = accesos.map((a) => {
+        const pend = pendientes.get(a.id);
+        if (!pend || (a.estadoEn && previo && a.estadoEn > previo.fecha)) return a;
+        const estado = pend === 'POR_DESACTIVAR' ? 'SUSPENDIDO' : 'ACTIVO';
+        if (estadoDeAcceso(a) === estado) return a;
+        cambio = true;
+        aplicados++;
+        return estado === 'SUSPENDIDO'
+          ? { ...a, estado, estadoEn: fecha, estadoPor: `Corte #${previo!.numero}`, motivo: 'MOROSIDAD' as const, corte: previo!.numero }
+          : { ...a, estado, estadoEn: fecha, estadoPor: `Corte #${previo!.numero}`, motivo: undefined, corte: undefined };
+      });
+      if (cambio) {
+        await update('Perfil', { userId: r.userId }, { accesos: JSON.stringify(nuevos) });
+        r.accesos = nuevos;
+      }
+    }
+
+    // 2. Adeudo vencido de cada casa con lo que cuenta en este corte (las reservas nunca cuentan).
+    const hoy = hoyMX();
+    const deuda = new Map<string, { cuotas: number; extras: number; monto: number }>();
+    for (const cg of cargos) {
+      if (cg.estado !== 'PENDIENTE' || !cg.vence || cg.vence >= hoy) continue;
+      const tipo = tipoDeCargo(cg as { id: string; tipo?: string | null });
+      const esCuota = tipo === 'CUOTA';
+      const esExtra = (TIPOS_CARGO_MANUAL as readonly string[]).includes(tipo);
+      if (!esCuota && tipo !== 'RECARGO' && !(esExtra && criterio.extraordinarios)) continue;
+      const d = deuda.get(cg.unidadId) ?? { cuotas: 0, extras: 0, monto: 0 };
+      if (esCuota) d.cuotas++;
+      else if (esExtra) d.extras++;
+      d.monto = Math.round((d.monto + (Number(cg.monto) || 0)) * 100) / 100;
+      deuda.set(cg.unidadId, d);
+    }
+
+    // 3. Acción de cada acceso para el técnico.
+    const marcar = new Set(criterio.tipos);
+    const filas: FilaCorte[] = [];
+    const orden = [...unidades].sort((a, b) => String(a.etiqueta).localeCompare(String(b.etiqueta), 'es', { numeric: true }));
+    for (const u of orden) {
+      const d = deuda.get(u.id) ?? { cuotas: 0, extras: 0, monto: 0 };
+      const moroso = d.cuotas + d.extras >= criterio.minCuotas;
+      const rs = residentes.filter((r) => r.unidadId === u.id);
+      for (const r of rs.length ? rs : [null]) {
+        const accesos: AccesoCorte[] = (r ? accesosDe(r.accesos) : []).map((a) => {
+          const suspendidoYa = estadoDeAcceso(a) === 'SUSPENDIDO';
+          const porMorosidad = a.motivo === 'MOROSIDAD';
+          const estado: EstadoCorte = moroso
+            ? suspendidoYa
+              ? 'DESACTIVADO'
+              : marcar.has(a.tipo)
+                ? 'POR_DESACTIVAR'
+                : 'ACTIVO'
+            : suspendidoYa
+              ? porMorosidad
+                ? 'POR_ACTIVAR'
+                : 'DESACTIVADO'
+              : 'ACTIVO';
+          return { id: a.id, tipo: a.tipo, codigo: a.codigo, estado, ...(suspendidoYa && !porMorosidad ? { manual: true } : {}) };
+        });
+        // Solo se guardan morosos y quien tiene algún acceso sin activar (el resto está activo).
+        if (!moroso && !accesos.some((a) => a.estado !== 'ACTIVO')) continue;
+        filas.push({
+          unidadId: u.id,
+          unidad: u.etiqueta,
+          userId: r?.userId ?? null,
+          residente: r ? r.nombre || r.email : u.propietario || 'Sin residente',
+          moroso,
+          ...d,
+          accesos,
+        });
+      }
+    }
+    const todos = filas.flatMap((f) => f.accesos);
+    const unidadesMorosas = new Map(filas.filter((f) => f.moroso).map((f) => [f.unidadId, f.monto]));
+    const resumen: ResumenCorte = {
+      morosos: unidadesMorosas.size,
+      monto: Math.round([...unidadesMorosas.values()].reduce((s, m) => s + m, 0) * 100) / 100,
+      porDesactivar: todos.filter((a) => a.estado === 'POR_DESACTIVAR').length,
+      porActivar: todos.filter((a) => a.estado === 'POR_ACTIVAR').length,
+      desactivados: todos.filter((a) => a.estado === 'DESACTIVADO').length,
+      aplicados,
+    };
+    const corte = await put('CorteAccesos', {
+      condominioId: c.id,
+      numero,
+      fecha,
+      porNombre: yo.nombre,
+      criterio: JSON.stringify(criterio),
+      resumen: JSON.stringify(resumen),
+      filas: JSON.stringify(filas),
+    });
+    return { corte: corteDe(corte), previos: anteriores.slice(0, 2) };
   },
 
   // URL firmada para subir una foto al chat con una unidad (10 minutos, imagen de 10 MB máximo).

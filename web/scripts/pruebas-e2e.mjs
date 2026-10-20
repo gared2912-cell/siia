@@ -63,7 +63,7 @@ const apis = await new AppSyncClient({}).send(new ListGraphqlApisCommand({}));
 const api = apis.graphqlApis.find((a) => a.uris?.GRAPHQL === outputs.data.url);
 const SUFIJO_TABLA = `-${api.apiId}-NONE`;
 const T = (m) => `${m}${SUFIJO_TABLA}`;
-const MODELOS = ['Actividad', 'Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia'];
+const MODELOS = ['Actividad', 'Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia', 'CorteAccesos'];
 
 // ---------- utilidades ----------
 const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
@@ -1330,6 +1330,59 @@ try {
     }
     return bloqueado(sesiones.op2.admin('yo'));
   });
+  // =====================================================================
+  grupo('Registro de activaciones: cortes de accesos por morosidad');
+  // Casa 1 (Ana) debe 2 cuotas vencidas; le queda el control de portón P-77 activo de las pruebas anteriores.
+  const diasAtras = (n) => new Date(Date.parse(`${hoy}T12:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
+  const vencidas = [`e2e-${randomBytes(4).toString('hex')}#cuota`, `e2e-${randomBytes(4).toString('hex')}#cuota`];
+  const accesoDe = async (tipo) => JSON.parse((await ok(ag.db('Perfil', 'list'))).find((x) => x.userId === r1.sub).accesos).find((a) => a.tipo === tipo);
+  const filaR1 = (corte) => corte.filas.find((f) => f.userId === r1.sub);
+  await prueba('Corte: la contadora (sin permiso de usuarios) no puede hacerlo', () =>
+    bloqueado(ct.admin('cortes.crear', { condominioId: X.robles, tipos: ['Control remoto de portón'] })),
+  );
+  await prueba('Corte #1: moroso con 2 cuotas vencidas → su control, por desactivar', async () => {
+    const ts = new Date().toISOString();
+    for (const [i, id] of vencidas.entries())
+      await ddb.send(
+        new PutCommand({
+          TableName: T('Cargo'),
+          Item: { id, __typename: 'Cargo', createdAt: ts, updatedAt: ts, condominioId: X.robles, unidadId: X.unidadesRobles[0], concepto: `Cuota e2e ${i}`, monto: 1000, vence: diasAtras(40 - i * 30), estado: 'PENDIENTE', tipo: 'CUOTA' },
+        }),
+      );
+    const { corte } = await ok(ag.admin('cortes.crear', { condominioId: X.robles, tipos: ['Control remoto de portón'], extraordinarios: false, minCuotas: 2 }));
+    const f = filaR1(corte);
+    esperar(corte.numero === 1 && f?.moroso && f.cuotas >= 2 && f.monto >= 2000, JSON.stringify(f));
+    esperar(f.accesos.find((a) => a.tipo === 'Control remoto de portón')?.estado === 'POR_DESACTIVAR', JSON.stringify(f.accesos));
+    esperar((await accesoDe('Control remoto de portón')).estado !== 'SUSPENDIDO', 'se desactivó antes del siguiente corte');
+    X.corte1 = corte.id;
+    return `${corte.resumen.morosos} moroso(s), ${corte.resumen.porDesactivar} por desactivar`;
+  });
+  await prueba('Corte #2: lo anterior se da por hecho → desactivado en SIIA', async () => {
+    const { corte, previos } = await ok(ag.admin('cortes.crear', { condominioId: X.robles, tipos: ['Control remoto de portón'] }));
+    esperar(corte.numero === 2 && previos.length === 1 && corte.resumen.aplicados >= 1, JSON.stringify(corte.resumen));
+    esperar(filaR1(corte).accesos.find((a) => a.tipo === 'Control remoto de portón').estado === 'DESACTIVADO', JSON.stringify(filaR1(corte)));
+    const a = await accesoDe('Control remoto de portón');
+    esperar(a.estado === 'SUSPENDIDO' && a.motivo === 'MOROSIDAD' && a.estadoPor === 'Corte #1', JSON.stringify(a));
+  });
+  await prueba('Corte #3: ya pagó → por activar; corte #4 lo activa', async () => {
+    for (const id of vencidas) await ddb.send(new PutCommand({ TableName: T('Cargo'), Item: { ...(await ddb.send(new GetCommand({ TableName: T('Cargo'), Key: { id } }))).Item, estado: 'PAGADO' } }));
+    const c3 = (await ok(ag.admin('cortes.crear', { condominioId: X.robles, tipos: ['Control remoto de portón'] }))).corte;
+    esperar(!filaR1(c3).moroso && filaR1(c3).accesos.find((a) => a.tipo === 'Control remoto de portón').estado === 'POR_ACTIVAR', JSON.stringify(filaR1(c3)));
+    const c4 = (await ok(ag.admin('cortes.crear', { condominioId: X.robles, tipos: [] }))).corte;
+    esperar(!filaR1(c4), 'sigue en el corte aunque ya está al corriente y activo');
+    const a = await accesoDe('Control remoto de portón');
+    esperar(a.estado === 'ACTIVO' && !a.motivo, JSON.stringify(a));
+    X.corte3 = c3.id;
+  });
+  await prueba('Lista de cortes y descarga de un corte con sus 2 anteriores', async () => {
+    const l = await ok(ag.admin('cortes.lista', { condominioId: X.robles }));
+    esperar(l.cortes.map((c) => c.numero).join() === '4,3,2,1' && !l.cortes[0].filas && l.tipos.includes('Control remoto de portón'), JSON.stringify(l).slice(0, 200));
+    const v = await ok(ag.admin('cortes.ver', { condominioId: X.robles, id: X.corte3 }));
+    esperar(v.corte.numero === 3 && v.previos.map((c) => c.numero).join() === '2,1', JSON.stringify(v.previos.map((c) => c.numero)));
+    await bloqueado(ag.admin('cortes.lista', { condominioId: X.torre + 'x' }));
+    return '4 cortes';
+  });
+
   // =====================================================================
   grupo('Suspender, eliminar y restaurar condominios (solo superadministrador)');
   const torre = `Torre Mirador${SUFIJO}`;

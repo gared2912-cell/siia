@@ -14,7 +14,7 @@ export const SISTEMA: Firmante = { id: 'sistema', nombre: 'SIIA (automático)', 
 // Modelos que llevan firma (los mismos que tienen los campos firma/firmaCambio en el esquema).
 export const MODELOS_FIRMADOS = new Set([
   'RolAdmin', 'Condominio', 'Unidad', 'Perfil', 'Cargo', 'Pago', 'Egreso', 'SaldoMensual', 'Comunicado',
-  'Encuesta', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Mascota',
+  'Encuesta', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Mascota', 'CorteAccesos',
 ]);
 
 // Campos que se actualizan solos (contadores, marcas de lectura): no son un cambio de la administración.

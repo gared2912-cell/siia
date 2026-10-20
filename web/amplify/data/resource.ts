@@ -494,6 +494,23 @@ const schema = a
       .secondaryIndexes((i) => [i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('actividadPorCondominio')])
       .authorization(admin),
 
+    // Registro de activaciones: corte de accesos por morosidad para el técnico (ver shared/cortes.ts).
+    CorteAccesos: a
+      .model({
+        // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
+        firma: a.json(),
+        firmaCambio: a.json(),
+        condominioId: a.id().required(),
+        numero: a.integer().required(),
+        fecha: a.datetime().required(),
+        porNombre: a.string(),
+        criterio: a.json(), // { tipos, extraordinarios, minCuotas }
+        resumen: a.json(), // { morosos, monto, porDesactivar, porActivar, desactivados, aplicados }
+        filas: a.json(), // [{ unidadId, unidad, userId, residente, moroso, cuotas, extras, monto, accesos: [{ id, tipo, codigo, estado }] }]
+      })
+      .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('cortesPorCondominio')])
+      .authorization(admin),
+
     // API para residentes y vigilantes (validada en la Lambda portal-api)
     portal: a
       .mutation()

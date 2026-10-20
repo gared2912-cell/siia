@@ -38,6 +38,7 @@ const POR_CONDOMINIO = [
   'Visita',
   'TurnoVigilancia',
   'Mascota',
+  'CorteAccesos',
   'Actividad',
 ];
 
