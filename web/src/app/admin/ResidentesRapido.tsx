@@ -162,6 +162,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
                             <span className="pill-punto" />
                             {p.estado === 'APROBADO' ? 'Acceso activado' : 'Acceso suspendido'}
                           </span>
+                          {p.estado === 'APROBADO' && p.accesoSinEnviar && <span className="pill sm mal">Accesos sin enviar</span>}
                           <ListaAccesos p={p} />
                         </div>
                         {cambiaContrasena && (

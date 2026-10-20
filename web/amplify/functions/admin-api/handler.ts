@@ -1238,14 +1238,21 @@ async function perfilDe(userId: string) {
 }
 
 // Alta directa por la administración: Cognito envía la invitación con contraseña temporal.
+/** Cognito no pudo mandar el correo (límite diario del remitente o falla de entrega). */
+const sinCupoCorreo = (err: any) => err?.name === 'LimitExceededException' || err?.name === 'CodeDeliveryFailureException';
+const AVISO_CUPO = 'Se alcanzó el límite de correos de hoy. Intenta mañana o asígnale una contraseña con el botón «Contraseña».';
+
+/**
+ * Alta de una cuenta. `enviarCorreo: false` solo la crea (sin correo); si se pide el correo y se acabó el cupo del día,
+ * también se crea sin correo. En ambos casos queda `accesoSinEnviar` y después se le envía o se le asigna contraseña.
+ */
 async function altaUsuario(p: Item, yo: Yo) {
   const email = str(p.email, 200).toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail('Correo no válido.');
   const nombre = str(p.nombre, 120);
   const asignacion = await validarAsignacion(p, yo);
-  let sub: string | undefined;
-  try {
-    const r = await cognito.send(
+  const crear = (enviar: boolean) =>
+    cognito.send(
       new AdminCreateUserCommand({
         UserPoolId,
         Username: email,
@@ -1254,9 +1261,22 @@ async function altaUsuario(p: Item, yo: Yo) {
           { Name: 'email_verified', Value: 'true' },
           ...(nombre ? [{ Name: 'name', Value: nombre }] : []),
         ],
-        DesiredDeliveryMediums: ['EMAIL'],
+        ...(enviar ? { DesiredDeliveryMediums: ['EMAIL' as const] } : { MessageAction: 'SUPPRESS' as const }),
       }),
     );
+  const correoPedido = p.enviarCorreo !== false;
+  let correoEnviado = correoPedido;
+  let sub: string | undefined;
+  try {
+    let r;
+    try {
+      r = await crear(correoEnviado);
+    } catch (err: any) {
+      if (!correoEnviado || !sinCupoCorreo(err)) throw err;
+      console.warn('alta sin correo (cupo)', err.name);
+      correoEnviado = false;
+      r = await crear(false);
+    }
     sub = r.User?.Attributes?.find((a) => a.Name === 'sub')?.Value;
   } catch (err: any) {
     if (err?.name === 'UsernameExistsException') fail('Ya existe un usuario con ese correo.');
@@ -1264,15 +1284,17 @@ async function altaUsuario(p: Item, yo: Yo) {
   }
   if (!sub) fail('No se pudo crear el usuario.');
   await asignarGrupo(sub!, asignacion.rol);
-  return put('Perfil', {
+  const perfil = await put('Perfil', {
     userId: sub,
     email,
     nombre,
     telefono: str(p.telefono, 20),
     telefono2: str(p.telefono2, 20),
     estado: 'APROBADO',
+    accesoSinEnviar: correoEnviado ? null : true,
     ...asignacion,
   });
+  return { ...perfil, correoEnviado, correoPedido };
 }
 
 /** Envía por correo una contraseña temporal nueva (la actual deja de funcionar si ya la había creado). */
@@ -1284,7 +1306,13 @@ async function enviarAccesos(userId: string) {
   // El reenvío (AdminCreateUser) exige el correo como usuario; con el sub Cognito responde «Username should be an email».
   const email = u.UserAttributes?.find((a) => a.Name === 'email')?.Value;
   if (!email) fail('La cuenta no tiene correo registrado.');
-  await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: email, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
+  try {
+    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: email, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
+  } catch (err: any) {
+    if (sinCupoCorreo(err)) fail(AVISO_CUPO);
+    throw err;
+  }
+  await update('Perfil', { userId }, { accesoSinEnviar: null });
 }
 
 /**
@@ -1321,11 +1349,24 @@ async function editarPersona(perfil: Item, p: Item, yo: Yo) {
     }
   }
   await update('Perfil', { userId: perfil.userId }, cambios);
+  // Correo nuevo: se le envían accesos nuevos, salvo que la administración elija no enviar correo (conserva su
+  // contraseña). Si se acabó el cupo de correos del día, el cambio queda guardado y el acceso, por enviar.
+  let correoEnviado = false;
   if (cambios.email && perfil.estado === 'APROBADO') {
-    await enviarAccesos(perfil.userId);
-    await cerrarSesiones(perfil.userId);
+    if (p.enviarCorreo === false) {
+      await update('Perfil', { userId: perfil.userId }, { accesoSinEnviar: true });
+    } else {
+      try {
+        await enviarAccesos(perfil.userId);
+        await cerrarSesiones(perfil.userId);
+        correoEnviado = true;
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.message !== AVISO_CUPO) throw err;
+        await update('Perfil', { userId: perfil.userId }, { accesoSinEnviar: true });
+      }
+    }
   }
-  return { cambios: Object.keys(cambios) };
+  return { cambios: Object.keys(cambios), correoEnviado };
 }
 
 // ---------- suspensión y papelera de condominios (ver shared/condominios.ts) ----------
@@ -1487,6 +1528,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       throw err;
     }
     await cerrarSesiones(perfil.userId);
+    if (perfil.accesoSinEnviar) await update('Perfil', { userId: perfil.userId }, { accesoSinEnviar: null });
     anotar('Perfil', perfil, 'acceso', 'Se asignó una contraseña nueva');
     return { ok: true, email: perfil.email };
   },
@@ -1683,7 +1725,9 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const filas: Item[] = Array.isArray(p.filas) ? p.filas.slice(0, 25) : [];
     const porClave = new Map((await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id)).map((u) => [claveUnidad(u.etiqueta), u]));
     const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', c!.id);
-    const out: { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; cambios: string[]; error?: string }[] = [];
+    // enviarCorreo: false → altas y cambios de correo sin enviar accesos (se envían o se asigna contraseña después).
+    const enviarCorreo = p.enviarCorreo !== false;
+    const out: { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; correo?: boolean; cambios: string[]; error?: string }[] = [];
     for (const f of filas) {
       const etiqueta = etiquetaUnidad(f?.numero, c!.tipoUnidad);
       const r: (typeof out)[number] = { etiqueta, cambios: [] };
@@ -1710,13 +1754,16 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
           const suyos = perfiles.filter((x) => x.rol === 'RESIDENTE' && x.unidadId === u!.id && x.estado !== 'RECHAZADO');
           const mismo = suyos.find((x) => x.email === email) ?? (suyos.length === 1 ? suyos[0] : undefined);
           if (mismo) {
-            const e = await editarPersona(mismo, { nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, email }, yo);
+            const e = await editarPersona(mismo, { nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, email, enviarCorreo }, yo);
             r.cambios.push(...e.cambios);
+            if (e.cambios.includes('email')) r.correo = e.correoEnviado;
           } else if (suyos.length) {
             fail('La unidad tiene varios residentes; cambia sus datos desde la lista.');
           } else {
-            perfiles.push(await altaUsuario({ email, nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, rol: 'RESIDENTE', condominioId: c!.id, unidadId: u!.id }, yo));
+            const nuevo = await altaUsuario({ email, nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2, rol: 'RESIDENTE', condominioId: c!.id, unidadId: u!.id, enviarCorreo }, yo);
+            perfiles.push(nuevo);
             r.acceso = true;
+            r.correo = nuevo.correoEnviado;
           }
         }
       } catch (err) {

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { Firma } from './Firma';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, errMsg, fecha, useAction, useLoad } from '../ui';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, errMsg, fecha, useAction, useLoad, useToast } from '../ui';
 import { claveUnidad, etiquetaUnidad, prefijoUnidad } from '../../../amplify/functions/shared/unidades';
 import { useAdmin, type Unidad } from './AdminApp';
 import { descargarMachote, leerMachote, type FilaActual, type FilaMachote } from './excel';
@@ -11,7 +11,19 @@ import { ChatUnidad } from './Comunicacion';
 
 type Perfil = Schema['Perfil']['type'];
 type Cuenta = { status?: string; enabled?: boolean; creado?: string };
-type Resultado = { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; cambios?: string[]; error?: string };
+type Resultado = { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; correo?: boolean; cambios?: string[]; error?: string };
+type Alta = { correoEnviado?: boolean; correoPedido?: boolean };
+
+/** ¿Se pidió enviar correo? (formularios con dos botones: «… y enviar accesos» / «… sin enviar correo»). */
+export const conCorreo = (e: React.FormEvent) => ((e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value !== 'sin-correo';
+
+/** Aviso después de dar de alta una cuenta, según si salió el correo con sus accesos. */
+export function avisoAlta(r: Alta, email: string) {
+  if (r.correoEnviado) return `Alta realizada; enviamos los accesos a ${email}.`;
+  if (r.correoPedido)
+    return `Alta realizada, pero no se envió el correo: se alcanzó el límite de correos de hoy. Envíale sus accesos mañana o asígnale una contraseña con el botón «Contraseña».`;
+  return `Alta realizada sin enviar correo. Cuando quieras, envíale sus accesos o asígnale una contraseña con el botón «Contraseña».`;
+}
 type Filtro = 'todas' | 'sin' | 'invitados' | 'suspendidos';
 
 const correoValido = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
@@ -168,6 +180,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
         <div style={{ minWidth: 0 }}>
           <strong>{p.nombre || p.email}</strong> {p.estado !== 'APROBADO' && <Badge estado={p.estado} />}{' '}
           {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
+          {p.estado === 'APROBADO' && p.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
           <div className="list-sub" style={{ overflowWrap: 'anywhere' }}>
             {p.email}
             {p.telefono && ` · ${p.telefono}`}
@@ -318,18 +331,37 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
 }
 
 /** Envía filas al servidor en grupos de 20 (crea unidades y da de alta residentes). */
-async function importar(condominioId: string, filas: Omit<FilaMachote, 'linea'>[], avance?: (r: Resultado[]) => void) {
+async function importar(condominioId: string, filas: Omit<FilaMachote, 'linea'>[], enviarCorreo: boolean, avance?: (r: Resultado[]) => void) {
   const out: Resultado[] = [];
   for (let i = 0; i < filas.length; i += 20) {
-    const r = await adminCall<Resultado[]>('residentes.importar', { condominioId, filas: filas.slice(i, i + 20) });
+    const r = await adminCall<Resultado[]>('residentes.importar', { condominioId, filas: filas.slice(i, i + 20), enviarCorreo });
     out.push(...r);
     avance?.([...out]);
   }
   return out;
 }
 
+/** «¿Se envían los accesos por correo?»: un botón para cada respuesta. */
+export function BotonesAlta({ busy, disabled, texto = 'Guardar' }: { busy: boolean; disabled?: boolean; texto?: string }) {
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <span className="small">¿Le enviamos sus accesos (usuario y contraseña temporal) por correo?</span>
+      <div className="row-actions">
+        <button className="btn-app" value="con-correo" disabled={busy || disabled}>
+          <Icon name="mail" />
+          {busy ? 'Guardando…' : `Sí, ${texto.toLowerCase()} y enviar correo`}
+        </button>
+        <button className="btn-app secondary" value="sin-correo" disabled={busy || disabled}>
+          {busy ? 'Guardando…' : `No, solo ${texto.toLowerCase()}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; onClose: () => void; onDone: () => void }) {
   const { condo, unidades } = useAdmin();
+  const toast = useToast();
   const [f, setF] = useState({ numero: '', nombre: '', telefono: '', telefono2: '', correo: '', fechaEntrega: '' });
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
@@ -338,16 +370,19 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const correo = f.correo.trim().toLowerCase();
-    const okk = await run(
-      async () => {
-        if (f.nombre.trim() && !correo) throw new Error('Escribe el correo del residente para enviarle sus accesos.');
-        if (correo && perfiles.some((p) => p.email === correo)) throw new Error('Ya existe un usuario con ese correo.');
-        const [r] = await importar(condo!.id, [{ ...f, correo }]);
-        if (r?.error) throw new Error(r.error);
-      },
-      correo ? `${etiqueta} lista; enviamos los accesos a ${correo}.` : `${etiqueta} dada de alta.`,
-    );
-    if (okk) onDone();
+    const enviar = conCorreo(e);
+    let r: Resultado | undefined;
+    const okk = await run(async () => {
+      if (f.nombre.trim() && !correo) throw new Error('Escribe el correo del residente: es su usuario para entrar al portal.');
+      if (correo && perfiles.some((p) => p.email === correo)) throw new Error('Ya existe un usuario con ese correo.');
+      [r] = await importar(condo!.id, [{ ...f, correo }], enviar);
+      if (r?.error) throw new Error(r.error);
+    });
+    if (okk) {
+      if (r?.acceso) alert(`${etiqueta}: ${avisoAlta({ correoEnviado: r.correo, correoPedido: enviar }, correo)}`);
+      else toast(`${etiqueta} guardada.`);
+      onDone();
+    }
   }
   return (
     <Modal title={`Agregar ${prefijoUnidad(condo!.tipoUnidad) === 'Depto' ? 'departamento' : 'casa'} o residente`} onClose={onClose}>
@@ -376,15 +411,19 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
             <input type="tel" maxLength={20} value={f.telefono2} onChange={set('telefono2')} />
           </Field>
         </div>
-        <Field label="Correo electrónico" hint="Le enviamos su usuario y una contraseña temporal.">
+        <Field label="Correo electrónico" hint="Es su usuario. Puedes enviarle ahora su contraseña temporal por correo o hacerlo después.">
           <input type="email" value={f.correo} onChange={set('correo')} />
         </Field>
         <p className="small muted" style={{ margin: 0 }}>
           Sin nombre ni correo solo se da de alta la {prefijoUnidad(condo!.tipoUnidad) === 'Depto' ? 'unidad' : 'casa'}; el residente se puede agregar después.
         </p>
-        <button className="btn-app" disabled={busy}>
-          {busy ? 'Guardando…' : f.correo ? 'Guardar y enviar accesos' : 'Guardar'}
-        </button>
+        {f.correo.trim() ? (
+          <BotonesAlta busy={busy} />
+        ) : (
+          <button className="btn-app" disabled={busy}>
+            {busy ? 'Guardando…' : 'Guardar'}
+          </button>
+        )}
       </form>
     </Modal>
   );
@@ -425,7 +464,7 @@ function revisar(leidas: FilaMachote[], fechasInvalidas: number[], unidades: Uni
         if (f.correo !== mismo.email) {
           if (otro(f.correo, mismo) || correosNuevos.has(f.correo)) return { ...r, error: 'Ya existe un usuario con ese correo' };
           if (mismo.estado !== 'APROBADO' && mismo.estado !== 'SUSPENDIDO') return { ...r, error: 'El residente aún no está autorizado' };
-          r.cambios.push('correo (se envían accesos nuevos)');
+          r.cambios.push('correo (accesos nuevos)');
         }
         if (f.nombre && f.nombre !== mismo.nombre) {
           envio.nombre = f.nombre;
@@ -444,7 +483,7 @@ function revisar(leidas: FilaMachote[], fechasInvalidas: number[], unidades: Uni
       } else {
         if (otro(f.correo) || correosNuevos.has(f.correo)) return { ...r, error: 'Ya existe un usuario con ese correo' };
         Object.assign(envio, { nombre: f.nombre, telefono: f.telefono, telefono2: f.telefono2 });
-        r.cambios.push('residente nuevo (se envían accesos)');
+        r.cambios.push('residente nuevo (accesos)');
       }
       correosNuevos.add(f.correo);
     } else if (f.nombre && !suyos.length) {
@@ -461,6 +500,7 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
   const [leyendo, setLeyendo] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorArchivo, setErrorArchivo] = useState('');
+  const [conCorreoMasivo, setConCorreoMasivo] = useState(true);
   const delCondo = perfiles.filter((p) => p.condominioId === condo!.id);
 
   async function cargar(file?: File) {
@@ -485,14 +525,16 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
     }
   }
 
-  async function enviar() {
+  async function enviar(enviarCorreo: boolean) {
     if (!filas) return;
     setEnviando(true);
+    setConCorreoMasivo(enviarCorreo);
     const pendientes = filas.filter((f) => f.envio && !f.error && !f.resultado);
     try {
       await importar(
         condo!.id,
         pendientes.map((f) => f.envio!),
+        enviarCorreo,
         (rs) => setFilas((prev) => prev && prev.map((f) => (pendientes.indexOf(f) >= 0 && rs[pendientes.indexOf(f)] ? { ...f, resultado: rs[pendientes.indexOf(f)] } : f))),
       );
     } catch (e) {
@@ -502,13 +544,21 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
   }
 
   const porGuardar = filas?.filter((f) => f.envio && !f.error && !f.resultado).length ?? 0;
+  // Altas nuevas o cambios de correo: a estos se les puede enviar su acceso por correo.
+  const conAcceso = filas?.filter((f) => f.envio && !f.error && !f.resultado && f.cambios.some((c) => c.includes('accesos'))).length ?? 0;
+  const sinCorreoEnviado = filas?.filter((f) => f.resultado?.acceso && !f.resultado.correo).length ?? 0;
   const procesadas = filas?.filter((f) => f.resultado).length ?? 0;
   const sinCambios = filas?.filter((f) => !f.error && !f.cambios.length).length ?? 0;
   const ignoradas = filas?.filter((f) => f.ignorada).length ?? 0;
   const conError = filas?.filter((f) => (f.error && !f.ignorada) || f.resultado?.error).length ?? 0;
   const estado = (f: FilaRevisada) => {
     if (f.resultado?.error) return <Badge estado="RECHAZADO">{f.resultado.error}</Badge>;
-    if (f.resultado) return <Badge estado="APROBADO">{f.resultado.acceso ? 'Guardado · accesos enviados' : 'Guardado'}</Badge>;
+    if (f.resultado)
+      return (
+        <Badge estado="APROBADO">
+          {f.resultado.acceso || f.resultado.correo !== undefined ? (f.resultado.correo ? 'Guardado · accesos enviados' : 'Guardado · sin enviar correo') : 'Guardado'}
+        </Badge>
+      );
     if (f.ignorada) return <Badge estado="CANCELADO">{f.error}</Badge>;
     if (f.error) return <Badge estado="RECHAZADO">{f.error}</Badge>;
     if (!f.cambios.length) return <span className="small muted">Sin cambios</span>;
@@ -579,13 +629,43 @@ function AltaMasiva({ perfiles, actuales, onClose, onDone }: { perfiles: Perfil[
                 </tbody>
               </table>
             </div>
+            {porGuardar > 0 && !enviando && conAcceso > 0 && (
+              <div className="alert small" style={{ margin: 0 }}>
+                <strong>¿Quieres que se envíen por correo los accesos a {conAcceso === 1 ? 'el residente' : `los ${conAcceso} residentes`} pendientes de recibir su contraseña?</strong> Si eliges
+                «No», igual se dan de alta todos los del archivo; después puedes enviarles sus accesos o asignarles una contraseña con el botón «Contraseña».
+              </div>
+            )}
+            {sinCorreoEnviado > 0 && !enviando && (
+              <div className="alert small" style={{ margin: 0 }}>
+                {sinCorreoEnviado} residente(s) quedaron dados de alta <strong>sin correo</strong>
+                {conCorreoMasivo ? ' porque se alcanzó el límite de correos de hoy' : ''}. Aparecen como «Accesos sin enviar» en la lista: envíales sus accesos después o
+                asígnales una contraseña con «Contraseña».
+              </div>
+            )}
             <div className="row-actions">
-              {porGuardar > 0 && (
-                <button type="button" className="btn-app" disabled={enviando} onClick={enviar}>
-                  <Icon name="upload" />
-                  {enviando ? `Guardando… (${procesadas} de ${procesadas + porGuardar})` : `Guardar ${porGuardar} cambio(s)`}
-                </button>
-              )}
+              {porGuardar > 0 &&
+                (enviando ? (
+                  <button type="button" className="btn-app" disabled>
+                    <Icon name="upload" />
+                    Guardando… ({procesadas} de {procesadas + porGuardar})
+                  </button>
+                ) : conAcceso > 0 ? (
+                  <>
+                    <button type="button" className="btn-app" onClick={() => enviar(true)}>
+                      <Icon name="mail" />
+                      Sí, guardar {porGuardar} cambio(s) y enviar correos
+                    </button>
+                    <button type="button" className="btn-app secondary" onClick={() => enviar(false)}>
+                      <Icon name="upload" />
+                      No, solo guardar {porGuardar} cambio(s)
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn-app" onClick={() => enviar(false)}>
+                    <Icon name="upload" />
+                    Guardar {porGuardar} cambio(s)
+                  </button>
+                ))}
               {(procesadas > 0 || !porGuardar) && !enviando && (
                 <button type="button" className="btn-app secondary" onClick={procesadas ? onDone : onClose}>
                   Terminar
@@ -612,13 +692,20 @@ function AgregarVigilante({ onClose, onDone }: { onClose: () => void; onDone: ()
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    const okk = await run(() => adminCall('crearUsuario', { ...f, rol: 'VIGILANTE', condominioId: condoId }), `Alta realizada; enviamos los accesos a ${f.email}.`);
-    if (okk) onDone();
+    let r: Alta = {};
+    const enviarCorreo = conCorreo(e);
+    const okk = await run(async () => {
+      r = await adminCall<Alta>('crearUsuario', { ...f, rol: 'VIGILANTE', condominioId: condoId, enviarCorreo });
+    });
+    if (okk) {
+      alert(avisoAlta(r, f.email));
+      onDone();
+    }
   }
   return (
     <Modal title="Agregar vigilante" onClose={onClose}>
       <form className="form" onSubmit={guardar}>
-        <Field label="Correo electrónico" hint="Le enviamos su usuario y una contraseña temporal para la app de caseta.">
+        <Field label="Correo electrónico" hint="Es su usuario para la app de caseta.">
           <input required type="email" value={f.email} onChange={set('email')} />
         </Field>
         <div className="form-2">
@@ -629,9 +716,7 @@ function AgregarVigilante({ onClose, onDone }: { onClose: () => void; onDone: ()
             <input type="tel" maxLength={20} value={f.telefono} onChange={set('telefono')} />
           </Field>
         </div>
-        <button className="btn-app" disabled={busy}>
-          {busy ? 'Guardando…' : 'Dar de alta y enviar accesos'}
-        </button>
+        <BotonesAlta busy={busy} texto="Dar de alta" />
       </form>
     </Modal>
   );
@@ -646,9 +731,28 @@ async function guardarPersona(p: Perfil, d: DatosPersona) {
   const cambia = (k: keyof DatosPersona) => d[k].trim() !== antes[k];
   if (!cambia('nombre') && !cambia('telefono') && !cambia('telefono2') && !cambia('email')) return false;
   if (!d.email.trim()) throw new Error('El correo no puede quedar vacío.');
-  await adminCall('residentes.editar', { userId: p.userId, nombre: d.nombre, telefono: d.telefono, telefono2: d.telefono2, email: d.email });
-  return cambia('email');
+  // Correo nuevo de una cuenta autorizada: se pregunta si se le envían accesos nuevos a ese correo.
+  const enviarCorreo =
+    cambia('email') && p.estado === 'APROBADO'
+      ? confirm(`¿Enviar accesos nuevos (contraseña temporal) a ${d.email.trim()}?\n\nAceptar: se envía el correo.\nCancelar: solo se cambia el correo, sin enviar nada.`)
+      : false;
+  const r = await adminCall<{ correoEnviado?: boolean }>('residentes.editar', {
+    userId: p.userId,
+    nombre: d.nombre,
+    telefono: d.telefono,
+    telefono2: d.telefono2,
+    email: d.email,
+    enviarCorreo,
+  });
+  if (!cambia('email') || p.estado !== 'APROBADO') return false;
+  return r.correoEnviado ? 'enviado' : enviarCorreo ? 'sin-cupo' : 'sin-correo';
 }
+const avisoCorreo = (r: 'enviado' | 'sin-cupo' | 'sin-correo', email: string) =>
+  r === 'enviado'
+    ? `Enviamos accesos nuevos a ${email}.`
+    : r === 'sin-cupo'
+      ? `El correo se cambió, pero no se enviaron los accesos: se alcanzó el límite de correos de hoy. Envíalos mañana o asígnale una contraseña con «Contraseña».`
+      : `El correo se cambió sin enviar accesos. Su contraseña sigue igual; si la necesita, envíale accesos o asígnale una contraseña con «Contraseña».`;
 
 function CamposPersona({ d, onChange, disabled }: { d: DatosPersona; onChange: (d: DatosPersona) => void; disabled?: boolean }) {
   const set = (k: keyof DatosPersona) => (e: React.ChangeEvent<HTMLInputElement>) => onChange({ ...d, [k]: e.target.value });
@@ -665,7 +769,7 @@ function CamposPersona({ d, onChange, disabled }: { d: DatosPersona; onChange: (
           <input type="tel" maxLength={20} value={d.telefono2} onChange={set('telefono2')} disabled={disabled} />
         </Field>
       </div>
-      <Field label="Correo electrónico" hint="Es su usuario. Si lo cambias, le enviamos accesos nuevos a ese correo.">
+      <Field label="Correo electrónico" hint="Es su usuario. Si lo cambias, te preguntamos si le enviamos accesos nuevos a ese correo.">
         <input required type="email" value={d.email} onChange={set('email')} disabled={disabled} />
       </Field>
     </>
@@ -683,7 +787,7 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
   const { run, busy } = useAction();
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    let accesos = 0;
+    const correos: string[] = [];
     let movidos = 0;
     const okk = await run(async () => {
       const unidadCambia =
@@ -699,7 +803,11 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
           }),
         );
       }
-      if (gestionaUsuarios) for (const [i, p] of residentes.entries()) if (await guardarPersona(p, personas[i])) accesos++;
+      if (gestionaUsuarios)
+        for (const [i, p] of residentes.entries()) {
+          const r = await guardarPersona(p, personas[i]);
+          if (r) correos.push(avisoCorreo(r, personas[i].email.trim()));
+        }
       if (gestionaUsuarios)
         for (const [i, p] of residentes.entries()) {
           if (destino[i] && destino[i] !== (p.unidadId ?? u.id)) {
@@ -709,7 +817,7 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
         }
     }, 'Cambios guardados');
     if (okk) {
-      if (accesos) alert('Enviamos accesos nuevos al correo actualizado.');
+      if (correos.length) alert(correos.join('\n\n'));
       if (movidos) alert(`${movidos === 1 ? 'El residente cambió' : 'Los residentes cambiaron'} de casa o departamento.`);
       onDone();
     }
@@ -761,12 +869,12 @@ function EditarPersona({ p, onClose, onDone }: { p: Perfil; onClose: () => void;
   const { run, busy } = useAction();
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    let nuevoCorreo = false;
+    let nuevoCorreo: Awaited<ReturnType<typeof guardarPersona>> = false;
     const okk = await run(async () => {
       nuevoCorreo = await guardarPersona(p, d);
     }, 'Datos guardados');
     if (okk) {
-      if (nuevoCorreo) alert(`Enviamos accesos nuevos a ${d.email}.`);
+      if (nuevoCorreo) alert(avisoCorreo(nuevoCorreo, d.email.trim()));
       onDone();
     }
   }

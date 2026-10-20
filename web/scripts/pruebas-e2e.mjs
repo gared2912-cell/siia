@@ -423,12 +423,17 @@ try {
   await prueba('Rechaza asignar una unidad de otro condominio', () =>
     bloqueado(ag.admin('aprobar', { userId: SUB.r3, rol: 'RESIDENTE', condominioId: X.robles, unidadId: X.unidadesTorre[0] })),
   );
-  await prueba('Alta por la API con invitación por correo', async () => {
-    const p = await ok(ag.admin('crearUsuario', { email: E('residente4'), nombre: 'Dora Robles E2E', rol: 'RESIDENTE', condominioId: X.robles, unidadId: X.unidadesRobles[2] }));
+  // Sin correo: no gasta el cupo diario de correos de Cognito (compartido con producción).
+  await prueba('Alta por la API sin enviar correo; después se le asigna contraseña', async () => {
+    const p = await ok(ag.admin('crearUsuario', { email: E('residente4'), nombre: 'Dora Robles E2E', rol: 'RESIDENTE', condominioId: X.robles, unidadId: X.unidadesRobles[2], enviarCorreo: false }));
     SUB.r4 = p.userId;
+    esperar(p.correoEnviado === false && p.correoPedido === false && p.accesoSinEnviar === true, JSON.stringify(p));
     const cuentas = await ok(ag.admin('estadoCuentas'));
     esperar(cuentas[SUB.r4]?.status === 'FORCE_CHANGE_PASSWORD', JSON.stringify(cuentas[SUB.r4]));
-    return 'invitación enviada, cuenta sin primer ingreso';
+    await ok(ag.admin('generarContrasena', { userId: SUB.r4, password: PASS }));
+    const l = await ok(ag.db('Perfil', 'list'));
+    esperar(!l.find((x) => x.userId === SUB.r4)?.accesoSinEnviar, 'sigue marcado «Accesos sin enviar»');
+    return 'cuenta creada sin correo; contraseña asignada';
   });
   await prueba('Suspender y reactivar residente', async () => {
     await ok(ag.admin('suspender', { userId: SUB.r4 }));

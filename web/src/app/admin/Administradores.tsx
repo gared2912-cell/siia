@@ -5,7 +5,7 @@ import { adminCall, all, db, type Schema } from '../api';
 import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
-import { Contrasena } from './Residentes';
+import { BotonesAlta, Contrasena, avisoAlta, conCorreo } from './Residentes';
 import { EXTRAS, NIVELES, SECCIONES_PERMISO, type Nivel, type Permisos } from '../../../amplify/functions/shared/permisos';
 
 type Perfil = Schema['Perfil']['type'];
@@ -315,10 +315,19 @@ export function AsignarAdmin({ perfil, roles, onClose, onDone }: { perfil?: Perf
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const payload = { ...f, condominiosAdmin: todos ? ['*'] : elegidos };
-    const okk = perfil
-      ? await run(() => adminCall('aprobar', { userId: perfil.userId, ...payload }), 'Administrador actualizado')
-      : await run(() => adminCall('crearUsuario', payload), `Alta realizada; enviamos los accesos a ${f.email}.`);
-    if (okk) onDone();
+    if (perfil) {
+      if (await run(() => adminCall('aprobar', { userId: perfil.userId, ...payload }), 'Administrador actualizado')) onDone();
+      return;
+    }
+    let r: { correoEnviado?: boolean; correoPedido?: boolean } = {};
+    const enviarCorreo = conCorreo(e);
+    const okk = await run(async () => {
+      r = await adminCall('crearUsuario', { ...payload, enviarCorreo });
+    });
+    if (okk) {
+      alert(avisoAlta(r, f.email));
+      onDone();
+    }
   }
 
   return (
@@ -392,9 +401,13 @@ export function AsignarAdmin({ perfil, roles, onClose, onDone }: { perfil?: Perf
             </fieldset>
           </>
         )}
-        <button className="btn-app" disabled={busy || (f.rol === 'ADMIN' && !todos && !elegidos.length)}>
-          {busy ? 'Guardando…' : perfil ? 'Guardar cambios' : 'Dar de alta y enviar accesos'}
-        </button>
+        {perfil ? (
+          <button className="btn-app" disabled={busy || (f.rol === 'ADMIN' && !todos && !elegidos.length)}>
+            {busy ? 'Guardando…' : 'Guardar cambios'}
+          </button>
+        ) : (
+          <BotonesAlta busy={busy} disabled={f.rol === 'ADMIN' && !todos && !elegidos.length} texto="Dar de alta" />
+        )}
       </form>
     </Modal>
   );

@@ -122,6 +122,8 @@ const schema = a
         // Solo RESIDENTE: llaveros, tarjetas, controles… asignados (ver shared/accesos.ts)
         accesos: a.json(),
         chatLeidoCaseta: a.string(),
+        // Alta (o cambio de correo) sin enviar los accesos por correo: falta enviarlos o asignarle contraseña.
+        accesoSinEnviar: a.boolean(),
       })
       .identifier(['userId'])
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('perfilesPorCondominio')])
