@@ -26,7 +26,7 @@ export type PerfilResp = {
     unidadSolicitada?: string;
     nota?: string;
   };
-  condominio?: { id: string; nombre: string; modulos: string[]; datosPago?: string; telefonoCaseta?: string; serviciosCondominio?: string[] } | null;
+  condominio?: { id: string; nombre: string; modulos: string[]; datosPago?: string; telefonoCaseta?: string; serviciosCondominio?: string[]; suspendido?: boolean } | null;
   unidad?: { id: string; etiqueta: string; cuota?: number } | null;
 };
 
@@ -94,6 +94,12 @@ function Portal() {
     return (
       <Estado icon="alert" titulo="Sin condominio asignado">
         La administración aún no asigna tu condominio.
+      </Estado>
+    );
+  if (r.condominio.suspendido)
+    return (
+      <Estado icon="alert" titulo="Portal suspendido">
+        El portal de <strong>{r.condominio.nombre}</strong> está suspendido por el momento. Comunícate con la administración de tu condominio.
       </Estado>
     );
   if (perfil.rol === 'VIGILANTE') return <CasetaApp perfil={r} />;

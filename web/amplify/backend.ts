@@ -11,15 +11,16 @@ import { portalApi } from './functions/portal-api/resource';
 import { notificador } from './functions/notificador/resource';
 import { recargos } from './functions/recargos/resource';
 import { reservasVencidas } from './functions/reservas-vencidas/resource';
+import { papelera } from './functions/papelera/resource';
 import { AMBIENTE, PORTAL_URL, SITIO, VAPID_PUBLICA } from './ambiente';
 
-const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas });
+const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas, papelera });
 
 const { userPool } = backend.auth.resources;
 const tables = backend.data.resources.tables;
 
 // Las Lambdas usan DynamoDB directo; reciben los nombres de tabla como variables de entorno (TABLE_<Modelo>).
-for (const fn of [backend.adminApi, backend.portalApi, backend.notificador, backend.recargos, backend.reservasVencidas]) {
+for (const fn of [backend.adminApi, backend.portalApi, backend.notificador, backend.recargos, backend.reservasVencidas, backend.papelera]) {
   const lambda = fn.resources.lambda;
   for (const [model, table] of Object.entries(tables)) {
     table.grantReadWriteData(lambda);
@@ -88,6 +89,27 @@ backend.adminApi.resources.lambda.addToRolePolicy(
       'cognito-idp:ListUsersInGroup',
     ],
     resources: [userPool.userPoolArn],
+  }),
+);
+
+// Papelera de condominios: admin-api la invoca (sin esperar) al eliminar, restaurar o borrar definitivamente.
+// Desactiva, reactiva y borra cuentas de Cognito, y borra los archivos del condominio con sus versiones anteriores.
+const papeleraFn = backend.papelera.resources.lambda;
+papeleraFn.grantInvoke(backend.adminApi.resources.lambda);
+backend.adminApi.addEnvironment('PAPELERA_FN', papeleraFn.functionName);
+backend.papelera.addEnvironment('USER_POOL_ID', userPool.userPoolId);
+backend.papelera.addEnvironment('BUCKET', bucket.bucketName);
+papeleraFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminDisableUser', 'cognito-idp:AdminEnableUser', 'cognito-idp:AdminDeleteUser', 'cognito-idp:AdminUserGlobalSignOut'],
+    resources: [userPool.userPoolArn],
+  }),
+);
+papeleraFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:ListBucketVersions', 's3:ListBucket'], resources: [bucket.bucketArn] }));
+papeleraFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['s3:DeleteObject', 's3:DeleteObjectVersion'],
+    resources: [`${bucket.bucketArn}/condominios/*`, `${bucket.bucketArn}/residentes/*`],
   }),
 );
 

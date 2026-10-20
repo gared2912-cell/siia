@@ -50,6 +50,11 @@ const RESUMEN_ACCION: Record<string, string> = {
   'roles.guardar': 'Guardó un rol de administración',
   'roles.eliminar': 'Eliminó un rol de administración',
   'condominios.asignarAdmin': 'Cambió los administradores del condominio',
+  'condominios.suspender': 'Suspendió el condominio',
+  'condominios.reactivar': 'Reactivó el condominio suspendido',
+  'condominios.eliminar': 'Envió el condominio a la papelera',
+  'condominios.restaurar': 'Restauró el condominio de la papelera',
+  'condominios.borrarDefinitivo': 'Pidió borrar definitivamente el condominio',
   avisar: 'Envió un aviso a los residentes',
 };
 const MAX_CAMBIOS = 60;

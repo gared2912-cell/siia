@@ -22,6 +22,7 @@ const CAMPOS: Record<string, string> = {
   accesos: 'Accesos', documentos: 'Documentos', acceso: 'Acceso', administradores: 'Administradores', etiqueta: 'Unidad',
   propietario: 'Propietario', categoria: 'Categoría', proveedor: 'Proveedor', importante: 'Importante', saldoInicial: 'Saldo inicial',
   historial: 'Seguimiento', horaInicio: 'Hora de inicio', horaFin: 'Hora de fin', activo: 'Activo', modulos: 'Servicios del portal',
+  suspendido: 'Suspendido', suspension: 'Suspensión', eliminadoEn: 'En la papelera desde', eliminacion: 'Eliminación', eliminadoPor: 'Eliminado por',
 };
 const valor = (v: unknown) => {
   if (v === null || v === undefined || v === '') return '—';

@@ -15,6 +15,7 @@ import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, Ma
 import { ResidentesRapido } from './ResidentesRapido';
 import { CampanaAdmin } from './CampanaAdmin';
 import { Actividad } from './Actividad';
+import { AvisoSuspendido } from './EstadoCondominio';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -139,6 +140,8 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   };
   const lista = useMemo(() => [...(condos.data ?? [])].sort((a, b) => a.nombre.localeCompare(b.nombre)), [condos.data]);
   const condo = lista.find((c) => c.id === condoId) ?? null;
+  // Condominio suspendido: sus administradores no pueden trabajarlo (admin-api lo rechaza); el superadministrador sí.
+  const bloqueado = !!condo?.suspendido && !mios.superadmin;
 
   useEffect(() => {
     if (condos.data && !condo && lista.length) setCondoId(lista[0].id);
@@ -146,8 +149,8 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   }, [condos.data]);
 
   const unidades = useLoad(
-    () => (condo ? all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: condo.id }, o)) : Promise.resolve([])),
-    [condo?.id],
+    () => (condo && !bloqueado ? all<Unidad>((o) => db.models.Unidad.unidadesPorCondominio({ condominioId: condo.id }, o)) : Promise.resolve([])),
+    [condo?.id, bloqueado],
   );
   const unidadesOrden = useMemo(
     () => [...(unidades.data ?? [])].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es', { numeric: true })),
@@ -172,7 +175,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   };
 
   // Conversaciones del condominio cuyo último mensaje es de un residente (menú Chat; el icono de la app lleva el número de la campana)
-  const veChat = !!condo && puede('chat');
+  const veChat = !!condo && !bloqueado && puede('chat');
   const mensajes = useLoad(
     () => (veChat ? all<Mensaje>((o) => db.models.Mensaje.mensajesPorCondominio({ condominioId: condo!.id }, o)) : Promise.resolve([])),
     [condo?.id, veChat],
@@ -199,7 +202,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
         title="Administración SIIA"
         subtitle={condo?.nombre ?? 'Sin condominio seleccionado'}
         user={`${yo} · ${mios.rol}`}
-        actions={condo && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
+        actions={condo && !bloqueado && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
       >
         {condos.error && <ErrorBox error={condos.error} retry={condos.reload} />}
         {!sec.global && lista.length > 0 && (
@@ -208,7 +211,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
               <select value={condo?.id ?? ''} onChange={(e) => setCondoId(e.target.value)} style={{ minWidth: 240 }}>
                 {lista.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.nombre} {c.activo === false ? '(inactivo)' : ''}
+                    {c.nombre} {c.suspendido ? '(suspendido)' : c.activo === false ? '(inactivo)' : ''}
                   </option>
                 ))}
               </select>
@@ -231,8 +234,15 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
               <p style={{ margin: 0 }}>Aún no tienes condominios asignados. Pide al superadministrador que te asigne uno.</p>
             )}
           </div>
+        ) : bloqueado && !sec.global ? (
+          <AvisoSuspendido c={condo!} />
         ) : (
           <>
+            {!sec.global && condo?.suspendido && (
+              <div style={{ marginBottom: 16 }}>
+                <AvisoSuspendido c={condo} />
+              </div>
+            )}
             {actual === 'panel' && (rapido ? <ResidentesRapido go={go} /> : <Panel go={go} />)}
             {actual === 'administradores' && <Administradores />}
             {actual === 'actividad' && <Actividad />}

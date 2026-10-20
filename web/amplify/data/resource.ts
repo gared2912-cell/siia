@@ -69,6 +69,13 @@ const schema = a
         // Servicios que entran al condominio (basura, gas, agua…): la caseta avisa a todos los residentes cuando llegan
         serviciosCondominio: a.string().array(),
         folioSeq: a.integer(),
+        // Solo el SUPERADMIN suspende o elimina un condominio (admin-api condominios.*; ver shared/condominios.ts).
+        // Suspendido: nadie de ese condominio entra (residentes, caseta ni sus administradores) y no corren cuotas ni recargos.
+        suspendido: a.boolean(),
+        suspension: a.json(), // { motivo, en, por, porNombre }
+        // Papelera: oculto para todos; la Lambda siia-papelera lo borra con todos sus datos 30 días después de eliminadoEn.
+        eliminadoEn: a.datetime(),
+        eliminacion: a.json(), // { por, porNombre, cuentas: [userId desactivados], purgando }
       })
       .authorization(admin),
 

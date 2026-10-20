@@ -30,6 +30,7 @@ import { CAMPO_LEIDO, chatSinLeer, deEquipo, leidoHasta } from '../shared/pendie
 import { SLOTS_AMENIDADES, documentosDe } from '../shared/documentos';
 import { nombreAdjunto } from '../shared/comunicados';
 import { ACTIVAS, HORAS_APARTADO, apartadas, cancelarCargoReserva, cargoDeReserva, confirmarReserva, limitePago, relacionadas, vencerSiCorresponde } from '../shared/reservas';
+import { enPapelera, operando, suspendido } from '../shared/condominios';
 
 type Ctx = {
   sub: string;
@@ -48,6 +49,8 @@ const pub = (c: Item) => ({
   datosPago: c.datosPago,
   telefonoCaseta: c.telefonoCaseta,
   serviciosCondominio: (c.serviciosCondominio ?? []).filter(Boolean),
+  // Suspendido por SIIA o en la papelera: el portal muestra un aviso en lugar de los servicios.
+  suspendido: !operando(c),
 });
 
 const sinPrivados = ({ userId, __typename, ...rest }: Item) => rest;
@@ -1072,7 +1075,8 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     const perfil = await get('Perfil', { userId: sub });
     if (!perfil || perfil.estado !== 'APROBADO') fail('Tu acceso aún no ha sido autorizado por la administración.');
     const condominio = await get('Condominio', { id: perfil!.condominioId });
-    if (!condominio || condominio.activo === false) fail('Tu condominio no tiene el portal activo.');
+    if (!condominio || condominio.activo === false || enPapelera(condominio)) fail('Tu condominio no tiene el portal activo.');
+    if (suspendido(condominio)) fail('El portal de tu condominio está suspendido. Comunícate con la administración.');
     const modulos: string[] = condominio!.modulos ?? [];
     const ctx: Ctx = { sub, email: perfil!.email, perfil: perfil!, condominio: condominio!, p };
 

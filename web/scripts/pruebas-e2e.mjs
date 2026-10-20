@@ -11,11 +11,12 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
 import { DescribeContinuousBackupsCommand, DescribeTableCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchWriteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import {
   AdminAddUserToGroupCommand,
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
+  AdminGetUserCommand,
   AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
   DescribeUserPoolClientCommand,
@@ -197,7 +198,9 @@ async function limpiar() {
   const dispositivos = (await scanTodo('Dispositivo')).filter((d) => usuariosE2E.has(d.userId));
   await borrarItems('Dispositivo', dispositivos.map((d) => ({ id: d.id })));
   await borrarItems('Perfil', perfiles.map((p) => ({ userId: p.userId })));
-  const actividadGlobal = (await scanTodo('Actividad')).filter((x) => x.condominioId === 'GLOBAL' && String(x.porEmail ?? '').endsWith(`@${DOMINIO}`));
+  const actividadGlobal = (await scanTodo('Actividad')).filter(
+    (x) => x.condominioId === 'GLOBAL' && (String(x.porEmail ?? '').endsWith(`@${DOMINIO}`) || (x.accion === 'condominios.purgar' && String(x.resumen).includes(SUFIJO))),
+  );
   await borrarItems('Actividad', actividadGlobal.map((x) => ({ id: x.id })));
   const roles = (await scanTodo('RolAdmin')).filter((r) => String(r.nombre).startsWith('E2E '));
   await borrarItems('RolAdmin', roles.map((r) => ({ id: r.id })));
@@ -1327,6 +1330,91 @@ try {
     }
     return bloqueado(sesiones.op2.admin('yo'));
   });
+  // =====================================================================
+  grupo('Suspender, eliminar y restaurar condominios (solo superadministrador)');
+  const torre = `Torre Mirador${SUFIJO}`;
+  const cuentaActiva = async (sub) => {
+    try {
+      return (await cognito.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: sub }))).Enabled;
+    } catch (e) {
+      if (e.name === 'UserNotFoundException') return null;
+      throw e;
+    }
+  };
+  const listaDe = async (s) => (await ok(s.db('Condominio', 'list'))).map((c) => c.id);
+  await prueba('Un administrador no puede suspender, eliminar ni ver la papelera', async () => {
+    await bloqueado(ag.admin('condominios.suspender', { condominioId: X.torre, motivo: 'x' }));
+    await bloqueado(ag.admin('condominios.eliminar', { condominioId: X.torre, confirmacion: torre }));
+    return bloqueado(ag.admin('condominios.papelera'));
+  });
+  await prueba('Suspender pide el motivo', () => bloqueado(sa.admin('condominios.suspender', { condominioId: X.torre })));
+  await prueba('Suspendido: no entran residentes ni administradores; el superadministrador sí', async () => {
+    await ok(sa.admin('condominios.suspender', { condominioId: X.torre, motivo: 'Prueba e2e' }));
+    await bloqueado(r3.portal('inicio.resumen'));
+    const p = await ok(r3.portal('perfil'));
+    esperar(p.condominio?.suspendido === true, 'el portal no recibe el aviso de suspendido');
+    const lista = await ok(ag.db('Condominio', 'list'));
+    esperar(lista.find((c) => c.id === X.torre)?.suspendido === true, 'el administrador no ve el condominio como suspendido');
+    const msg = await bloqueado(ag.db('Unidad', 'unidadesPorCondominio', { args: { condominioId: X.torre } }));
+    await ok(sa.db('Unidad', 'unidadesPorCondominio', { args: { condominioId: X.torre } }));
+    await ok(ag.db('Unidad', 'unidadesPorCondominio', { args: { condominioId: X.robles } }));
+    return msg;
+  });
+  await prueba('Reactivar devuelve el acceso', async () => {
+    await ok(sa.admin('condominios.reactivar', { condominioId: X.torre }));
+    await ok(r3.portal('inicio.resumen'));
+    await ok(ag.db('Unidad', 'unidadesPorCondominio', { args: { condominioId: X.torre } }));
+    return 'residente y administrador entran';
+  });
+  await prueba('Eliminar exige escribir el nombre del condominio', () =>
+    bloqueado(sa.admin('condominios.eliminar', { condominioId: X.torre, confirmacion: 'Otro nombre' })),
+  );
+  await prueba('Eliminado: va a la papelera, desaparece para todos y se desactivan sus cuentas', async () => {
+    const r = await ok(sa.admin('condominios.eliminar', { condominioId: X.torre, confirmacion: `  ${torre.toUpperCase()} ` }));
+    const dias = Math.round((Date.parse(r.borraEl) - Date.now()) / 86400000);
+    esperar(dias === 30, `se borraría en ${dias} días`);
+    esperar(!(await listaDe(sa)).includes(X.torre) && !(await listaDe(ag)).includes(X.torre), 'sigue en la lista');
+    const papelera = await ok(sa.admin('condominios.papelera'));
+    esperar(papelera.some((c) => c.id === X.torre && c.cuentas >= 1), 'no está en la papelera');
+    await bloqueado(r3.portal('inicio.resumen'));
+    await bloqueado(sa.db('Unidad', 'unidadesPorCondominio', { args: { condominioId: X.torre } }));
+    const activa = await hasta(() => cuentaActiva(SUB.r3), (x) => x === false, 30);
+    esperar(activa === false, 'la cuenta del residente sigue activa');
+    return `se borra el ${r.borraEl.slice(0, 10)}`;
+  });
+  await prueba('Restaurar devuelve el condominio y reactiva sus cuentas', async () => {
+    const r = await ok(sa.admin('condominios.restaurar', { condominioId: X.torre }));
+    esperar((await listaDe(ag)).includes(X.torre), 'no regresó a la lista');
+    const activa = await hasta(() => cuentaActiva(SUB.r3), (x) => x === true, 30);
+    esperar(activa === true, 'la cuenta del residente sigue desactivada');
+    const r3b = await entrar('r3b', E('residente3'));
+    await ok(r3b.portal('inicio.resumen'));
+    return `${r.cuentas} cuenta(s) reactivada(s)`;
+  });
+  await prueba('Borrar definitivamente elimina el condominio, sus datos y sus cuentas', async () => {
+    await ok(sa.admin('condominios.eliminar', { condominioId: X.torre, confirmacion: torre }));
+    await bloqueado(sa.admin('condominios.borrarDefinitivo', { condominioId: X.torre, confirmacion: 'x' }));
+    await ok(sa.admin('condominios.borrarDefinitivo', { condominioId: X.torre, confirmacion: torre }));
+    await bloqueado(sa.admin('condominios.restaurar', { condominioId: X.torre }));
+    const existe = async () => !!(await ddb.send(new GetCommand({ TableName: T('Condominio'), Key: { id: X.torre } }))).Item;
+    let sigue = true;
+    for (let i = 0; i < 60 && sigue; i++) {
+      await espera(2000);
+      sigue = await existe();
+    }
+    esperar(!sigue, 'el condominio no se borró en 2 minutos');
+    const restos = [];
+    for (const m of ['Unidad', 'Incidente', 'Visita', 'Actividad', 'Perfil']) {
+      const n = (await scanTodo(m)).filter((x) => x.condominioId === X.torre).length;
+      if (n) restos.push(`${m}: ${n}`);
+    }
+    esperar(!restos.length, `quedaron registros (${restos.join(', ')})`);
+    esperar((await cuentaActiva(SUB.r3)) === null, 'la cuenta del residente sigue en Cognito');
+    const constancia = (await scanTodo('Actividad')).find((x) => x.condominioId === 'GLOBAL' && x.accion === 'condominios.purgar' && String(x.resumen).includes(torre));
+    esperar(!!constancia, 'no quedó constancia en la actividad global');
+    return constancia.resumen;
+  });
+
   await prueba('Sin sesión no hay acceso a la API', async () => {
     const r = await fetch(outputs.data.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: 'mutation{ portal(action:"perfil") }' }) });
     esperar(r.status === 401, `HTTP ${r.status}`);

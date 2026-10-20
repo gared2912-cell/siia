@@ -11,6 +11,7 @@ import { CatalogoAmenidades } from './Operacion';
 import { TipoIngreso } from './FinanzasAdmin';
 import { Firma } from './Firma';
 import { AdminsCondominio } from './AdminsCondominio';
+import { AvisoSuspendido, Papelera, ZonaCondominio } from './EstadoCondominio';
 
 type Cargo = Schema['Cargo']['type'];
 type Tab = 'general' | 'cuotas' | 'residentes' | 'amenidades' | 'servicios';
@@ -22,8 +23,8 @@ const nombreTipoUnidad = (t?: string | null) => (t === 'DEPARTAMENTO' ? 'Departa
 
 /** `inicio`: abre directo la ficha del condominio seleccionado en esa pestaña (acceso directo del Panel). */
 export function Condominios({ inicio }: { inicio?: Tab } = {}) {
-  const { condos, condo, setCondoId, puede, tiene } = useAdmin();
-  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo'>(() => (inicio ? 'ficha' : 'lista'));
+  const { condos, condo, setCondoId, puede, tiene, superadmin } = useAdmin();
+  const [vista, setVista] = useState<'lista' | 'ficha' | 'nuevo' | 'papelera'>(() => (inicio ? 'ficha' : 'lista'));
   const [tab, setTab] = useState<Tab>(inicio ?? 'general');
   const alta = puede('condominios', 'editar') && tiene('condominios.alta');
 
@@ -39,10 +40,17 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
       />
     );
   if (vista === 'ficha') return condo ? <Ficha tab={tab} setTab={setTab} onBack={() => setVista('lista')} /> : <Loading />;
+  if (vista === 'papelera' && superadmin) return <Papelera onBack={() => setVista('lista')} />;
 
   return (
     <div className="stack">
       <PageHead icon="building" title="Condominios" sub="Cada condominio con sus datos, cuotas, residentes, amenidades y servicios.">
+        {superadmin && (
+          <button className="btn-app secondary" onClick={() => setVista('papelera')}>
+            <Icon name="trash" />
+            Papelera
+          </button>
+        )}
         {alta && (
           <button className="btn-app" onClick={() => setVista('nuevo')}>
             <Icon name="plus" />
@@ -56,7 +64,11 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
             <article key={c.id} className="panel" style={{ marginTop: 0 }}>
               <div className="panel-head">
                 <h3>{c.nombre}</h3>
-                <Badge estado={c.activo === false ? 'SUSPENDIDO' : 'APROBADO'}>{c.activo === false ? 'Inactivo' : 'Activo'}</Badge>
+                {c.suspendido ? (
+                  <Badge estado="SUSPENDIDO">Suspendido</Badge>
+                ) : (
+                  <Badge estado={c.activo === false ? 'SUSPENDIDO' : 'APROBADO'}>{c.activo === false ? 'Inactivo' : 'Activo'}</Badge>
+                )}
               </div>
               <p className="small muted" style={{ margin: '0 0 8px' }}>
                 {c.tipo ?? 'Sin tipo'} · {nombreTipoUnidad(c.tipoUnidad)}
@@ -93,6 +105,19 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
 function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; onBack: () => void }) {
   const { condo, unidades, puede, superadmin } = useAdmin();
   const c = condo!;
+  // Suspendido: sus administradores solo ven el aviso; el superadministrador trabaja normal.
+  if (c.suspendido && !superadmin)
+    return (
+      <div className="stack">
+        <div>
+          <button className="linklike" onClick={onBack}>
+            <Icon name="back" /> Todos los condominios
+          </button>
+        </div>
+        <PageHead icon="building" title={c.nombre} />
+        <AvisoSuspendido c={c} />
+      </div>
+    );
   const tabs: [Tab, string][] = [
     ...(puede('condominios') ? [['general', 'Datos generales'] as [Tab, string]] : []),
     ...(puede('condominios') || puede('finanzas') ? [['cuotas', 'Cuotas y pagos'] as [Tab, string]] : []),
@@ -115,12 +140,14 @@ function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; on
         sub={`${c.tipo ?? 'Sin tipo'} · ${nombreTipoUnidad(c.tipoUnidad)} · ${unidades.length} unidades${c.activo === false ? ' · portal inactivo' : ''}`}
       />
       <Firma item={c} alta="Dado de alta por" />
+      {c.suspendido && <AvisoSuspendido c={c} />}
       <Seg value={actual} onChange={setTab} options={tabs} />
       {actual === 'general' && (
         <>
           <DatosCondominio key={`g${c.id}`} c={c} seccion="general" />
           {superadmin && <AdminsCondominio key={`a${c.id}`} />}
           <Documentos />
+          {superadmin && <ZonaCondominio key={`z${c.id}`} onEliminado={onBack} />}
         </>
       )}
       {actual === 'cuotas' && (

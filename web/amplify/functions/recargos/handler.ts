@@ -6,6 +6,7 @@
 // solo para cuotas que vencen después de activarlo (recargoDesde). La unidad recibe un aviso en el portal (que
 // también llega como notificación a la app) y cada residente de la unidad, un correo a su dirección registrada.
 import { byIndex, hoyMX, put, scan, type Item } from '../shared/db';
+import { operando } from '../shared/condominios';
 import { crearCuotas, fechaCargo } from '../shared/cuotas';
 import { enviarCorreo } from '../shared/correo';
 import { SISTEMA, firmarComo, tomarCambios } from '../shared/firma';
@@ -21,7 +22,7 @@ const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', c
 
 export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
   const monto = Number(c.recargoMonto);
-  if (!c.recargoActivo || !(monto > 0) || c.activo === false) return 0;
+  if (!c.recargoActivo || !(monto > 0) || c.activo === false || !operando(c)) return 0;
   const desde: string = c.recargoDesde ?? hoy;
   const [cargos, pagos, perfiles] = await Promise.all([
     byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
@@ -92,7 +93,7 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
  * partir de cuotaAutomaticaDesde, para no cobrar meses anteriores al activarla.
  */
 export async function generarCuotaAutomatica(c: Item, hoy = hoyMX()) {
-  if (!c.cuotaAutomatica || c.activo === false) return 0;
+  if (!c.cuotaAutomatica || c.activo === false || !operando(c)) return 0;
   const periodo = hoy.slice(0, 7);
   const cargo = fechaCargo(c, periodo);
   if (hoy < cargo || cargo < (c.cuotaAutomaticaDesde ?? hoy)) return 0;

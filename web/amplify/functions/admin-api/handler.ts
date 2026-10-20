@@ -20,6 +20,7 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import { Amplify } from 'aws-amplify';
@@ -37,6 +38,7 @@ import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../share
 import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo } from '../shared/accesos';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL } from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
+import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
 import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
@@ -65,16 +67,21 @@ type Yo = {
   permisos: Permisos;
   condos: '*' | Set<string>;
   rolNombre: string;
+  /** Condominios suspendidos y en la papelera (solo el superadministrador entra a los suspendidos). */
+  suspendidos: Set<string>;
+  eliminados: Set<string>;
 };
 
 async function cargarYo(identity: any): Promise<Yo> {
   const grupos: string[] = identity?.groups ?? identity?.claims?.['cognito:groups'] ?? [];
   const sub: string = identity?.sub;
   const email = identity?.claims?.email || (await emailDe(sub).catch(() => sub));
-  const perfil = sub ? await get('Perfil', { userId: sub }) : undefined;
+  const [perfil, condominios] = await Promise.all([sub ? get('Perfil', { userId: sub }) : undefined, scan('Condominio')]);
   const nombre = perfil?.nombre || email;
+  const suspendidos = new Set(condominios.filter((c) => suspendido(c)).map((c) => c.id as string));
+  const eliminados = new Set(condominios.filter((c) => enPapelera(c)).map((c) => c.id as string));
   if (grupos.includes('SUPERADMIN')) {
-    return { sub, email, nombre, superadmin: true, permisos: TODOS_LOS_PERMISOS, condos: '*', rolNombre: 'Superadministrador' };
+    return { sub, email, nombre, superadmin: true, permisos: TODOS_LOS_PERMISOS, condos: '*', rolNombre: 'Superadministrador', suspendidos, eliminados };
   }
   if (!grupos.includes('ADMIN')) fail('Acceso solo para administradores.');
   if (!perfil || perfil.estado !== 'APROBADO' || perfil.rol !== 'ADMIN') fail('Tu cuenta de administración no está activa.');
@@ -88,10 +95,14 @@ async function cargarYo(identity: any): Promise<Yo> {
     permisos: rol ? normalizarPermisos(rol.permisos) : SIN_PERMISOS,
     condos: lista.includes('*') ? '*' : new Set(lista),
     rolNombre: rol?.nombre ?? 'Sin rol asignado',
+    suspendidos,
+    eliminados,
   };
 }
 
-const enAlcance = (yo: Yo, condominioId?: string | null) => !!condominioId && (yo.condos === '*' || yo.condos.has(condominioId));
+/** Condominios que ve: los asignados que no están en la papelera (los suspendidos se listan, pero no se trabajan). */
+const enAlcance = (yo: Yo, condominioId?: string | null) =>
+  !!condominioId && !yo.eliminados.has(condominioId) && (yo.condos === '*' || yo.condos.has(condominioId));
 
 function exigir(yo: Yo, seccion: string, nivel: Nivel) {
   if (yo.superadmin) return;
@@ -105,7 +116,9 @@ function exigirExtra(yo: Yo, extra: string) {
   fail(`Tu rol no permite: ${EXTRAS.find((e) => e.key === extra)?.label.toLowerCase() ?? extra}.`);
 }
 function exigirCondo(yo: Yo, condominioId?: string | null) {
+  if (condominioId && yo.eliminados.has(condominioId)) fail('Este condominio está en la papelera.');
   if (!enAlcance(yo, condominioId)) fail('No tienes asignado ese condominio.');
+  if (!yo.superadmin && yo.suspendidos.has(condominioId!)) fail('Este condominio está suspendido. Comunícate con SIIA.');
 }
 function exigirSuper(yo: Yo) {
   if (!yo.superadmin) fail('Solo el superadministrador puede hacer esto.');
@@ -1150,6 +1163,26 @@ async function editarPersona(perfil: Item, p: Item, yo: Yo) {
   return { cambios: Object.keys(cambios) };
 }
 
+// ---------- suspensión y papelera de condominios (ver shared/condominios.ts) ----------
+const lambda = new LambdaClient({});
+/** Encarga a la Lambda siia-papelera desactivar, reactivar o borrar cuentas y datos (sin esperar a que termine). */
+async function enviarAPapelera(orden: OrdenPapelera) {
+  await lambda.send(new InvokeCommand({ FunctionName: process.env.PAPELERA_FN!, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify(orden)) }));
+}
+/** `papelera`: el condominio debe estar en la papelera (true) o fuera de ella (false). */
+async function condominioSuper(p: Item, yo: Yo, papelera = false) {
+  exigirSuper(yo);
+  const c = await get('Condominio', { id: str(p.condominioId, 64) });
+  if (!c) fail('Condominio no encontrado.');
+  if (enPapelera(c) !== papelera) fail(papelera ? 'El condominio no está en la papelera.' : 'El condominio está en la papelera.');
+  return c!;
+}
+/** Eliminar pide escribir el nombre del condominio (sin importar mayúsculas ni espacios de más). */
+function confirmarNombre(c: Item, p: Item) {
+  const norm = (x: unknown) => String(x ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!norm(p.confirmacion) || norm(p.confirmacion) !== norm(c.nombre)) fail('Escribe el nombre exacto del condominio para confirmar.');
+}
+
 const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Permisos efectivos de quien llama (el panel muestra solo lo permitido).
   async yo(_p, yo) {
@@ -1554,6 +1587,81 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
 
   async hoy() {
     return { hoy: hoyMX() };
+  },
+
+  // ----- suspender, eliminar (papelera de 30 días) y restaurar condominios (solo superadministrador) -----
+  async 'condominios.suspender'(p, yo) {
+    const c = await condominioSuper(p, yo);
+    if (suspendido(c)) fail('El condominio ya está suspendido.');
+    const motivo = str(p.motivo, 300);
+    if (!motivo) fail('Escribe el motivo de la suspensión.');
+    await update('Condominio', { id: c.id }, { suspendido: true, suspension: JSON.stringify({ motivo, en: now(), por: yo.email, porNombre: yo.nombre }) });
+    return { ok: true };
+  },
+
+  async 'condominios.reactivar'(p, yo) {
+    const c = await condominioSuper(p, yo);
+    if (!suspendido(c)) fail('El condominio no está suspendido.');
+    await update('Condominio', { id: c.id }, { suspendido: null, suspension: null });
+    return { ok: true };
+  },
+
+  // A la papelera: desaparece para todos y sus cuentas se desactivan; se borra definitivamente a los 30 días.
+  async 'condominios.eliminar'(p, yo) {
+    const c = await condominioSuper(p, yo);
+    confirmarNombre(c, p);
+    const eliminadoEn = now();
+    await update('Condominio', { id: c.id }, { eliminadoEn, eliminacion: JSON.stringify({ por: yo.email, porNombre: yo.nombre, cuentas: [] }) });
+    await enviarAPapelera({ accion: 'desactivar', condominioId: c.id });
+    return { ok: true, borraEl: fechaBorrado(eliminadoEn) };
+  },
+
+  async 'condominios.papelera'(_p, yo) {
+    exigirSuper(yo);
+    const condos = (await scan('Condominio')).filter((c) => enPapelera(c));
+    return Promise.all(
+      condos
+        .sort((a, b) => String(b.eliminadoEn).localeCompare(String(a.eliminadoEn)))
+        .map(async (c) => {
+          const e = jsonDe(c.eliminacion);
+          const [unidades, cuentas] = await Promise.all([
+            byIndex('Unidad', 'byCondominio', 'condominioId', c.id),
+            byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
+          ]);
+          return {
+            id: c.id,
+            nombre: c.nombre,
+            tipo: c.tipo ?? null,
+            eliminadoEn: c.eliminadoEn,
+            borraEl: fechaBorrado(c.eliminadoEn),
+            porNombre: e?.porNombre ?? null,
+            por: e?.por ?? null,
+            purgando: !!e?.purgando,
+            unidades: unidades.length,
+            cuentas: cuentas.filter((x) => !ES_ADMIN(x.rol)).length,
+          };
+        }),
+    );
+  },
+
+  async 'condominios.restaurar'(p, yo) {
+    const c = await condominioSuper(p, yo, true);
+    const e = jsonDe(c.eliminacion);
+    if (e?.purgando) fail('Este condominio ya se está borrando definitivamente.');
+    await update('Condominio', { id: c.id }, { eliminadoEn: null, eliminacion: null });
+    const cuentas: string[] = Array.isArray(e?.cuentas) ? e!.cuentas : [];
+    if (cuentas.length) await enviarAPapelera({ accion: 'reactivar', condominioId: c.id, cuentas });
+    return { ok: true, cuentas: cuentas.length };
+  },
+
+  // Sin esperar los 30 días: borra todo en los próximos minutos. No hay vuelta atrás.
+  async 'condominios.borrarDefinitivo'(p, yo) {
+    const c = await condominioSuper(p, yo, true);
+    confirmarNombre(c, p);
+    const e = jsonDe(c.eliminacion) ?? {};
+    await update('Condominio', { id: c.id }, { eliminacion: JSON.stringify({ ...e, purgando: true, purgaPor: yo.email, purgaPorNombre: yo.nombre }) });
+    await enviarAPapelera({ accion: 'purgar', condominioId: c.id });
+    return { ok: true };
   },
 
   // ----- registro de actividad y administradores por condominio (solo superadministrador) -----
