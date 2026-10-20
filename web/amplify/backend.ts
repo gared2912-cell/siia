@@ -12,7 +12,7 @@ import { notificador } from './functions/notificador/resource';
 import { recargos } from './functions/recargos/resource';
 import { reservasVencidas } from './functions/reservas-vencidas/resource';
 import { papelera } from './functions/papelera/resource';
-import { AMBIENTE, PORTAL_URL, SITIO, VAPID_PUBLICA } from './ambiente';
+import { AMBIENTE, CORREO_SES, PORTAL_URL, REMITENTE, SITIO, VAPID_PUBLICA } from './ambiente';
 
 const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas, papelera });
 
@@ -164,6 +164,15 @@ backend.auth.resources.cfnResources.cfnUserPoolClient.accessTokenValidity = 60;
 backend.auth.resources.cfnResources.cfnUserPoolClient.idTokenValidity = 60;
 
 // ---------- correo ----------
+// Cuentas: con CORREO_SES, Cognito envía por SES con la identidad del dominio siia.casa (ver ambiente.ts).
+// Amplify (senders.email) solo acepta la identidad del correo exacto, por eso se configura aquí sobre el dominio.
+if (CORREO_SES) {
+  backend.auth.resources.cfnResources.cfnUserPool.emailConfiguration = {
+    emailSendingAccount: 'DEVELOPER',
+    from: REMITENTE,
+    sourceArn: Stack.of(userPool).formatArn({ service: 'ses', resource: 'identity', resourceName: 'siia.casa' }),
+  };
+}
 // Recargos por pago tardío: aviso por correo a los residentes (Amazon SES, dominio siia.casa verificado con DKIM).
 // EN PAUSA hasta tener el dominio con HTTPS y SES listo; para activarlo: CORREOS_ACTIVOS = '1'.
 backend.recargos.addEnvironment('CORREOS_ACTIVOS', '0');

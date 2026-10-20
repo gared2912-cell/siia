@@ -27,7 +27,8 @@ const invitacion = (usuario: string, codigo: string) => `
       </td></tr></table>
       <p style="margin:0 0 22px"><a href="${PORTAL}" style="display:inline-block;background:#007c7d;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 22px;border-radius:999px">Entrar al portal</a></p>
       <p style="margin:0 0 6px;font-size:13px;color:#676d86">En tu primer ingreso te pediremos crear una contraseña nueva. La contraseña temporal vence en 7 días; si vence, pide a la administración que te reenvíe tu acceso.</p>
-      <p style="margin:0;font-size:13px;color:#676d86">Si no esperabas este correo, ignóralo.</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#676d86">Si no esperabas este correo, ignóralo.</p>
+      <p style="margin:0;font-size:12px;color:#8a8fa3">Este correo es automático, no lo respondas. Si tienes dudas, comunícate con la administración de tu condominio.</p>
     </td></tr>
   </table>
 </div>`;

@@ -5,7 +5,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 
 const ses = new SESv2Client({});
-const REMITENTE = process.env.CORREO_REMITENTE ?? 'SIIA Soluciones Inmobiliarias <notificaciones@siia.casa>';
+const REMITENTE = process.env.CORREO_REMITENTE ?? 'SIIA <no-reply@siia.casa>';
 
 const escapar = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
