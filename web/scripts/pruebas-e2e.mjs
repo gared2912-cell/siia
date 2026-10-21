@@ -63,7 +63,7 @@ const apis = await new AppSyncClient({}).send(new ListGraphqlApisCommand({}));
 const api = apis.graphqlApis.find((a) => a.uris?.GRAPHQL === outputs.data.url);
 const SUFIJO_TABLA = `-${api.apiId}-NONE`;
 const T = (m) => `${m}${SUFIJO_TABLA}`;
-const MODELOS = ['Actividad', 'Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia', 'CorteAccesos'];
+const MODELOS = ['Actividad', 'Unidad', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota', 'Egreso', 'SaldoMensual', 'TurnoVigilancia', 'CorteAccesos', 'ReporteProveedor'];
 
 // ---------- utilidades ----------
 const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City' }).format(new Date());
@@ -1354,6 +1354,76 @@ try {
     }
     return bloqueado(sesiones.op2.admin('yo'));
   });
+  // =====================================================================
+  grupo('Proveedores: bitácora de trabajo con fotos');
+  const mesActual = hoy.slice(0, 7);
+  await prueba('Solo quien tiene permiso de Proveedores da de alta un proveedor', async () => {
+    const datos = { email: E('proveedor'), nombre: 'Pedro Jardinero E2E', empresa: 'Jardines E2E', rol: 'PROVEEDOR', condominiosServicio: [X.robles], servicios: ['Jardinería y poda', 'Otro'], enviarCorreo: false };
+    await bloqueado(ct.admin('crearUsuario', datos));
+    await bloqueado(sa.admin('crearUsuario', { ...datos, servicios: [] }));
+    const p = await ok(sa.admin('crearUsuario', datos));
+    SUB.pv = p.userId;
+    esperar(p.rol === 'PROVEEDOR' && p.condominiosServicio?.[0] === X.robles && !p.condominioId, JSON.stringify(p).slice(0, 200));
+    await ok(sa.admin('generarContrasena', { userId: SUB.pv, password: PASS }));
+    const l = await ok(sa.admin('proveedores.lista', { condominioId: X.robles }));
+    esperar(l.some((x) => x.userId === SUB.pv && x.empresa === 'Jardines E2E'), JSON.stringify(l).slice(0, 200));
+    return 'alta con servicios y condominio';
+  });
+  const pv = await entrar('pv', E('proveedor'));
+  const fotoTrabajo = async (condominioId, contenido) => {
+    const s = await ok(pv.portal('proveedor.subirFoto', { condominioId, nombre: `trabajo-e2e-${Date.now()}.jpg`, tamano: contenido.length }));
+    esperar((await fetch(s.url, { method: 'PUT', headers: { 'Content-Type': s.contentType }, body: contenido })).ok, 'no subió la foto');
+    return s.path;
+  };
+  await prueba('El proveedor ve sus condominios y servicios; un residente no entra a su sección', async () => {
+    const i = await ok(pv.portal('proveedor.inicio'));
+    esperar(i.condominios.length === 1 && i.condominios[0].id === X.robles && i.servicios.includes('Jardinería y poda'), JSON.stringify(i));
+    await bloqueado(r1.portal('proveedor.inicio'));
+    return bloqueado(pv.portal('finanzas.estadoCuenta'));
+  });
+  await prueba('Reporte inválido: sin descripción de foto, servicio que no da o condominio ajeno', async () => {
+    const path = await fotoTrabajo(X.robles, 'antes');
+    const base = { condominioId: X.robles, destino: 'ADMIN', tipo: 'Jardinería y poda', descripcion: 'Poda general', fotos: [{ path, descripcion: 'Antes' }] };
+    await bloqueado(pv.portal('proveedor.enviar', { ...base, fotos: [{ path, descripcion: '' }] }));
+    await bloqueado(pv.portal('proveedor.enviar', { ...base, tipo: 'Elevadores' }));
+    await bloqueado(pv.portal('proveedor.enviar', { ...base, tipo: 'Otro' }));
+    await bloqueado(pv.portal('proveedor.enviar', { ...base, condominioId: X.torre }));
+    return bloqueado(pv.portal('proveedor.subirFoto', { condominioId: X.torre, nombre: 'x.jpg', tamano: 10 }));
+  });
+  await prueba('Reporte para la administración y para residentes (con aviso a las unidades)', async () => {
+    const f1 = await fotoTrabajo(X.robles, 'foto antes');
+    const f2 = await fotoTrabajo(X.robles, 'foto después');
+    const a = await ok(pv.portal('proveedor.enviar', { condominioId: X.robles, destino: 'ADMIN', tipo: 'Jardinería y poda', descripcion: 'Poda de 6 árboles; falta retirar ramas.', fotos: [{ path: f1, descripcion: 'Antes' }, { path: f2, descripcion: 'Después' }] }));
+    esperar(a.destino === 'ADMIN' && a.fecha === hoy, JSON.stringify(a));
+    const f3 = await fotoTrabajo(X.robles, 'foto residentes');
+    await ok(pv.portal('proveedor.enviar', { condominioId: X.robles, destino: 'RESIDENTES', tipo: 'Otro', tipoOtro: 'Limpieza de canaletas', descripcion: 'Se limpiaron las canaletas del andador.', fotos: [{ path: f3, descripcion: 'Canaleta limpia' }] }));
+    const av = await hasta(() => ok(r1.portal('inicio.avisos')), (x) => x.avisos.some((y) => y.tipo === 'TRABAJO'));
+    esperar(av.avisos.find((y) => y.tipo === 'TRABAJO').titulo === 'Trabajo realizado: Limpieza de canaletas', 'sin aviso de trabajo');
+    return '2 reportes';
+  });
+  await prueba('Los residentes ven solo el reporte para residentes, con sus fotos', async () => {
+    const t = await ok(r1.portal('mantenimientos.trabajos'));
+    esperar(t.length === 1 && t[0].servicio === 'Limpieza de canaletas' && t[0].proveedor === 'Jardines E2E', JSON.stringify(t).slice(0, 200));
+    esperar((await (await fetch(t[0].fotos[0].url)).text()) === 'foto residentes', 'foto no visible');
+  });
+  await prueba('La administración ve los reportes por proveedor y mes; el proveedor, su bitácora', async () => {
+    const r = await ok(sa.admin('proveedores.reportes', { condominioId: X.robles, mes: mesActual, proveedorId: SUB.pv, destino: 'ADMIN' }));
+    esperar(r.length === 1 && r[0].fotos.length === 2 && r[0].fotos[1].descripcion === 'Después', JSON.stringify(r).slice(0, 200));
+    esperar((await (await fetch(r[0].fotos[0].url)).text()) === 'foto antes', 'foto no visible para la administración');
+    const res = await ok(sa.admin('proveedores.reportes', { condominioId: X.robles, mes: mesActual, destino: 'RESIDENTES' }));
+    esperar(res.length === 1, `residentes: ${res.length}`);
+    const m = await ok(pv.portal('proveedor.mios', { mes: mesActual }));
+    esperar(m.length === 2, `bitácora: ${m.length}`);
+    await bloqueado(ct.admin('proveedores.reportes', { condominioId: X.robles, mes: mesActual }));
+    return '1 para administración, 1 para residentes';
+  });
+  await prueba('Un reporte enviado ya no se puede modificar ni borrar', async () => {
+    const [r] = await ok(sa.admin('proveedores.reportes', { condominioId: X.robles, mes: mesActual, destino: 'ADMIN' }));
+    await bloqueado(pv.portal('proveedor.editar', { id: r.id, descripcion: 'cambio' }));
+    await bloqueado(sa.db('ReporteProveedor', 'update', { input: { id: r.id, descripcion: 'cambio' } }));
+    return bloqueado(sa.db('ReporteProveedor', 'delete', { input: { id: r.id } }));
+  });
+
   // =====================================================================
   grupo('Registro de activaciones: cortes de accesos por morosidad');
   // Casa 1 (Ana) debe 2 cuotas vencidas; le queda el control de portón P-77 activo de las pruebas anteriores.

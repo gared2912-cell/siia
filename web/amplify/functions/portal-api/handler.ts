@@ -2,7 +2,8 @@
 // Punto único de control: nadie accede a datos si un administrador no lo aprobó,
 // y cada módulo solo responde si la administración lo habilitó para su condominio.
 import type { AppSyncResolverEvent } from 'aws-lambda';
-import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { randomUUID } from 'node:crypto';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   ApiError,
@@ -31,6 +32,7 @@ import { SLOTS_AMENIDADES, documentosDe } from '../shared/documentos';
 import { nombreAdjunto } from '../shared/comunicados';
 import { ACTIVAS, HORAS_APARTADO, apartadas, cancelarCargoReserva, cargoDeReserva, confirmarReserva, limitePago, relacionadas, vencerSiCorresponde } from '../shared/reservas';
 import { enPapelera, operando, suspendido } from '../shared/condominios';
+import { MAX_FOTOS_REPORTE, MAX_FOTO_REPORTE, OTRO_SERVICIO, listaJson, servicioDe, type FotoReporte } from '../shared/proveedores';
 
 type Ctx = {
   sub: string;
@@ -388,6 +390,23 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       estado: 'ABIERTO',
     });
     return sinPrivados(inc);
+  },
+
+  // Reportes de proveedores para los residentes (los últimos 60 días), con sus fotos.
+  async 'mantenimientos.trabajos'({ condominio }) {
+    const desde = hoyMX(new Date(Date.now() - 60 * 86400000));
+    const items = (await byIndex('ReporteProveedor', 'byCondominio', 'condominioId', condominio.id)).filter((r) => r.destino === 'RESIDENTES' && r.fecha >= desde);
+    return Promise.all(
+      items.sort(newest).map(async (r) => ({
+        id: r.id,
+        fecha: r.fecha,
+        createdAt: r.createdAt,
+        servicio: servicioDe(r.tipo, r.tipoOtro),
+        descripcion: r.descripcion ?? null,
+        proveedor: r.empresa || r.proveedorNombre || 'Proveedor',
+        fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await fotoUrl(f.path) }))),
+      })),
+    );
   },
 
   async 'mantenimientos.lista'({ condominio }) {
@@ -1086,6 +1105,104 @@ async function perfilActual(sub: string, email: string) {
   };
 }
 
+// ---------- proveedores (siia.casa/proveedores; ver shared/proveedores.ts) ----------
+type CtxProveedor = { sub: string; perfil: Item; p: Item };
+/** Condominios activos que atiende el proveedor. */
+async function condominiosProveedor(perfil: Item) {
+  const ids: string[] = perfil.condominiosServicio ?? [];
+  const condos = await Promise.all(ids.map((id) => get('Condominio', { id })));
+  return condos.filter((c): c is Item => !!c && c.activo !== false && operando(c));
+}
+async function condominioDelProveedor(perfil: Item, id: unknown) {
+  const c = (await condominiosProveedor(perfil)).find((x) => x.id === str(id, 64));
+  if (!c) fail('Elige uno de los condominios que atiendes.');
+  return c!;
+}
+const TIPOS_FOTO_REPORTE: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
+
+const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
+  async 'proveedor.inicio'({ perfil }) {
+    return {
+      nombre: perfil.nombre ?? null,
+      email: perfil.email,
+      empresa: perfil.empresa ?? null,
+      servicios: perfil.servicios ?? [],
+      condominios: (await condominiosProveedor(perfil)).map((c) => ({ id: c.id, nombre: c.nombre })),
+    };
+  },
+
+  // URL firmada para subir una foto del reporte (10 minutos, 10 MB).
+  async 'proveedor.subirFoto'({ sub, perfil, p }) {
+    const c = await condominioDelProveedor(perfil, p.condominioId);
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'foto.jpg';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_FOTO_REPORTE[ext]) fail('Sube una foto (JPG, PNG, WEBP o HEIC).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > MAX_FOTO_REPORTE) fail('Cada foto debe pesar máximo 10 MB.');
+    const path = `condominios/${c.id}/proveedores/${sub}/${randomUUID()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_FOTO_REPORTE[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_FOTO_REPORTE[ext] };
+  },
+
+  // Enviar = guardar: el reporte queda en su bitácora y ya no se modifica.
+  async 'proveedor.enviar'({ sub, perfil, p }) {
+    const c = await condominioDelProveedor(perfil, p.condominioId);
+    const destino = p.destino === 'RESIDENTES' ? 'RESIDENTES' : p.destino === 'ADMIN' ? 'ADMIN' : '';
+    if (!destino) fail('Elige para quién es el reporte.');
+    const tipo = str(p.tipo, 60);
+    const tipoOtro = tipo === OTRO_SERVICIO ? str(p.tipoOtro, 80) : '';
+    // Solo los mantenimientos que le asignó la administración («Otro» también se asigna).
+    if (!tipo || !(perfil.servicios ?? []).includes(tipo)) fail('Elige uno de los mantenimientos que tienes asignados.');
+    if (tipo === OTRO_SERVICIO && !tipoOtro) fail('Escribe qué tipo de mantenimiento realizaste.');
+    const descripcion = str(p.descripcion, 2000);
+    if (!descripcion) fail('Escribe una descripción del trabajo.');
+    const fotos: FotoReporte[] = (Array.isArray(p.fotos) ? p.fotos : []).map((f: Item) => ({ path: str(f?.path, 400), descripcion: str(f?.descripcion, 1000) }));
+    if (!fotos.length) fail('Agrega al menos una foto.');
+    if (fotos.length > MAX_FOTOS_REPORTE) fail(`Máximo ${MAX_FOTOS_REPORTE} fotos por reporte.`);
+    for (const [i, f] of fotos.entries()) {
+      if (!f.path.startsWith(`condominios/${c.id}/proveedores/${sub}/`)) fail(`La foto ${i + 1} no es válida.`);
+      if (!f.descripcion) fail(`Escribe la descripción de la foto ${i + 1}.`);
+      const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: f.path })).catch(() => undefined);
+      if (!h) fail(`No encontramos la foto ${i + 1}. Vuelve a subirla.`);
+    }
+    const reporte = await put('ReporteProveedor', {
+      condominioId: c.id,
+      proveedorId: sub,
+      proveedorNombre: perfil.nombre || perfil.email,
+      empresa: perfil.empresa || null,
+      destino,
+      tipo,
+      tipoOtro: tipoOtro || null,
+      descripcion,
+      fecha: hoyMX(),
+      fotos: JSON.stringify(fotos),
+    });
+    // El reporte para residentes les llega como aviso (campana y notificación) si el condominio tiene Mantenimientos.
+    if (destino === 'RESIDENTES' && (c.modulos ?? []).includes('mantenimientos')) {
+      const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', c.id);
+      const titulo = `Trabajo realizado: ${servicioDe(tipo, tipoOtro)}`.slice(0, 140);
+      const texto = `${descripcion.slice(0, 600)}${perfil.empresa ? ` · ${perfil.empresa}` : ''}`;
+      for (let i = 0; i < unidades.length; i += 25) {
+        await Promise.all(unidades.slice(i, i + 25).map((u) => put('Aviso', { condominioId: c.id, unidadId: u.id, tipo: 'TRABAJO', titulo, texto, leido: false })));
+      }
+    }
+    return { id: reporte.id, fecha: reporte.fecha, destino };
+  },
+
+  // Su bitácora: reportes de un mes (AAAA-MM) con sus fotos.
+  async 'proveedor.mios'({ sub, perfil, p }) {
+    const mes = /^\d{4}-\d{2}$/.test(p.mes) ? p.mes : hoyMX().slice(0, 7);
+    const nombres = new Map((await condominiosProveedor(perfil)).map((c) => [c.id, c.nombre]));
+    const items = (await byIndex('ReporteProveedor', 'byProveedor', 'proveedorId', sub)).filter((r) => String(r.fecha).startsWith(mes));
+    return Promise.all(
+      items.sort(newest).map(async ({ __typename, ...r }) => ({
+        ...r,
+        condominio: nombres.get(r.condominioId) ?? 'Condominio',
+        fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await fotoUrl(f.path) }))),
+      })),
+    );
+  },
+};
+
 // ---------- entrada ----------
 export const handler = async (event: AppSyncResolverEvent<{ action: string; payload?: unknown }>) => {
   const identity = event.identity as any;
@@ -1103,6 +1220,14 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     // A partir de aquí: solo usuarios aprobados de un condominio activo
     const perfil = await get('Perfil', { userId: sub });
     if (!perfil || perfil.estado !== 'APROBADO') fail('Tu acceso aún no ha sido autorizado por la administración.');
+    if (perfil!.rol === 'PROVEEDOR') {
+      // Puede instalar la app; por ahora no recibe notificaciones (sin categorías).
+      if (action.startsWith('notificaciones.')) return await accionNotificaciones(action, p, sub, [], '/proveedores/');
+      const fn = proveedor[action];
+      if (!fn) fail('Acción no permitida.');
+      return await fn({ sub, perfil: perfil!, p });
+    }
+    if (action.startsWith('proveedor.')) fail('Acción no permitida.');
     const condominio = await get('Condominio', { id: perfil!.condominioId });
     if (!condominio || condominio.activo === false || enPapelera(condominio)) fail('Tu condominio no tiene el portal activo.');
     if (suspendido(condominio)) fail('El portal de tu condominio está suspendido. Comunícate con la administración.');

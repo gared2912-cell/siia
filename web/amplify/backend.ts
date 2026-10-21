@@ -57,6 +57,8 @@ new Policy(Stack.of(bucket), 'GruposCarpetaPropia', {
 backend.storage.resources.bucket.grantRead(backend.portalApi.resources.lambda, 'residentes/*');
 // … y el reglamento y los términos de uso de las amenidades que el residente acepta al reservar.
 backend.storage.resources.bucket.grantRead(backend.portalApi.resources.lambda, 'condominios/*');
+// Proveedores: URL firmada para subir las fotos de su bitácora de trabajo.
+backend.storage.resources.bucket.grantPut(backend.portalApi.resources.lambda, 'condominios/*/proveedores/*');
 backend.portalApi.addEnvironment('BUCKET', backend.storage.resources.bucket.bucketName);
 // admin-api firma URLs de comprobantes y fotos solo para registros de los condominios del administrador.
 backend.storage.resources.bucket.grantRead(backend.adminApi.resources.lambda, 'residentes/*');

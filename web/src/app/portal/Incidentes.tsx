@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ElegirArchivo } from '../ElegirArchivo';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, VerImagen, etiquetaEstado, fecha, fechaHora, useAction, useLoad } from '../ui';
+import { TarjetaReporteFotos } from '../FotosReporte';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, VerImagen, etiquetaEstado, fecha, fechaHora, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 type Incidente = {
@@ -19,6 +20,7 @@ type Incidente = {
   // Etapas que registró la administración, con su foto de evidencia (URL temporal)
   seguimiento?: { estado: string; respuesta?: string | null; en: string; reabierto?: boolean; foto?: string | null; fotoPdf?: boolean }[];
 };
+type Trabajo = { id: string; fecha: string; createdAt: string; servicio: string; descripcion?: string | null; proveedor: string; fotos: { url?: string; descripcion?: string }[] };
 type Mant = { id: string; titulo: string; tipo?: string; area?: string; fecha?: string; estado?: string; proveedor?: string; notas?: string };
 
 const esImagen = (path?: string) => /\.(png|jpe?g|webp|gif|heic)$/i.test(path ?? '');
@@ -181,13 +183,46 @@ function Seguimiento({ i, onBack }: { i: Incidente; onBack: () => void }) {
 }
 
 /** Módulo Mantenimientos: los programados en el condominio. */
-export function Mantenimientos(_: ModProps) {
-  const { data, error, loading, reload } = useLoad(() => portal<Mant[]>('mantenimientos.lista'));
+export function Mantenimientos({ inicial }: ModProps & { inicial?: string }) {
+  const [tab, setTab] = useState<'programados' | 'trabajos'>(inicial === 'trabajos' ? 'trabajos' : 'programados');
   return (
     <div className="stack">
-      <PageHead icon="tools" title="Mantenimientos" sub="Mantenimientos programados en tu condominio." />
-      {loading && !data ? <Loading /> : error ? <ErrorBox error={error} retry={reload} /> : <ListaMantenimientos lista={data!} />}
+      <PageHead icon="tools" title="Mantenimientos" sub="Mantenimientos programados y trabajos que realizaron los proveedores en tu condominio." />
+      <Seg
+        value={tab}
+        onChange={setTab}
+        options={[
+          ['programados', 'Programados'],
+          ['trabajos', 'Trabajos realizados'],
+        ]}
+      />
+      {tab === 'programados' ? <Programados /> : <Trabajos />}
     </div>
+  );
+}
+
+function Programados() {
+  const { data, error, loading, reload } = useLoad(() => portal<Mant[]>('mantenimientos.lista'));
+  return loading && !data ? <Loading /> : error ? <ErrorBox error={error} retry={reload} /> : <ListaMantenimientos lista={data!} />;
+}
+
+/** Reportes para residentes que enviaron los proveedores (últimos 60 días). */
+function Trabajos() {
+  const { data, error, loading, reload } = useLoad(() => portal<Trabajo[]>('mantenimientos.trabajos'));
+  if (loading && !data) return <Loading />;
+  if (error) return <ErrorBox error={error} retry={reload} />;
+  if (!data!.length)
+    return (
+      <section className="panel">
+        <Empty icon="tools">Aún no hay trabajos reportados en los últimos 60 días.</Empty>
+      </section>
+    );
+  return (
+    <>
+      {data!.map((t) => (
+        <TarjetaReporteFotos key={t.id} titulo={t.servicio} detalle={`${fechaHora(t.createdAt)} · ${t.proveedor}`} descripcion={t.descripcion} fotos={t.fotos} />
+      ))}
+    </>
   );
 }
 

@@ -40,6 +40,7 @@ import { MIN_CUOTAS_DEFECTO, jsonCorte, type AccesoCorte, type Corte, type Crite
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL, tipoDeCargo } from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
+import { listaJson, type FotoReporte } from '../shared/proveedores';
 import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
@@ -55,7 +56,7 @@ import {
 } from '../shared/permisos';
 
 const UserPoolId = process.env.USER_POOL_ID!;
-const ROLES = ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE'] as const;
+const ROLES = ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE', 'PROVEEDOR'] as const;
 type Rol = (typeof ROLES)[number];
 const ES_ADMIN = (rol?: string | null) => rol === 'ADMIN' || rol === 'SUPERADMIN';
 
@@ -128,8 +129,15 @@ function exigirSuper(yo: Yo) {
 function exigirGestionable(yo: Yo, perfil: Item) {
   if (yo.superadmin) return;
   if (ES_ADMIN(perfil.rol)) fail('Solo el superadministrador administra cuentas de administración.');
+  // Un proveedor atiende varios condominios: basta con tener asignado uno de ellos.
+  if (perfil.rol === 'PROVEEDOR') {
+    if (!(perfil.condominiosServicio ?? []).some((c: string) => enAlcance(yo, c))) fail('Ese proveedor no atiende tus condominios.');
+    return;
+  }
   exigirCondo(yo, perfil.condominioId);
 }
+/** Sección de permisos con la que se gestiona una cuenta: los proveedores, en «Proveedores». */
+const seccionDe = (perfil: Item) => (perfil.rol === 'PROVEEDOR' ? 'proveedores' : 'usuarios');
 
 // ---------- cliente de datos (IAM) para el CRUD ----------
 let dataClient: ReturnType<typeof generateClient<Schema>> | undefined;
@@ -1215,7 +1223,29 @@ async function quitarGrupos(username: string) {
 const cerrarSesiones = (username: string) =>
   cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId, Username: username })).catch(() => undefined);
 
-type Asignacion = { rol: Rol; condominioId: string | null; unidadId: string | null; rolAdminId: string | null; condominiosAdmin: string[] | null };
+type Asignacion = {
+  rol: Rol;
+  condominioId: string | null;
+  unidadId: string | null;
+  rolAdminId: string | null;
+  condominiosAdmin: string[] | null;
+  // Solo PROVEEDOR
+  condominiosServicio?: string[];
+  servicios?: string[];
+  empresa?: string | null;
+};
+
+/** Servicios que da un proveedor: los del catálogo y los que escriba la administración (máximo 25). */
+function serviciosDe(v: unknown) {
+  const lista = (Array.isArray(v) ? v : []).map((x) => str(x, 60)).filter(Boolean);
+  return [...new Set(lista)].slice(0, 25);
+}
+/** Condominios de un proveedor que puede asignar quien llama (deben estar en su alcance). */
+function condominiosDe(v: unknown, yo: Yo) {
+  const lista = [...new Set((Array.isArray(v) ? v : []).map((x) => str(x, 64)).filter(Boolean))];
+  for (const c of lista) exigirCondo(yo, c);
+  return lista;
+}
 
 async function validarAsignacion(p: Item, yo: Yo): Promise<Asignacion> {
   const rol = (ROLES as readonly string[]).includes(p.rol) ? (p.rol as Rol) : 'RESIDENTE';
@@ -1237,6 +1267,15 @@ async function validarAsignacion(p: Item, yo: Yo): Promise<Asignacion> {
       if (!condominiosAdmin.length) fail('Asigna al menos un condominio (o todos).');
     }
     return { rol, ...vacio, rolAdminId: r!.id, condominiosAdmin };
+  }
+  if (rol === 'PROVEEDOR') {
+    exigir(yo, 'proveedores', 'editar');
+    const condominiosServicio = condominiosDe(p.condominiosServicio, yo);
+    for (const id of condominiosServicio) if (!(await get('Condominio', { id }))) fail('Condominio no encontrado.');
+    if (!condominiosServicio.length) fail('Asigna al menos un condominio que atiende.');
+    const servicios = serviciosDe(p.servicios);
+    if (!servicios.length) fail('Elige al menos un servicio que da.');
+    return { rol, ...vacio, condominiosServicio, servicios, empresa: str(p.empresa, 120) || null };
   }
   exigir(yo, 'usuarios', 'editar');
   const c = await get('Condominio', { id: str(p.condominioId, 64) });
@@ -1353,7 +1392,7 @@ async function enviarAccesos(userId: string) {
  */
 async function editarPersona(perfil: Item, p: Item, yo: Yo) {
   exigirGestionable(yo, perfil);
-  exigir(yo, 'usuarios', 'editar');
+  exigir(yo, seccionDe(perfil), 'editar');
   const cambios: Item = {};
   const nombre = str(p.nombre, 120);
   const telefono = str(p.telefono, 20);
@@ -1535,7 +1574,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async reenviarAcceso(p, yo) {
     const perfil = await perfilDe(str(p.userId, 64));
     exigirGestionable(yo, perfil);
-    exigir(yo, 'usuarios', 'editar');
+    exigir(yo, seccionDe(perfil), 'editar');
     if (perfil.estado !== 'APROBADO') fail('Solo se reenvía el acceso a usuarios autorizados.');
     await enviarAccesos(perfil.userId);
     anotar('Perfil', perfil, 'acceso', 'Se reenvió el acceso por correo');
@@ -1547,7 +1586,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async generarContrasena(p, yo) {
     const perfil = await perfilDe(str(p.userId, 64));
     exigirGestionable(yo, perfil);
-    exigir(yo, 'usuarios', 'editar');
+    exigir(yo, seccionDe(perfil), 'editar');
     if (perfil.estado !== 'APROBADO') fail('Solo se asigna contraseña a usuarios autorizados.');
     const password = typeof p.password === 'string' ? p.password : '';
     if (password.length < 8 || password.length > 64 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password) || /\s/.test(password)) {
@@ -1585,7 +1624,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async rechazar(p, yo) {
     const perfil = await perfilDe(str(p.userId, 64));
     exigirGestionable(yo, perfil);
-    exigir(yo, 'usuarios', 'editar');
+    exigir(yo, seccionDe(perfil), 'editar');
     if (perfil.userId === yo.sub) fail('No puedes rechazar tu propia cuenta.');
     // Sin grupo y sin sesiones: un rechazo no deja acceso al panel ni al portal.
     await quitarGrupos(perfil.userId);
@@ -1596,7 +1635,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async suspender(p, yo) {
     const perfil = await perfilDe(str(p.userId, 64));
     exigirGestionable(yo, perfil);
-    exigir(yo, 'usuarios', 'editar');
+    exigir(yo, seccionDe(perfil), 'editar');
     if (perfil.userId === yo.sub) fail('No puedes suspender tu propia cuenta.');
     await cognito.send(new AdminDisableUserCommand({ UserPoolId, Username: perfil.userId }));
     await cerrarSesiones(perfil.userId);
@@ -1606,7 +1645,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   async reactivar(p, yo) {
     const perfil = await perfilDe(str(p.userId, 64));
     exigirGestionable(yo, perfil);
-    exigir(yo, 'usuarios', 'editar');
+    exigir(yo, seccionDe(perfil), 'editar');
     await cognito.send(new AdminEnableUserCommand({ UserPoolId, Username: perfil.userId }));
     return update('Perfil', { userId: perfil.userId }, { estado: 'APROBADO' });
   },
@@ -1831,6 +1870,60 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
 
   async hoy() {
     return { hoy: hoyMX() };
+  },
+
+  // ----- proveedores (bitácora de trabajo; ver shared/proveedores.ts) -----
+  // Proveedores que atienden el condominio, con el estado de su cuenta.
+  async 'proveedores.lista'(p, yo) {
+    exigir(yo, 'proveedores', 'ver');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const lista = (await scan('Perfil')).filter((x) => x.rol === 'PROVEEDOR' && (x.condominiosServicio ?? []).includes(cid));
+    return Promise.all(
+      lista.map(async ({ __typename, firma, firmaCambio, ...x }) => {
+        const u = await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: x.userId })).catch(() => undefined);
+        return { ...x, cuenta: u?.UserStatus ?? null };
+      }),
+    );
+  },
+
+  // Datos del proveedor, sus servicios y los condominios que atiende (solo cambia los condominios de quien llama).
+  async 'proveedores.editar'(p, yo) {
+    exigir(yo, 'proveedores', 'editar');
+    const perfil = await perfilDe(str(p.userId, 64));
+    if (perfil.rol !== 'PROVEEDOR') fail('Esa cuenta no es de un proveedor.');
+    exigirGestionable(yo, perfil);
+    const servicios = serviciosDe(p.servicios);
+    if (!servicios.length) fail('Elige al menos un servicio que da.');
+    const pedidos = condominiosDe(p.condominiosServicio, yo);
+    const ajenos = (perfil.condominiosServicio ?? []).filter((c: string) => !enAlcance(yo, c));
+    const condominiosServicio = [...new Set([...ajenos, ...pedidos])];
+    if (!condominiosServicio.length) fail('Debe quedar al menos un condominio asignado.');
+    const r = await editarPersona(perfil, { nombre: p.nombre, telefono: p.telefono, email: p.email, enviarCorreo: p.enviarCorreo }, yo);
+    await update('Perfil', { userId: perfil.userId }, { empresa: str(p.empresa, 120) || null, servicios, condominiosServicio });
+    return r;
+  },
+
+  // Reportes de un mes (AAAA-MM) del condominio: por proveedor y para la administración o los residentes.
+  async 'proveedores.reportes'(p, yo) {
+    exigir(yo, 'proveedores', 'ver');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const mes = /^\d{4}-\d{2}$/.test(p.mes) ? p.mes : hoyMX().slice(0, 7);
+    const proveedorId = str(p.proveedorId, 64);
+    const destino = p.destino === 'RESIDENTES' ? 'RESIDENTES' : 'ADMIN';
+    const items = (await byIndex('ReporteProveedor', 'byCondominio', 'condominioId', cid)).filter(
+      (r) => String(r.fecha).startsWith(mes) && r.destino === destino && (!proveedorId || r.proveedorId === proveedorId),
+    );
+    const firmar = (k: string) => getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: k }), { expiresIn: 3600 });
+    return Promise.all(
+      items
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+        .map(async ({ __typename, ...r }) => ({
+          ...r,
+          fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await firmar(f.path) }))),
+        })),
+    );
   },
 
   // ----- suspender, eliminar (papelera de 30 días) y restaurar condominios (solo superadministrador) -----

@@ -13,7 +13,7 @@ const admin = (allow: any) => [allow.group('SUPERADMIN')];
 
 const schema = a
   .schema({
-    Rol: a.enum(['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE']),
+    Rol: a.enum(['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE', 'PROVEEDOR']),
     EstadoPerfil: a.enum(['PENDIENTE', 'APROBADO', 'RECHAZADO', 'SUSPENDIDO']),
 
     // Rol de administración: qué secciones y acciones puede usar un ADMIN (ver shared/permisos.ts).
@@ -124,6 +124,10 @@ const schema = a
         chatLeidoCaseta: a.string(),
         // Alta (o cambio de correo) sin enviar los accesos por correo: falta enviarlos o asignarle contraseña.
         accesoSinEnviar: a.boolean(),
+        // Solo PROVEEDOR (ver shared/proveedores.ts): empresa (vacío = personal propio), servicios que da y condominios que atiende
+        empresa: a.string(),
+        servicios: a.string().array(),
+        condominiosServicio: a.string().array(),
       })
       .identifier(['userId'])
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('perfilesPorCondominio')])
@@ -511,6 +515,27 @@ const schema = a
         filas: a.json(), // [{ unidadId, unidad, userId, residente, moroso, cuotas, extras, monto, accesos: [{ id, tipo, codigo, estado }] }]
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('cortesPorCondominio')])
+      .authorization(admin),
+
+    // Bitácora de trabajo de un proveedor (ver shared/proveedores.ts). destino ADMIN = detallado para la administración;
+    // RESIDENTES = lo que ven los residentes en Mantenimientos. Lo crea portal-api y ya no se modifica.
+    ReporteProveedor: a
+      .model({
+        condominioId: a.id().required(),
+        proveedorId: a.id().required(),
+        proveedorNombre: a.string(),
+        empresa: a.string(),
+        destino: a.string().required(),
+        tipo: a.string().required(),
+        tipoOtro: a.string(),
+        descripcion: a.string(),
+        fecha: a.date().required(),
+        fotos: a.json(), // [{ path, descripcion }]
+      })
+      .secondaryIndexes((i) => [
+        i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('reportesProveedorPorCondominio'),
+        i('proveedorId').sortKeys(['fecha']).name('byProveedor').queryField('reportesPorProveedor'),
+      ])
       .authorization(admin),
 
     // API para residentes y vigilantes (validada en la Lambda portal-api)

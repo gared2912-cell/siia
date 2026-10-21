@@ -48,5 +48,5 @@ export const auth = defineAuth({
   userAttributes: {
     fullname: { required: false, mutable: true },
   },
-  groups: ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE'],
+  groups: ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE', 'PROVEEDOR'],
 });

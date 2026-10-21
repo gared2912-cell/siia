@@ -25,6 +25,7 @@ export const SECCIONES_PERMISO: { key: string; label: string; editar: string; so
   { key: 'amenidades', label: 'Amenidades y reservas', editar: 'Configurar amenidades y aprobar o rechazar reservas' },
   { key: 'visitas', label: 'Visitas (bitácora)', editar: '', soloVer: true },
   { key: 'mascotas', label: 'Mascota segura', editar: 'Aprobar o rechazar mascotas' },
+  { key: 'proveedores', label: 'Proveedores', editar: 'Crear proveedores, asignarles mantenimientos y condominios, contraseña, suspender y reactivar (con «Solo ver»: ver proveedores y sus reportes)' },
 ];
 
 /** Permisos especiales, adicionales al nivel de su sección. */

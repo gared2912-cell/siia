@@ -39,6 +39,7 @@ const POR_CONDOMINIO = [
   'TurnoVigilancia',
   'Mascota',
   'CorteAccesos',
+  'ReporteProveedor',
   'Actividad',
 ];
 
@@ -155,6 +156,17 @@ async function purgar(condominioId: string) {
         Key: { userId: a.userId },
         UpdateExpression: 'SET condominiosAdmin = :l, updatedAt = :u',
         ExpressionAttributeValues: { ':l': a.condominiosAdmin.filter((x: string) => x !== condominioId), ':u': now() },
+      }),
+    );
+  }
+  // Proveedores que lo atendían (sus cuentas siguen activas para sus otros condominios).
+  for (const a of (await scan('Perfil')).filter((p) => p.rol === 'PROVEEDOR' && (p.condominiosServicio ?? []).includes(condominioId))) {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table('Perfil'),
+        Key: { userId: a.userId },
+        UpdateExpression: 'SET condominiosServicio = :l, updatedAt = :u',
+        ExpressionAttributeValues: { ':l': a.condominiosServicio.filter((x: string) => x !== condominioId), ':u': now() },
       }),
     );
   }

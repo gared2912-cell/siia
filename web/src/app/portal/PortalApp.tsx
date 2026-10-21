@@ -21,7 +21,7 @@ export type PerfilResp = {
     userId: string;
     nombre?: string;
     email: string;
-    rol: 'SUPERADMIN' | 'ADMIN' | 'RESIDENTE' | 'VIGILANTE';
+    rol: 'SUPERADMIN' | 'ADMIN' | 'RESIDENTE' | 'VIGILANTE' | 'PROVEEDOR';
     estado: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'SUSPENDIDO';
     unidadSolicitada?: string;
     nota?: string;
@@ -87,6 +87,15 @@ function Portal() {
     return (
       <Estado icon="settings" titulo="Cuenta de administración">
         Tu cuenta es de administrador. <a href="/admin/">Ir al panel de administración</a>
+      </Estado>
+    );
+  }
+  if (perfil.rol === 'PROVEEDOR') {
+    // La app instalada abre /portal/: los proveedores pasan a su bitácora.
+    location.replace('/proveedores/');
+    return (
+      <Estado icon="tools" titulo="Cuenta de proveedor">
+        <a href="/proveedores/">Ir a mi bitácora de trabajo</a>
       </Estado>
     );
   }
@@ -194,7 +203,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
       {actual === 'visitas' && <Visitas {...props} />}
       {actual === 'amenidades' && <Amenidades {...props} />}
       {actual === 'incidentes' && <Incidentes {...props} />}
-      {actual === 'mantenimientos' && <Mantenimientos {...props} />}
+      {actual === 'mantenimientos' && <Mantenimientos key={cur} {...props} inicial={sub} />}
       {actual === 'comunicados' && <Comunicados {...props} />}
       {actual === 'chat' && <Chat key={cur} {...props} inicial={sub} />}
       {actual === 'mascotas' && <Mascotas {...props} />}

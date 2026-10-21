@@ -16,6 +16,7 @@ import { ResidentesRapido } from './ResidentesRapido';
 import { CampanaAdmin } from './CampanaAdmin';
 import { Actividad } from './Actividad';
 import { AvisoSuspendido } from './EstadoCondominio';
+import { ProveedoresAdmin } from './Proveedores';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -104,6 +105,7 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'amenidades', label: 'Amenidades', icon: 'calendar' },
   { key: 'visitas', label: 'Visitas', icon: 'qr' },
   { key: 'mascotas', label: 'Mascotas', icon: 'paw' },
+  { key: 'proveedores', label: 'Proveedores', icon: 'package' },
   { key: 'actividad', label: 'Actividad', icon: 'clock', soloSuper: true },
 ];
 
@@ -256,6 +258,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'amenidades' && <AmenidadesAdmin />}
             {actual === 'visitas' && <VisitasAdmin />}
             {actual === 'mascotas' && <MascotasAdmin />}
+            {actual === 'proveedores' && <ProveedoresAdmin />}
           </>
         )}
       </Shell>
