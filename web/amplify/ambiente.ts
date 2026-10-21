@@ -17,3 +17,4 @@ export const SECRETO_VAPID = ES_PRODUCCION ? 'VAPID_PRIVATE_KEY_PRODUCCION' : 'V
 // para toda la cuenta de AWS. Se activa cuando AWS saque a SES del modo de pruebas (solicitud del 2026-10-20).
 export const CORREO_SES = false;
 export const REMITENTE = 'SIIA <no-reply@siia.casa>';
+

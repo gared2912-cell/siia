@@ -1,6 +1,7 @@
 // Campana del panel: lo pendiente de atender en el condominio seleccionado (comprobantes, reservas,
 // mascotas, incidentes nuevos, solicitudes de acceso y chats por responder). Cada renglón lleva a la
-// sección donde se atiende y, una vez visto, desaparece de la campana.
+// sección donde se atiende y, una vez visto, desaparece de la campana. Excepción: las cotizaciones del sitio web
+// (de todos los condominios) siguen en la campana hasta que alguien las marca «Respondido al solicitante».
 import { useMemo } from 'react';
 import { all, db, type Schema } from '../api';
 import { money, useLoad, usePoll } from '../ui';
@@ -9,27 +10,32 @@ import { useInsigniaApp } from '../AppMovil';
 
 export const VISTOS_ADMIN = 'siia-vistos-admin';
 import { useAdmin } from './AdminApp';
+import { listaCotizaciones, resumenCotizacion, type Cotizacion } from './Cotizaciones';
 
 type Mensaje = Schema['Mensaje']['type'];
 
 export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensajes: Mensaje[] }) {
-  const { condo, puede, tiene, etiqueta } = useAdmin();
+  const { condo, puede, tiene, etiqueta, superadmin } = useAdmin();
   const vistos = useVistos(VISTOS_ADMIN);
   const id = condo?.id ?? '';
   // Solo se consultan las secciones que el rol puede ver (igual que el Panel).
   const si = <T,>(ok: boolean, fn: () => Promise<T[]>) => (id && ok ? fn() : Promise.resolve([] as T[]));
+  // El condominio suspendido no se trabaja (salvo el superadministrador); las cotizaciones no dependen de él.
+  const enCondo = !!condo && (!condo.suspendido || superadmin);
+  const veCotizaciones = puede('cotizaciones');
   const datos = useLoad(async () => {
     const q = { condominioId: id };
-    const [pagos, reservas, mascotas, incidentes, perfiles] = await Promise.all([
-      si(puede('finanzas') && tiene('finanzas.validarPagos'), () => all((o) => db.models.Pago.pagosPorCondominio(q, o))),
-      si(puede('amenidades'), () => all((o) => db.models.Reserva.reservasPorCondominio(q, o))),
-      si(puede('mascotas'), () => all((o) => db.models.Mascota.mascotasPorCondominio(q, o))),
-      si(puede('incidentes'), () => all((o) => db.models.Incidente.incidentesPorCondominio(q, o))),
-      si(puede('usuarios'), () => all((o) => db.models.Perfil.list(o))),
+    const [pagos, reservas, mascotas, incidentes, perfiles, cotizaciones] = await Promise.all([
+      si(enCondo && puede('finanzas') && tiene('finanzas.validarPagos'), () => all((o) => db.models.Pago.pagosPorCondominio(q, o))),
+      si(enCondo && puede('amenidades'), () => all((o) => db.models.Reserva.reservasPorCondominio(q, o))),
+      si(enCondo && puede('mascotas'), () => all((o) => db.models.Mascota.mascotasPorCondominio(q, o))),
+      si(enCondo && puede('incidentes'), () => all((o) => db.models.Incidente.incidentesPorCondominio(q, o))),
+      si(enCondo && puede('usuarios'), () => all((o) => db.models.Perfil.list(o))),
+      veCotizaciones ? listaCotizaciones() : Promise.resolve([] as Cotizacion[]),
     ]);
-    return { pagos, reservas, mascotas, incidentes, perfiles };
-  }, [id]);
-  usePoll(() => datos.reload(true), 60000, !!id);
+    return { pagos, reservas, mascotas, incidentes, perfiles, cotizaciones };
+  }, [id, enCondo]);
+  usePoll(() => datos.reload(true), 60000, !!id || veCotizaciones);
 
   const items = useMemo<ItemCampana[]>(() => {
     const d = datos.data;
@@ -52,7 +58,19 @@ export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensaj
       for (const p of d.perfiles.filter((x) => x.estado === 'PENDIENTE' && x.condominioId === id))
         out.push({ id: `perfil-${p.userId}`, icono: 'users', titulo: `Solicitud de acceso: ${p.nombre || p.email}`, texto: p.unidadSolicitada ?? undefined, fecha: p.createdAt, nuevo: true, abrir: () => go('condominios/residentes') });
     }
-    return vistos(out.sort((a, b) => String(b.fecha ?? '').localeCompare(String(a.fecha ?? ''))));
+    // Cotizaciones pendientes: no se quitan al verlas, solo al marcarlas «Respondido al solicitante».
+    const cotizaciones: ItemCampana[] = (d?.cotizaciones ?? [])
+      .filter((c) => c.estado === 'PENDIENTE')
+      .map((c) => ({
+        id: `cotizacion-${c.id}`,
+        icono: 'inbox',
+        titulo: `${c.origen === 'CONTACTO' ? 'Mensaje del sitio web' : 'Solicitud de cotización'}: ${c.nombre}`,
+        texto: resumenCotizacion(c) || undefined,
+        fecha: c.createdAt,
+        nuevo: true,
+        abrir: () => go(`cotizaciones/${c.id}`),
+      }));
+    return [...cotizaciones, ...vistos(out)].sort((a, b) => String(b.fecha ?? '').localeCompare(String(a.fecha ?? '')));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datos.data, mensajes, id, vistos]);
   const total = items.length;

@@ -17,6 +17,7 @@ import { CampanaAdmin } from './CampanaAdmin';
 import { Actividad } from './Actividad';
 import { AvisoSuspendido } from './EstadoCondominio';
 import { ProveedoresAdmin } from './Proveedores';
+import { CotizacionesAdmin } from './Cotizaciones';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -96,6 +97,7 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'panel', label: 'Panel', icon: 'home' },
   { key: 'administradores', label: 'Administradores', icon: 'shield', global: true, soloSuper: true },
   { key: 'condominios', label: 'Condominios', icon: 'building', global: true },
+  { key: 'cotizaciones', label: 'Cotizaciones', icon: 'inbox', global: true },
   { key: 'finanzas', label: 'Finanzas', icon: 'money' },
   { key: 'comunicados', label: 'Comunicados', icon: 'megaphone' },
   { key: 'encuestas', label: 'Encuestas', icon: 'vote' },
@@ -204,7 +206,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
         title="Administración SIIA"
         subtitle={condo?.nombre ?? 'Sin condominio seleccionado'}
         user={`${yo} · ${mios.rol}`}
-        actions={condo && !bloqueado && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
+        actions={((condo && !bloqueado) || puede('cotizaciones')) && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
       >
         {condos.error && <ErrorBox error={condos.error} retry={condos.reload} />}
         {!sec.global && lista.length > 0 && (
@@ -259,6 +261,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'visitas' && <VisitasAdmin />}
             {actual === 'mascotas' && <MascotasAdmin />}
             {actual === 'proveedores' && <ProveedoresAdmin />}
+            {actual === 'cotizaciones' && <CotizacionesAdmin key={cur} abrir={sub} />}
           </>
         )}
       </Shell>

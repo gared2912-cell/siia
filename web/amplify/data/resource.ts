@@ -538,6 +538,31 @@ const schema = a
       ])
       .authorization(admin),
 
+    // Solicitudes de cotización y mensajes de contacto del sitio público (Lambda siia-cotizaciones).
+    // Siguen pendientes hasta que un administrador marca «Respondido al solicitante».
+    Cotizacion: a
+      .model({
+        origen: a.string().required(), // COTIZACION | CONTACTO
+        estado: a.string().required(), // PENDIENTE | RESPONDIDA
+        nombre: a.string().required(),
+        telefono: a.string(),
+        correo: a.string(),
+        rol: a.string(),
+        tipoDesarrollo: a.string(),
+        unidades: a.integer(),
+        desarrollo: a.string(),
+        ubicacion: a.string(),
+        administracionActual: a.string(),
+        servicios: a.string().array(),
+        motivo: a.string(),
+        mensaje: a.string(),
+        pagina: a.string(),
+        respondidaEn: a.datetime(),
+        respondidaPor: a.json(), // { id, nombre, email }
+        notaRespuesta: a.string(),
+      })
+      .authorization(admin),
+
     // API para residentes y vigilantes (validada en la Lambda portal-api)
     portal: a
       .mutation()

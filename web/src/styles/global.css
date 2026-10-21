@@ -562,6 +562,19 @@ fieldset.field {
 .form-status[hidden] {
   display: none;
 }
+.form-status.is-error {
+  background: #fdecea;
+  border-color: #f5c2bd;
+  color: #8f1d14;
+}
+/* Campo trampa para robots: fuera de la vista y del teclado. */
+.trampa {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
 
 /* ---------- Prose (páginas legales) ---------- */
 .prose {

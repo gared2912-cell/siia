@@ -1,5 +1,6 @@
 // Envío de formularios de prospectos.
-// - Si el <form> tiene data-endpoint, se envía JSON por POST (p. ej. API Gateway/Lambda o Amplify, fase de integraciones).
+// - Si el <form> tiene data-endpoint, se envía JSON por POST a la función siia-cotizaciones (se guarda en el panel
+//   › Cotizaciones y llega por correo). data-origen dice si es COTIZACION o CONTACTO.
 // - Si no, se abre WhatsApp (si el <form> tiene data-whatsapp) o el correo con el mensaje ya redactado para que el prospecto lo envíe.
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
@@ -15,7 +16,7 @@ function collect(form: HTMLFormElement) {
   const lines: string[] = [];
   const seen = new Set<string>();
   for (const el of Array.from(form.elements) as Field[]) {
-    if (!el.name || el.type === 'submit' || el.name === 'consentimiento' || seen.has(el.name)) continue;
+    if (!el.name || el.type === 'submit' || el.name === 'consentimiento' || el.name === 'sitio_web' || seen.has(el.name)) continue;
     seen.add(el.name);
     let value: string;
     if (el.type === 'checkbox' || el.type === 'radio') {
@@ -50,11 +51,13 @@ export function initLeadForms() {
   document.querySelectorAll<HTMLFormElement>('[data-lead-form]').forEach((form) => {
     form.noValidate = true;
     const status = form.querySelector<HTMLElement>('[data-status]');
-    const showStatus = (msg: string) => {
+    const showStatus = (msg: string, error = false) => {
       if (!status) return;
       status.textContent = msg;
+      status.classList.toggle('is-error', error);
       status.hidden = false;
     };
+    const boton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
 
     form.addEventListener('input', (e) => {
       const el = e.target as Field;
@@ -72,18 +75,28 @@ export function initLeadForms() {
       const subject = form.dataset.subject ?? 'Contacto desde el sitio web';
 
       if (form.dataset.endpoint) {
+        if (boton) boton.disabled = true;
         try {
+          const trampa = form.querySelector<HTMLInputElement>('[name="sitio_web"]')?.value ?? '';
           const res = await fetch(form.dataset.endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject, ...data, page: location.pathname }),
+            body: JSON.stringify({ subject, origen: form.dataset.origen, ...data, sitio_web: trampa, page: location.pathname }),
           });
+          const r = await res.json().catch(() => ({}));
+          // Datos incompletos o demasiados envíos: se explica y se deja corregir.
+          if (res.status >= 400 && res.status < 500 && r?.error) {
+            showStatus(r.error, true);
+            return;
+          }
           if (!res.ok) throw new Error(String(res.status));
           form.reset();
-          showStatus('¡Gracias! Recibimos tu información y un asesor de SIIA te contactará muy pronto.');
+          showStatus('¡Gracias! Recibimos tu solicitud y un asesor de SIIA te contactará muy pronto.');
           return;
         } catch {
-          // Si el endpoint falla, se ofrece WhatsApp o correo como respaldo.
+          // Si el envío falla (sin conexión o error del servidor), se ofrece WhatsApp o correo como respaldo.
+        } finally {
+          if (boton) boton.disabled = false;
         }
       }
 

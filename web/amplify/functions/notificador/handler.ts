@@ -3,6 +3,7 @@
 // - Mensaje → de un residente: administradores (canal ADMIN) o vigilantes (canal CASETA);
 //             de la administración o la caseta: residentes de la unidad.
 // - Pago (en revisión), Incidente, Reserva (solicitada), Mascota (pendiente) → administradores con permiso.
+// - Cotizacion (formulario del sitio público) → administradores con acceso a Cotizaciones (de cualquier condominio).
 // Cada usuario recibe solo las categorías que no apagó y, si es administrador, solo de sus condominios y secciones.
 import type { DynamoDBStreamEvent } from 'aws-lambda';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
@@ -25,8 +26,8 @@ async function vigilantes(condominioId: string) {
   return (await byIndex('Perfil', 'byCondominio', 'condominioId', condominioId)).filter((p) => p.rol === 'VIGILANTE' && p.estado === 'APROBADO');
 }
 
-/** Administradores que atienden el condominio y cuyo rol incluye la categoría. */
-async function administradores(condominioId: string, categoria: string) {
+/** Administradores que atienden el condominio (null: cualquiera, p. ej. cotizaciones) y cuyo rol incluye la categoría. */
+async function administradores(condominioId: string | null, categoria: string) {
   const cat = CATEGORIAS_ADMIN.find((c) => c.key === categoria)!;
   const perfiles = (await scan('Perfil')).filter((p) => (p.rol === 'ADMIN' || p.rol === 'SUPERADMIN') && p.estado === 'APROBADO');
   const roles = new Map<string, Item | undefined>();
@@ -34,7 +35,7 @@ async function administradores(condominioId: string, categoria: string) {
   for (const p of perfiles) {
     if (p.rol === 'ADMIN') {
       const condos: string[] = p.condominiosAdmin ?? [];
-      if (!condos.includes('*') && !condos.includes(condominioId)) continue;
+      if (condominioId && !condos.includes('*') && !condos.includes(condominioId)) continue;
       if (!roles.has(p.rolAdminId)) roles.set(p.rolAdminId, p.rolAdminId ? await get('RolAdmin', { id: p.rolAdminId }) : undefined);
       const rol = roles.get(p.rolAdminId);
       if (!rol) continue;
@@ -148,6 +149,16 @@ async function procesar(modelo: string, r: Item): Promise<number> {
         body: `${condo} · ${unidad}`,
         url: panel(r.condominioId, 'mascotas'),
         tag: `mascota-${r.id}`,
+      });
+    }
+
+    case 'Cotizacion': {
+      const contacto = r.origen === 'CONTACTO';
+      return enviar(await administradores(null, 'cotizaciones'), 'cotizaciones', {
+        title: contacto ? `Mensaje del sitio web: ${corto(r.nombre ?? '', 50)}` : `Solicitud de cotización: ${corto(r.nombre ?? '', 50)}`,
+        body: [r.desarrollo, r.tipoDesarrollo, r.unidades ? `${r.unidades} unidades` : null, r.ubicacion, contacto ? r.motivo : null].filter(Boolean).join(' · ') || 'Desde el sitio web',
+        url: `/admin/#/cotizaciones/${r.id}`,
+        tag: `cotizacion-${r.id}`,
       });
     }
   }

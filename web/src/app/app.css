@@ -2671,3 +2671,58 @@ table.tbl {
   justify-content: space-between;
   align-items: center;
 }
+
+/* ---------- Cotizaciones del sitio web (admin/Cotizaciones.tsx) ---------- */
+.cot-tarjeta.cot-pendiente {
+  border-left: 4px solid var(--teal);
+}
+.cot-icono {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--mint-wash);
+  color: var(--teal-dark);
+}
+.cot-icono svg {
+  width: 22px;
+  height: 22px;
+}
+.cot-datos {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+.cot-datos > div {
+  display: grid;
+  grid-template-columns: minmax(130px, 38%) 1fr;
+  gap: 4px 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cot-datos dt {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.cot-datos dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .cot-datos > div {
+    grid-template-columns: 1fr;
+  }
+}
+.cot-respondida {
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+}
+.cot-nota {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font-style: italic;
+}

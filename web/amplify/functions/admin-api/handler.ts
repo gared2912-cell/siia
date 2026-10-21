@@ -1926,6 +1926,49 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     );
   },
 
+  // ----- cotizaciones y mensajes del sitio público (Lambda siia-cotizaciones) -----
+  // Todas, de la más reciente a la más antigua; no dependen de un condominio.
+  async 'cotizaciones.lista'(_p, yo) {
+    exigir(yo, 'cotizaciones', 'ver');
+    return (await scan('Cotizacion'))
+      .map(({ __typename, ipHash, respondidaPor, ...c }) => {
+        // Quién la respondió: los administradores ven el nombre; el correo, solo el superadministrador.
+        const por = jsonDe(respondidaPor);
+        if (por && !yo.superadmin) delete por.email;
+        return { ...c, respondidaPor: por } as Item;
+      })
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  },
+
+  // «Respondido al solicitante»: deja de estar pendiente para todos y queda quién y cuándo la respondió.
+  async 'cotizaciones.responder'(p, yo) {
+    exigir(yo, 'cotizaciones', 'editar');
+    const id = str(p.id, 64);
+    const c = await get('Cotizacion', { id });
+    if (!c) fail('Solicitud no encontrada.');
+    if (c!.estado === 'RESPONDIDA') fail(`Ya la marcó como respondida ${jsonDe(c!.respondidaPor)?.nombre ?? 'otro administrador'}.`);
+    const respondidaPor = { id: yo.sub, nombre: yo.nombre, email: yo.email };
+    await update(
+      'Cotizacion',
+      { id },
+      { estado: 'RESPONDIDA', respondidaEn: now(), respondidaPor: JSON.stringify(respondidaPor), notaRespuesta: str(p.nota, 1000) || null },
+      { estado: 'PENDIENTE' },
+    ).catch((e) => {
+      if (e?.name === 'ConditionalCheckFailedException') fail('Otro administrador acaba de marcarla como respondida.');
+      throw e;
+    });
+    return { ok: true };
+  },
+
+  // Por si se marcó por error (solo superadministrador): vuelve a pendiente.
+  async 'cotizaciones.reabrir'(p, yo) {
+    exigirSuper(yo);
+    const id = str(p.id, 64);
+    if (!(await get('Cotizacion', { id }))) fail('Solicitud no encontrada.');
+    await update('Cotizacion', { id }, { estado: 'PENDIENTE', respondidaEn: null, respondidaPor: null, notaRespuesta: null });
+    return { ok: true };
+  },
+
   // ----- suspender, eliminar (papelera de 30 días) y restaurar condominios (solo superadministrador) -----
   async 'condominios.suspender'(p, yo) {
     const c = await condominioSuper(p, yo);

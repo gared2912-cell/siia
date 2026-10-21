@@ -1,7 +1,8 @@
 import { defineBackend } from '@aws-amplify/backend';
-import { RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { FilterCriteria, FilterRule, StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda';
 import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
@@ -12,9 +13,10 @@ import { notificador } from './functions/notificador/resource';
 import { recargos } from './functions/recargos/resource';
 import { reservasVencidas } from './functions/reservas-vencidas/resource';
 import { papelera } from './functions/papelera/resource';
-import { AMBIENTE, CORREO_SES, PORTAL_URL, REMITENTE, SITIO, VAPID_PUBLICA } from './ambiente';
+import { cotizaciones } from './functions/cotizaciones/resource';
+import { AMBIENTE, CORREO_SES, ES_PRODUCCION, PORTAL_URL, REMITENTE, SITIO, VAPID_PUBLICA } from './ambiente';
 
-const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas, papelera });
+const backend = defineBackend({ auth, data, storage, adminApi, portalApi, notificador, recargos, reservasVencidas, papelera, cotizaciones });
 
 const { userPool } = backend.auth.resources;
 const tables = backend.data.resources.tables;
@@ -34,6 +36,21 @@ for (const fn of [backend.adminApi, backend.portalApi, backend.notificador, back
     }),
   );
 }
+
+// Formularios del sitio público (Cotizar y Contacto): URL pública sin sesión; solo escribe en Cotizacion.
+const cotizacionesFn = backend.cotizaciones.resources.lambda;
+tables.Cotizacion.grantWriteData(cotizacionesFn);
+tables.Cotizacion.grant(cotizacionesFn, 'dynamodb:Scan');
+backend.cotizaciones.addEnvironment('TABLE_Cotizacion', tables.Cotizacion.tableName);
+const urlCotizaciones = cotizacionesFn.addFunctionUrl({
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: ES_PRODUCCION ? [SITIO, 'https://www.siia.casa'] : [SITIO, 'http://localhost:4321'],
+    allowedMethods: [HttpMethod.POST],
+    allowedHeaders: ['content-type'],
+    maxAge: Duration.hours(1),
+  },
+});
 
 // Los usuarios de un grupo de Cognito reciben el rol IAM de su grupo (no el rol autenticado genérico),
 // así que la regla "cada residente su carpeta" de defineStorage no les aplica. Se replica aquí.
@@ -190,11 +207,11 @@ backend.recargos.resources.lambda.addToRolePolicy(
 for (const fn of [backend.adminApi, backend.portalApi, backend.notificador]) fn.addEnvironment('VAPID_PUBLIC_KEY', VAPID_PUBLICA);
 backend.recargos.addEnvironment('PORTAL_URL', PORTAL_URL);
 // El sitio lee estos datos de amplify_outputs.json (y los scripts de prueba se niegan a correr en producción).
-backend.addOutput({ custom: { ambiente: AMBIENTE, sitio: SITIO, vapidPublica: VAPID_PUBLICA } });
+backend.addOutput({ custom: { ambiente: AMBIENTE, sitio: SITIO, vapidPublica: VAPID_PUBLICA, cotizacionesUrl: urlCotizaciones.url } });
 
 // ---------- notificaciones push ----------
 // El notificador escucha los registros nuevos de estas tablas (los streams ya existen en las tablas de Amplify).
-for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Mascota']) {
+for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Mascota', 'Cotizacion']) {
   backend.notificador.resources.lambda.addEventSource(
     new DynamoEventSource(tables[modelo], {
       startingPosition: StartingPosition.LATEST,

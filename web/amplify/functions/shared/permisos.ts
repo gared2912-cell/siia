@@ -25,6 +25,8 @@ export const SECCIONES_PERMISO: { key: string; label: string; editar: string; so
   { key: 'amenidades', label: 'Amenidades y reservas', editar: 'Configurar amenidades y aprobar o rechazar reservas' },
   { key: 'visitas', label: 'Visitas (bitácora)', editar: '', soloVer: true },
   { key: 'mascotas', label: 'Mascota segura', editar: 'Aprobar o rechazar mascotas' },
+  // Cotizaciones del sitio web: de entrada solo los superadministradores; a un rol se le activa a mano.
+  { key: 'cotizaciones', label: 'Cotizaciones (sitio web)', editar: 'Marcar solicitudes como «Respondido al solicitante» (con «Solo ver»: verlas y descargar el Excel)' },
   { key: 'proveedores', label: 'Proveedores', editar: 'Crear proveedores, asignarles mantenimientos y condominios, contraseña, suspender y reactivar (con «Solo ver»: ver proveedores y sus reportes)' },
 ];
 
@@ -39,6 +41,11 @@ export const EXTRAS: { key: string; seccion: string; label: string }[] = [
 ];
 
 export type Permisos = { secciones: Record<string, Nivel>; extras: string[] };
+
+/** Secciones que ningún rol inicial trae: el superadministrador decide a quién activárselas. */
+const SOLO_SUPER_DE_ENTRADA = ['cotizaciones'];
+const sinSoloSuper = (secciones: Record<string, Nivel>) =>
+  Object.fromEntries(Object.entries(secciones).filter(([k]) => !SOLO_SUPER_DE_ENTRADA.includes(k))) as Record<string, Nivel>;
 
 export const SIN_PERMISOS: Permisos = { secciones: {}, extras: [] };
 
@@ -77,7 +84,7 @@ export const ROLES_INICIALES: { id: string; nombre: string; descripcion: string;
     id: 'rol-general',
     nombre: 'Administrador general',
     descripcion: 'Gestiona todo en sus condominios asignados.',
-    permisos: TODOS_LOS_PERMISOS,
+    permisos: { ...TODOS_LOS_PERMISOS, secciones: sinSoloSuper(TODOS_LOS_PERMISOS.secciones) },
   },
   {
     id: 'rol-contador',
@@ -113,7 +120,7 @@ export const ROLES_INICIALES: { id: string; nombre: string; descripcion: string;
     nombre: 'Solo consulta',
     descripcion: 'Ve todas las secciones sin poder modificar nada (comité de vigilancia, auditoría).',
     permisos: {
-      secciones: Object.fromEntries(SECCIONES_PERMISO.map((s) => [s.key, 'ver'])) as Record<string, Nivel>,
+      secciones: sinSoloSuper(Object.fromEntries(SECCIONES_PERMISO.map((s) => [s.key, 'ver'])) as Record<string, Nivel>),
       extras: [],
     },
   },

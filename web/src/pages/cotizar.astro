@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import PageHero from '../components/PageHero.astro';
 import Icon from '../components/Icon.astro';
 import { photo } from '../data/images';
+import { endpointFormularios } from '../data/formularios';
 import { propertyTypes, quoteNote, services, site, telefonosVisibles } from '../data/site';
 
 const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarrollador / constructora', 'Otro'];
@@ -24,6 +25,8 @@ const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarro
       <form
         class="card form quote__form"
         data-lead-form
+        data-origen="COTIZACION"
+        data-endpoint={endpointFormularios}
         data-subject="Quiero cotizar la administración de mi condominio"
         data-whatsapp={site.mostrarWhatsapp ? site.whatsapp : undefined}
       >
@@ -121,6 +124,7 @@ const roles = ['Mesa directiva', 'Comité de vigilancia', 'Condómino', 'Desarro
             }
           </span>
         </label>
+        <div class="trampa" aria-hidden="true"><label>Sitio web <input name="sitio_web" type="text" tabindex="-1" autocomplete="off" /></label></div>
         <button class="btn" type="submit">Solicitar cotización <Icon name="arrow" /></button>
         <p class="form-status" role="status" hidden data-status></p>
       </form>

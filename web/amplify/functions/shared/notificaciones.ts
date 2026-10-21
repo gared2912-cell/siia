@@ -27,6 +27,7 @@ export const CATEGORIAS_ADMIN: (Categoria & { seccion: string; nivel: 'ver' | 'e
   { key: 'incidentes', label: 'Incidentes nuevos', desc: 'Un residente reporta una falla o incidente.', seccion: 'incidentes', nivel: 'ver' },
   { key: 'reservas', label: 'Reservas por aprobar', desc: 'Solicitud de reserva de una amenidad.', seccion: 'amenidades', nivel: 'editar' },
   { key: 'mascotas', label: 'Mascotas por validar', desc: 'Un residente registra una mascota.', seccion: 'mascotas', nivel: 'editar' },
+  { key: 'cotizaciones', label: 'Cotizaciones del sitio web', desc: 'Alguien pide una cotización o escribe desde el sitio.', seccion: 'cotizaciones', nivel: 'ver' },
 ];
 
 /** Categoría de residente de cada tipo de aviso (los avisos son lo que aparece en la campana del portal). */
