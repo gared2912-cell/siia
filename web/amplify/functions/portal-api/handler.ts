@@ -54,6 +54,18 @@ const pub = (c: Item) => ({
 });
 
 const sinPrivados = ({ userId, __typename, ...rest }: Item) => rest;
+/** Etapas del seguimiento de un incidente (JSON guardado como texto, a veces dos veces). */
+function pasosIncidente(v: unknown): Item[] {
+  let h = v;
+  for (let k = 0; k < 2 && typeof h === 'string'; k++) {
+    try {
+      h = JSON.parse(h);
+    } catch {
+      h = [];
+    }
+  }
+  return Array.isArray(h) ? h : [];
+}
 
 // ---------- utilidades ----------
 const s3 = new S3Client({});
@@ -339,8 +351,25 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   // ----- Incidentes y mantenimientos -----
   async 'incidentes.lista'({ unidad }) {
     const items = await byIndex('Incidente', 'byUnidad', 'unidadId', unidad!.id);
-    // La bitácora interna (quién atendió y sus fotos) no se comparte con el residente.
-    return items.sort(newest).map(({ historial, evidenciaPath, ...i }) => sinPrivados(i));
+    // El residente ve todo el seguimiento (etapa, descripción, fecha y foto de evidencia), sin el nombre ni el
+    // correo de quién lo atendió: para él lo hizo «Administración».
+    return Promise.all(
+      items.sort(newest).map(async ({ historial, evidenciaPath, ...i }) => ({
+        ...sinPrivados(i),
+        // Foto del reporte: la ve cualquier residente de la unidad (la carpeta de quien la subió es privada).
+        fotoUrl: i.fotoPath ? await fotoUrl(i.fotoPath) : null,
+        seguimiento: await Promise.all(
+          pasosIncidente(historial).map(async (h) => ({
+            estado: h.estado,
+            respuesta: h.respuesta ?? null,
+            en: h.en,
+            reabierto: !!h.reabierto,
+            foto: h.fotoPath ? await fotoUrl(h.fotoPath) : null,
+            fotoPdf: /\.pdf$/i.test(h.fotoPath ?? ''),
+          })),
+        ),
+      })),
+    );
   },
 
   async 'incidentes.crear'({ condominio, unidad, sub, p }) {

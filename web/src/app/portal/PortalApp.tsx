@@ -11,7 +11,7 @@ import { Finanzas } from './Finanzas';
 import { Visitas } from './Visitas';
 import { Comunicados } from './Comunicados';
 import { Chat } from './Chat';
-import { Incidentes } from './Incidentes';
+import { Incidentes, Mantenimientos } from './Incidentes';
 import { Amenidades } from './Amenidades';
 import { Mascotas } from './Mascotas';
 
@@ -167,7 +167,8 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
     ...(has('finanzas') ? [{ key: 'finanzas', label: 'Finanzas', icon: 'money' }] : []),
     ...(has('visitas') ? [{ key: 'visitas', label: 'Visitas', icon: 'qr' }] : []),
     ...(has('amenidades') ? [{ key: 'amenidades', label: 'Reservas', icon: 'calendar' }] : []),
-    ...(has('incidentes') || has('mantenimientos') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert' }] : []),
+    ...(has('incidentes') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert' }] : []),
+    ...(has('mantenimientos') ? [{ key: 'mantenimientos', label: 'Mantenimientos', icon: 'tools' }] : []),
     ...(has('comunicados') || has('encuestas') ? [{ key: 'comunicados', label: 'Comunicados', icon: 'megaphone' }] : []),
     ...(has('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: chatSinLeer }] : []),
     ...(has('mascotas') ? [{ key: 'mascotas', label: 'Mascotas', icon: 'paw' }] : []),
@@ -193,6 +194,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
       {actual === 'visitas' && <Visitas {...props} />}
       {actual === 'amenidades' && <Amenidades {...props} />}
       {actual === 'incidentes' && <Incidentes {...props} />}
+      {actual === 'mantenimientos' && <Mantenimientos {...props} />}
       {actual === 'comunicados' && <Comunicados {...props} />}
       {actual === 'chat' && <Chat key={cur} {...props} inicial={sub} />}
       {actual === 'mascotas' && <Mascotas {...props} />}

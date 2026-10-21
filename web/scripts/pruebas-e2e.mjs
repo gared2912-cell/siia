@@ -767,17 +767,36 @@ try {
     X.incidente = i.id;
     esperar(i.estado === 'ABIERTO', i.estado);
   });
-  await prueba('Administrador atiende el incidente y ve la foto', async () => {
+  // Etapa con foto de evidencia (como en el panel): URL firmada, subir la foto y registrar la etapa.
+  const etapa = async (estado, respuesta, contenido) => {
+    const s = await ok(ag.admin('incidentes.subirEvidencia', { incidenteId: X.incidente, id: X.incidente, nombre: `evidencia-e2e-${estado}.jpg`, tamano: contenido.length }));
+    esperar((await fetch(s.url, { method: 'PUT', headers: { 'Content-Type': s.contentType }, body: contenido })).ok, 'no subió la evidencia');
+    return ok(ag.admin('incidentes.atender', { incidenteId: X.incidente, id: X.incidente, estado, respuesta, fotoPath: s.path }));
+  };
+  await prueba('Administrador atiende el incidente por etapas y ve la foto', async () => {
     const { url } = await ok(ag.admin('archivo', { model: 'Incidente', id: X.incidente }));
     esperar((await fetch(url)).ok, 'foto no descargable');
-    await ok(ag.db('Incidente', 'update', { input: { id: X.incidente, estado: 'EN_PROCESO', respuesta: 'El plomero va mañana a las 10 h.' } }));
+    await etapa('EN_SEGUIMIENTO', 'Revisamos el registro: hay una fuga.', 'foto 1');
+    await etapa('EN_PROCESO', 'El plomero va mañana a las 10 h.', 'foto 2');
     const l = await hasta(() => ok(r1.portal('incidentes.lista')), (x) => x[0]?.estado === 'EN_PROCESO');
     esperar(l[0].respuesta?.includes('plomero'), 'sin respuesta');
+  });
+  await prueba('Residente ve todo el seguimiento del incidente con sus fotos', async () => {
+    const [i] = await ok(r1.portal('incidentes.lista'));
+    const s = i.seguimiento ?? [];
+    esperar(s.length === 2 && s[0].estado === 'EN_SEGUIMIENTO' && s[1].respuesta.includes('plomero'), JSON.stringify(s).slice(0, 200));
+    esperar((await (await fetch(s[0].foto)).text()) === 'foto 1' && (await (await fetch(s[1].foto)).text()) === 'foto 2', 'fotos de evidencia no visibles');
+    esperar(!JSON.stringify(i).includes('@') && !('historial' in i) && !('porNombre' in s[0]), 'expone quién lo atendió');
+    return '2 etapas con foto, sin datos de quién atendió';
   });
   await prueba('Mantenimiento programado visible para residentes', async () => {
     await ok(ag.db('Mantenimiento', 'create', { input: { condominioId: X.robles, titulo: 'Poda de árboles', tipo: 'PREVENTIVO', area: 'Áreas verdes', fecha: manana, estado: 'PROGRAMADO', proveedor: 'Jardines QRO' } }));
     const l = await hasta(() => ok(r2.portal('mantenimientos.lista')), (x) => x.length === 1);
     esperar(l[0]?.titulo === 'Poda de árboles', JSON.stringify(l));
+    const a = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((y) => y.tipo === 'MANTENIMIENTO'));
+    const av = a.avisos.find((y) => y.tipo === 'MANTENIMIENTO');
+    esperar(av.titulo === 'Mantenimiento programado: Poda de árboles' && av.texto.includes('Áreas verdes'), JSON.stringify(av));
+    return av.titulo;
   });
   await prueba('Alta de amenidades (con y sin aprobación)', async () => {
     const a1 = await ok(ag.db('Amenidad', 'create', { input: { condominioId: X.robles, nombre: 'Salón de eventos', horaApertura: '10:00', horaCierre: '22:00', maxHoras: 5, capacidad: 50, costo: 800, requiereAprobacion: true, activa: true } }));
@@ -1033,7 +1052,7 @@ try {
   await prueba('Cada rol ve solo sus tipos de notificación', async () => {
     const keys = async (ses) => (await ok(api(ses)('notificaciones.estado'))).categorias.map((c) => c.key).join(',');
     const r = { residente: await keys(r1), vigilante: await keys(g1), contadora: await keys(ct), operacion: await keys(op), general: await keys(ag) };
-    esperar(r.residente === 'pagos,caseta,comunicados,tramites,chat', `residente: ${r.residente}`);
+    esperar(r.residente === 'pagos,caseta,comunicados,tramites,mantenimientos,chat', `residente: ${r.residente}`);
     esperar(r.vigilante === 'chat,accesos', `vigilante: ${r.vigilante}`);
     esperar(r.contadora === 'pagos,chat', `contadora: ${r.contadora}`);
     esperar(r.operacion === 'chat,incidentes,reservas,mascotas', `operación: ${r.operacion}`);

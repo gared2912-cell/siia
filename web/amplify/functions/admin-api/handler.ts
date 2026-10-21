@@ -301,6 +301,35 @@ async function perfilesVisibles(yo: Yo) {
   return visibles.map(({ __typename, ...p }) => p);
 }
 
+/**
+ * Aviso a todas las unidades cuando se programa (o cambia de fecha) un mantenimiento: les llega a la campana y como
+ * notificación. Solo si el condominio tiene el servicio de mantenimientos y aún no está terminado ni ya pasó.
+ */
+async function avisarMantenimiento(m: Item, reprogramado: boolean) {
+  if (m.estado === 'TERMINADO' || (m.fecha && m.fecha < hoyMX())) return;
+  const c = await get('Condominio', { id: m.condominioId });
+  if (!c || !(c.modulos ?? []).includes('mantenimientos')) return;
+  const cuando = m.fecha
+    ? new Date(`${m.fecha}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Mexico_City' })
+    : '';
+  const texto = [cuando && `${reprogramado ? 'Nueva fecha' : 'Fecha'}: ${cuando}`, m.area && `Área: ${m.area}`, m.notas].filter(Boolean).join(' · ');
+  const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', m.condominioId);
+  for (let i = 0; i < unidades.length; i += 25) {
+    await Promise.all(
+      unidades.slice(i, i + 25).map((u) =>
+        put('Aviso', {
+          condominioId: m.condominioId,
+          unidadId: u.id,
+          tipo: 'MANTENIMIENTO',
+          titulo: `${reprogramado ? 'Mantenimiento reprogramado' : 'Mantenimiento programado'}: ${str(m.titulo, 100)}`,
+          texto: texto.slice(0, 1000),
+          leido: false,
+        }),
+      ),
+    );
+  }
+}
+
 async function db(p: Item, yo: Yo) {
   const m = str(p.model, 40);
   const op = str(p.op, 60);
@@ -407,6 +436,7 @@ async function db(p: Item, yo: Yo) {
     if (MODELOS_FIRMADOS.has(m)) input.firma = selloFirma();
     const creado = resultado(await M.create(input));
     registrarCambio(m, 'alta', undefined, creado);
+    if (m === 'Mantenimiento') await avisarMantenimiento(creado, false);
     // Un ADMIN con condominios específicos queda asignado al condominio que creó.
     if (m === 'Condominio' && yo.condos !== '*' && creado?.id) {
       await update('Perfil', { userId: yo.sub }, { condominiosAdmin: [...yo.condos, creado.id] });
@@ -459,7 +489,9 @@ async function db(p: Item, yo: Yo) {
       return actualizar({ id: actual!.id, ...(nota !== undefined ? { nota } : {}) });
     }
     if (m === 'Reserva' && (input.estado === 'RECHAZADA' || input.estado === 'CANCELADA')) await cancelarCargoReserva(actual!.id);
-    return actualizar(input);
+    const r = await actualizar(input);
+    if (m === 'Mantenimiento' && cambian.includes('fecha')) await avisarMantenimiento({ ...actual!, ...input }, true);
+    return r;
   }
 
   fail('Operación no permitida.');

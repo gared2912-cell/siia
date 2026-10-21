@@ -12,6 +12,7 @@ export const CATEGORIAS_RESIDENTE: Categoria[] = [
   { key: 'caseta', label: 'Caseta y visitas', desc: 'Llegada de visitas, paquetería y alertas de caseta.' },
   { key: 'comunicados', label: 'Comunicados y encuestas', desc: 'Avisos generales de la administración.' },
   { key: 'tramites', label: 'Mis trámites', desc: 'Respuesta a incidentes, reservas y registro de mascotas.' },
+  { key: 'mantenimientos', label: 'Mantenimientos', desc: 'Mantenimientos programados o reprogramados en tu condominio.' },
   { key: 'chat', label: 'Mensajes', desc: 'Respuestas de la administración o de la caseta en el chat.' },
 ];
 
@@ -42,6 +43,8 @@ export function categoriaDeAviso(tipo?: string | null): string {
     case 'RESERVA':
     case 'MASCOTA':
       return 'tramites';
+    case 'MANTENIMIENTO':
+      return 'mantenimientos';
     default:
       return 'comunicados';
   }

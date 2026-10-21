@@ -21,7 +21,7 @@ const DESTINO: Record<string, string> = {
   visitas: 'visitas',
   amenidades: 'amenidades',
   incidentes: 'incidentes',
-  mantenimientos: 'incidentes',
+  mantenimientos: 'mantenimientos',
   comunicados: 'comunicados',
   encuestas: 'comunicados',
   chat: 'chat',

@@ -444,6 +444,11 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
         <Field label="Notas (visibles para residentes)">
           <textarea maxLength={2000} value={f.notas} onChange={set('notas')} />
         </Field>
+        {f.estado !== 'TERMINADO' && (
+          <p className="small muted" style={{ margin: 0 }}>
+            {m.id ? 'Si cambias la fecha, se avisa' : 'Al guardarlo se avisa'} a todos los residentes con una notificación.
+          </p>
+        )}
         <button className="btn-app" disabled={busy}>
           Guardar
         </button>
