@@ -104,6 +104,7 @@ backend.adminApi.resources.lambda.addToRolePolicy(
       'cognito-idp:AdminGetUser',
       'cognito-idp:AdminUserGlobalSignOut',
       'cognito-idp:AdminSetUserPassword',
+      'cognito-idp:AdminUpdateUserAttributes',
       'cognito-idp:ListUsers',
       'cognito-idp:ListUsersInGroup',
     ],
