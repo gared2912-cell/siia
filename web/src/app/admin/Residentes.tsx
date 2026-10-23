@@ -931,7 +931,8 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
     }
   };
   const tel = (p.telefono ?? '').replace(/\D/g, '');
-  const mensaje = `Hola ${p.nombre ?? ''}. Tus datos para entrar ${destino} SIIA (${location.origin}/${esAdmin ? 'admin' : 'portal'}/):\nUsuario: ${p.email}\nContraseña: ${generada}`;
+  // El enlace va solo en su renglón: WhatsApp toma como parte de la liga cualquier signo pegado a ella.
+  const mensaje = `Hola ${p.nombre ?? ''}. Tus datos para entrar ${destino} SIIA:\n\n${location.origin}/${esAdmin ? 'admin' : 'portal'}\n\nUsuario: ${p.email}\nContraseña: ${generada}`;
 
   return (
     <Modal title={`Contraseña de ${nombre}`} onClose={onClose}>
