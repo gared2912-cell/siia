@@ -3,7 +3,8 @@ import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './ui';
-import { camposAcceso } from './camposAcceso';
+import { accesoDeLiga, camposConLiga } from './camposAcceso';
+import { ClaveCorreo } from './ClaveCorreo';
 import { SesionLista } from './sesion';
 import { AppYNotificaciones, SugerenciaApp, bajaDeEsteDispositivo, useSincronizarPush, type ApiApp } from './AppMovil';
 
@@ -36,7 +37,8 @@ export function Acceso({
 }
 
 function Puerta({ kicker, hideSignUp, foot, children }: { kicker: string; hideSignUp?: boolean; foot?: ReactNode; children: ReactNode }) {
-  const { authStatus } = useAuthenticator((c) => [c.authStatus]);
+  const { authStatus, route } = useAuthenticator((c) => [c.authStatus, c.route]);
+  const [liga] = useState(accesoDeLiga);
   if (authStatus === 'authenticated') return <>{children}</>;
   if (authStatus === 'configuring') return null;
   return (
@@ -48,10 +50,11 @@ function Puerta({ kicker, hideSignUp, foot, children }: { kicker: string; hideSi
           </a>
           <span className="auth-kicker">{kicker}</span>
         </div>
+        {liga && route !== 'forceNewPassword' && <ClaveCorreo acceso={liga} />}
         <Authenticator
           hideSignUp={hideSignUp}
           loginMechanisms={['email']}
-          formFields={camposAcceso}
+          formFields={camposConLiga(liga)}
         />
         {foot && <div className="auth-foot">{foot}</div>}
       </div>

@@ -314,7 +314,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
       {modal?.t === 'masiva' && <AltaMasiva perfiles={perfiles.data ?? []} actuales={filasActuales} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />}
       {modal?.t === 'vigilante' && <AgregarVigilante onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />}
       {modal?.t === 'unidad' && (
-        <EditarUnidad u={modal.u} residentes={residentesDe(delCondo, modal.u.id)} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />
+        <EditarUnidad u={modal.u} residentes={residentesDe(delCondo, modal.u.id)} perfiles={perfiles.data ?? []} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />
       )}
       {modal?.t === 'contrasena' && (
         <Contrasena p={modal.p} sinPrimerIngreso={sinPrimerIngreso(modal.p)} onClose={() => (setModal(null), cuentas.reload(true))} />
@@ -331,7 +331,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
 }
 
 /** Envía filas al servidor en grupos de 20 (crea unidades y da de alta residentes). */
-async function importar(condominioId: string, filas: Omit<FilaMachote, 'linea'>[], enviarCorreo: boolean, avance?: (r: Resultado[]) => void) {
+async function importar(condominioId: string, filas: (Omit<FilaMachote, 'linea'> & { unidadId?: string })[], enviarCorreo: boolean, avance?: (r: Resultado[]) => void) {
   const out: Resultado[] = [];
   for (let i = 0; i < filas.length; i += 20) {
     const r = await adminCall<Resultado[]>('residentes.importar', { condominioId, filas: filas.slice(i, i + 20), enviarCorreo });
@@ -776,7 +776,7 @@ function CamposPersona({ d, onChange, disabled }: { d: DatosPersona; onChange: (
   );
 }
 
-function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residentes: Perfil[]; onClose: () => void; onDone: () => void }) {
+function EditarUnidad({ u, residentes, perfiles, onClose, onDone }: { u: Unidad; residentes: Perfil[]; perfiles: Perfil[]; onClose: () => void; onDone: () => void }) {
   const { puede, unidades, condoId } = useAdmin();
   const gestionaUnidad = puede('condominios', 'editar');
   const gestionaUsuarios = puede('usuarios', 'editar');
@@ -784,12 +784,24 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
   const [personas, setPersonas] = useState<DatosPersona[]>(() => residentes.map(datosDe));
   // Casa o departamento de cada residente: cambiarla aquí lo mueve de unidad.
   const [destino, setDestino] = useState<string[]>(() => residentes.map((p) => p.unidadId ?? u.id));
+  // Unidad dada de alta sin residente: aquí se le agrega.
+  const agregaResidente = gestionaUsuarios && !residentes.length;
+  const [nuevo, setNuevo] = useState<DatosPersona>({ nombre: '', telefono: '', telefono2: '', email: '' });
+  const setN = (k: keyof DatosPersona) => (e: React.ChangeEvent<HTMLInputElement>) => setNuevo({ ...nuevo, [k]: e.target.value });
   const { run, busy } = useAction();
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const correos: string[] = [];
     let movidos = 0;
+    const enviar = conCorreo(e);
+    const correoNuevo = nuevo.email.trim().toLowerCase();
+    let alta: Resultado | undefined;
     const okk = await run(async () => {
+      if (agregaResidente && (nuevo.nombre.trim() || correoNuevo)) {
+        if (!correoNuevo) throw new Error('Escribe el correo del residente: es su usuario para entrar al portal.');
+        if (!correoValido(correoNuevo)) throw new Error('Revisa el correo del residente.');
+        if (perfiles.some((p) => p.email === correoNuevo)) throw new Error('Ya existe un usuario con ese correo.');
+      }
       const unidadCambia =
         f.etiqueta.trim() !== u.etiqueta || f.fechaEntrega !== (u.fechaEntrega ?? '') || f.propietario !== (u.propietario ?? '') || f.notas !== (u.notas ?? '');
       if (gestionaUnidad && unidadCambia) {
@@ -815,8 +827,17 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
             movidos++;
           }
         }
+      if (agregaResidente && correoNuevo) {
+        [alta] = await importar(
+          condoId!,
+          [{ numero: u.etiqueta, unidadId: u.id, nombre: nuevo.nombre, telefono: nuevo.telefono, telefono2: nuevo.telefono2, correo: correoNuevo, fechaEntrega: '' }],
+          enviar,
+        );
+        if (alta?.error) throw new Error(alta.error);
+      }
     }, 'Cambios guardados');
     if (okk) {
+      if (alta?.acceso) alert(`${f.etiqueta.trim() || u.etiqueta}: ${avisoAlta({ correoEnviado: alta.correo, correoPedido: enviar }, correoNuevo)}`);
       if (correos.length) alert(correos.join('\n\n'));
       if (movidos) alert(`${movidos === 1 ? 'El residente cambió' : 'Los residentes cambiaron'} de casa o departamento.`);
       onDone();
@@ -850,15 +871,38 @@ function EditarUnidad({ u, residentes, onClose, onDone }: { u: Unidad; residente
             )}
           </fieldset>
         ))}
+        {agregaResidente && (
+          <fieldset className="fld" style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, margin: 0, display: 'grid', gap: 12 }}>
+            <span>Residente</span>
+            <Field label="Nombre">
+              <input maxLength={120} value={nuevo.nombre} onChange={setN('nombre')} />
+            </Field>
+            <div className="form-2">
+              <Field label="Teléfono">
+                <input type="tel" maxLength={20} value={nuevo.telefono} onChange={setN('telefono')} />
+              </Field>
+              <Field label="Teléfono 2">
+                <input type="tel" maxLength={20} value={nuevo.telefono2} onChange={setN('telefono2')} />
+              </Field>
+            </div>
+            <Field label="Correo electrónico" hint="Es su usuario para entrar al portal. Déjalo vacío si aún no tienes sus datos.">
+              <input type="email" value={nuevo.email} onChange={setN('email')} />
+            </Field>
+          </fieldset>
+        )}
         <Field label="Propietario" hint="Si es distinto del residente (por ejemplo, unidad rentada).">
           <input maxLength={120} value={f.propietario} onChange={(e) => setF({ ...f, propietario: e.target.value })} disabled={!gestionaUnidad} />
         </Field>
         <Field label="Notas">
           <textarea maxLength={500} value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} disabled={!gestionaUnidad} />
         </Field>
-        <button className="btn-app" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar'}
-        </button>
+        {agregaResidente && nuevo.email.trim() ? (
+          <BotonesAlta busy={busy} />
+        ) : (
+          <button className="btn-app" disabled={busy}>
+            {busy ? 'Guardando…' : 'Guardar'}
+          </button>
+        )}
       </form>
     </Modal>
   );

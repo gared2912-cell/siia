@@ -1287,18 +1287,18 @@ async function validarAsignacion(p: Item, yo: Yo): Promise<Asignacion> {
   return { rol, ...vacio, condominioId: c!.id, unidadId: u!.id };
 }
 
-/** Contraseña temporal que cumple la política (mayúscula, minúscula, número y símbolo). */
+/**
+ * Contraseña temporal fácil de leer y copiar que cumple la política (mayúscula, minúscula, número y símbolo):
+ * tres sílabas, guion y cuatro dígitos, p. ej. «Pemaru-4827». Sin letras ni números que se confundan (0/O, 1/l).
+ */
 function temporal() {
-  const set = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnpqrstuvwxyz', '23456789', '$#!%*?'];
-  const chars = Array.from({ length: 12 }, (_, i) => {
-    const s = set[i < 4 ? i : randomInt(3)];
-    return s[randomInt(s.length)];
-  });
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join('');
+  const consonante = 'BCDFGHJKMNPRSTVZ';
+  const vocal = 'aeiu';
+  const digito = '23456789';
+  const de = (s: string) => s[randomInt(s.length)];
+  const silaba = () => de(consonante) + de(vocal);
+  const palabra = silaba() + silaba().toLowerCase() + silaba().toLowerCase();
+  return `${palabra}-${Array.from({ length: 4 }, () => de(digito)).join('')}`;
 }
 
 async function perfilDe(userId: string) {
@@ -1332,6 +1332,7 @@ async function altaUsuario(p: Item, yo: Yo) {
           { Name: 'email_verified', Value: 'true' },
           ...(nombre ? [{ Name: 'name', Value: nombre }] : []),
         ],
+        TemporaryPassword: temporal(),
         ...(enviar ? { DesiredDeliveryMediums: ['EMAIL' as const] } : { MessageAction: 'SUPPRESS' as const }),
       }),
     );
@@ -1378,7 +1379,7 @@ async function enviarAccesos(userId: string) {
   const email = u.UserAttributes?.find((a) => a.Name === 'email')?.Value;
   if (!email) fail('La cuenta no tiene correo registrado.');
   try {
-    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: email, MessageAction: 'RESEND', DesiredDeliveryMediums: ['EMAIL'] }));
+    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: email, MessageAction: 'RESEND', TemporaryPassword: temporal(), DesiredDeliveryMediums: ['EMAIL'] }));
   } catch (err: any) {
     if (sinCupoCorreo(err)) fail(AVISO_CUPO);
     throw err;
@@ -1789,26 +1790,30 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // fecha de entrega). Crea la unidad si no existe, guarda los cambios de la existente y, si trae correo, da de alta
   // al residente (con accesos por correo) o actualiza sus datos. Las celdas vacías no borran datos.
   async 'residentes.importar'(p, yo) {
-    exigir(yo, 'condominios', 'editar');
+    const filas: Item[] = Array.isArray(p.filas) ? p.filas.slice(0, 25) : [];
+    // Filas con unidadId: alta del residente en una unidad que ya existe (desde «Editar»), basta gestionar usuarios.
+    const soloResidentes = filas.length > 0 && filas.every((f) => f?.unidadId);
+    exigir(yo, soloResidentes ? 'usuarios' : 'condominios', 'editar');
     const c = await get('Condominio', { id: str(p.condominioId, 64) });
     if (!c) fail('Selecciona el condominio.');
     exigirCondo(yo, c!.id);
-    const filas: Item[] = Array.isArray(p.filas) ? p.filas.slice(0, 25) : [];
     const porClave = new Map((await byIndex('Unidad', 'byCondominio', 'condominioId', c!.id)).map((u) => [claveUnidad(u.etiqueta), u]));
     const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', c!.id);
     // enviarCorreo: false → altas y cambios de correo sin enviar accesos (se envían o se asigna contraseña después).
     const enviarCorreo = p.enviarCorreo !== false;
     const out: { etiqueta: string; unidad?: 'creada' | 'existente'; acceso?: boolean; correo?: boolean; cambios: string[]; error?: string }[] = [];
     for (const f of filas) {
-      const etiqueta = etiquetaUnidad(f?.numero, c!.tipoUnidad);
+      const fija = f?.unidadId ? [...porClave.values()].find((x) => x.id === str(f.unidadId, 64)) : undefined;
+      const etiqueta = fija?.etiqueta ?? etiquetaUnidad(f?.numero, c!.tipoUnidad);
       const r: (typeof out)[number] = { etiqueta, cambios: [] };
       out.push(r);
       try {
+        if (f?.unidadId && !fija) fail('No encontramos esa casa o departamento.');
         if (!etiqueta) fail('Falta el número de casa o departamento.');
         const email = str(f.correo, 200).toLowerCase();
         if (email) exigir(yo, 'usuarios', 'editar');
-        const fechaEntrega = /^\d{4}-\d{2}-\d{2}$/.test(f.fechaEntrega) ? f.fechaEntrega : null;
-        let u = porClave.get(claveUnidad(etiqueta));
+        const fechaEntrega = !fija && /^\d{4}-\d{2}-\d{2}$/.test(f.fechaEntrega) ? f.fechaEntrega : null;
+        let u = fija ?? porClave.get(claveUnidad(etiqueta));
         if (!u) {
           u = await put('Unidad', { condominioId: c!.id, etiqueta, fechaEntrega });
           porClave.set(claveUnidad(etiqueta), u);
