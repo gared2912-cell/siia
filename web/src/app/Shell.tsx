@@ -4,7 +4,7 @@ import '@aws-amplify/ui-react/styles.css';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './ui';
 import { accesoDeLiga, camposConLiga } from './camposAcceso';
-import { ClaveCorreo } from './ClaveCorreo';
+import { AvisoRestablecer, ClaveCorreo } from './ClaveCorreo';
 import { SesionLista } from './sesion';
 import { AppYNotificaciones, SugerenciaApp, bajaDeEsteDispositivo, useSincronizarPush, type ApiApp } from './AppMovil';
 
@@ -50,7 +50,8 @@ function Puerta({ kicker, hideSignUp, foot, children }: { kicker: string; hideSi
           </a>
           <span className="auth-kicker">{kicker}</span>
         </div>
-        {liga && route !== 'forceNewPassword' && <ClaveCorreo acceso={liga} />}
+        {liga && route === 'signIn' && <ClaveCorreo acceso={liga} />}
+        {(route === 'forgotPassword' || route === 'confirmResetPassword') && <AvisoRestablecer />}
         <Authenticator
           hideSignUp={hideSignUp}
           loginMechanisms={['email']}

@@ -34,6 +34,9 @@ I18n.putVocabulariesForLanguage('es', {
   'Password must have numbers': 'La contraseña debe tener números',
   'Password must have special characters': 'La contraseña debe tener un símbolo (por ejemplo $ ! # ?)',
   'Your passwords must match': 'Las contraseñas no coinciden',
+  'Invalid verification code provided, please try again.': 'El código no es correcto. Revísalo e inténtalo de nuevo.',
+  'Invalid code provided, please request a code again.': 'El código no es válido o ya venció. Pide uno nuevo.',
+  'Attempt limit exceeded, please try after some time.': 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
 });
 
 export const client = generateClient<Schema>();

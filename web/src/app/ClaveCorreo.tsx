@@ -30,3 +30,14 @@ export function ClaveCorreo({ acceso }: { acceso: AccesoLiga }) {
     </div>
   );
 }
+
+// Cognito no manda el código de «¿Olvidaste tu contraseña?» a cuentas que aún no entran por primera vez
+// (y responde como si lo hubiera enviado), así que se avisa antes de pedirlo.
+export function AvisoRestablecer() {
+  return (
+    <p style={{ background: '#e9faf8', borderRadius: 12, padding: '12px 14px', margin: '0 0 12px', color: '#3a3f55', fontSize: '.9rem', lineHeight: 1.5 }}>
+      ¿Aún no has entrado por primera vez? El código no te llegará: usa la contraseña temporal de tu correo de bienvenida o pide a
+      la administración que te reenvíe tu acceso.
+    </p>
+  );
+}

@@ -40,6 +40,9 @@ await sharp({ create: { width: 640, height: 640, channels: 4, background: '#ffff
 // Logotipo horizontal a color en PNG (fondo transparente) para reportes de Excel del panel
 await render(logoSvg('horizontal', 'color'), 900).png().toFile('public/marca/siia-horizontal.png');
 
+// Logotipo horizontal blanco en PNG para el encabezado teal de los correos (Gmail y Outlook no muestran SVG)
+await render(logoSvg('horizontal', 'white'), 480).png().toFile('public/marca/siia-horizontal-blanco.png');
+
 // Open Graph 1200×630: foto + logotipo blanco, sin recuadro
 const bg = await sharp('src/assets/fotos/acceso-fraccionamiento.webp').resize(1200, 630, { fit: 'cover' }).toBuffer();
 const shade = Buffer.from(`<svg width="1200" height="630"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#1f2440" stop-opacity=".88"/><stop offset=".75" stop-color="#1f2440" stop-opacity=".45"/><stop offset="1" stop-color="#1f2440" stop-opacity=".2"/></linearGradient></defs><rect width="1200" height="630" fill="url(#g)"/>

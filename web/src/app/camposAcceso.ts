@@ -9,6 +9,9 @@ export const camposAcceso = {
     username: { label: 'Correo electrónico', placeholder: 'tu@correo.com' },
     password: { label: 'Contraseña', placeholder: 'Tu contraseña' },
   },
+  forgotPassword: {
+    username: { label: 'Correo electrónico', placeholder: 'tu@correo.com' },
+  },
 };
 
 export type AccesoLiga = { usuario: string; clave: string };
@@ -47,5 +50,6 @@ export function camposConLiga(a: AccesoLiga | null) {
       username: { ...camposAcceso.signIn.username, defaultValue: a.usuario },
       password: { ...camposAcceso.signIn.password, defaultValue: a.clave },
     },
+    forgotPassword: { username: { ...camposAcceso.forgotPassword.username, defaultValue: a.usuario } },
   };
 }
