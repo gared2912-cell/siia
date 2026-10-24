@@ -3,8 +3,11 @@ import { adminCall, all, db, ok, type Schema } from '../api';
 import { Recibo, type ReciboData } from '../Recibo';
 import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
+import { HistorialVista } from '../HistorialVista';
+import type { DatosHistorial } from '../historialPdf';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { BalanceMensual, EgresosAdmin } from './Egresos';
+import { fechaIngreso } from './balance';
 import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
 import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
 
@@ -36,6 +39,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos' | 'amenidades'>(inicio ?? 'residentes');
   const [generar, setGenerar] = useState(false);
   const [cobranza, setCobranza] = useState(false);
+  const [excelPagos, setExcelPagos] = useState(false);
   const [cargo, setCargo] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const [filtroUnidad, setFiltroUnidad] = useState('');
@@ -195,6 +199,13 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
 
       {vista === 'ingresos' && tab === 'pagos' && (
         <section className="panel">
+          <div className="panel-head">
+            <h2>Pagos procesados</h2>
+            <button className="btn-app sm secondary" disabled={!procesados.length} onClick={() => setExcelPagos(true)}>
+              <Icon name="download" />
+              Descargar Excel
+            </button>
+          </div>
           {procesados.length ? (
             <div className="table-wrap">
               <table className="tbl tbl-tarjetas">
@@ -335,6 +346,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
         </section>
       )}
 
+      {excelPagos && <ExcelPagos pagos={procesados} cargos={cargos} onClose={() => setExcelPagos(false)} />}
       {cobranza && <ReporteCobranza pagos={pagos} cargos={cargos} onClose={() => setCobranza(false)} />}
       {generar && <GenerarCuotas onClose={() => setGenerar(false)} onDone={() => (setGenerar(false), setTab('cargos'), reload(true))} />}
       {cargo && <NuevoCargo onClose={() => setCargo(false)} onDone={() => (setCargo(false), setTab('cargos'), reload(true))} />}
@@ -515,7 +527,60 @@ function ReporteCobranza({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Ca
   );
 }
 
-/** Ingresos › Residentes: cada casa o departamento con su residente y su historial de pagos en PDF. */
+/** Excel de pagos procesados (aprobados y rechazados) en un rango de meses, con el formato de los reportes SIIA. */
+function ExcelPagos({ pagos, cargos, onClose }: { pagos: Pago[]; cargos: Cargo[]; onClose: () => void }) {
+  const { condo, unidades, firmaReporte } = useAdmin();
+  const hasta0 = periodoActual();
+  const primero = pagos.map((p) => fechaIngreso(p).slice(0, 7)).sort()[0] ?? hasta0;
+  const [desde, setDesde] = useState(primero < hasta0 ? primero : hasta0);
+  const [hasta, setHasta] = useState(hasta0);
+  const { run, busy } = useAction();
+  async function descargar(e: React.FormEvent) {
+    e.preventDefault();
+    const okk = await run(async () => {
+      const [{ descargarPagosExcel }, contactos] = await Promise.all([
+        import('./excelPagos'),
+        adminCall<Record<string, { nombre: string | null; telefono: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }),
+      ]);
+      await descargarPagosExcel({
+        condominio: condo!.nombre,
+        desde: desde <= hasta ? desde : hasta,
+        hasta: desde <= hasta ? hasta : desde,
+        hoy: hoy(),
+        unidades,
+        pagos,
+        cargos,
+        contactos,
+        generadoPor: firmaReporte,
+      });
+    }, 'Excel de pagos procesados descargado');
+    if (okk) onClose();
+  }
+  return (
+    <Modal title="Excel de pagos procesados" onClose={onClose}>
+      <form className="form" onSubmit={descargar}>
+        <p className="small muted" style={{ margin: 0 }}>
+          Cada pago aprobado o rechazado del periodo con su folio, unidad, residente, conceptos, monto y quién lo revisó; además un resumen por mes y otro por casa
+          o departamento.
+        </p>
+        <div className="grid-2">
+          <Field label="Desde">
+            <input required type="month" value={desde} onChange={(e) => setDesde(e.target.value)} />
+          </Field>
+          <Field label="Hasta">
+            <input required type="month" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+          </Field>
+        </div>
+        <button className="btn-app" disabled={busy}>
+          <Icon name="download" />
+          {busy ? 'Generando…' : 'Descargar Excel'}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+/** Ingresos › Residentes: cada casa o departamento con su residente; al tocarla se ve su historial de pagos y recibos, y se descargan en PDF. */
 function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] }) {
   const { condo, unidades, firmaReporte } = useAdmin();
   const contactos = useLoad(
@@ -523,32 +588,26 @@ function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] 
     [condo!.id],
   );
   const [buscar, setBuscar] = useState('');
-  const [bajando, setBajando] = useState<string | null>(null);
-  const { run } = useAction();
+  const [historial, setHistorial] = useState<DatosHistorial | null>(null);
   const nombre = (u: (typeof unidades)[number]) =>
     (contactos.data?.[u.id] ?? []).map((x) => x.nombre || x.email).join(', ') || u.propietario || '';
   const q = buscar.trim().toLowerCase();
   const lista = unidades.filter((u) => !q || `${u.etiqueta} ${nombre(u)}`.toLowerCase().includes(q));
+  const h = hoy();
+  // Lo vencido sin pagar (mismo criterio que Residentes): para saber de un vistazo quién está al corriente.
+  const vencidoDe = (id: string) => cargos.filter((c) => c.unidadId === id && c.estado === 'PENDIENTE' && c.vence && c.vence < h).reduce((s, c) => s + c.monto, 0);
 
-  const historial = (u: (typeof unidades)[number]) =>
-    run(async () => {
-      setBajando(u.id);
-      try {
-        const { descargarHistorial } = await import('../historialPdf');
-        await descargarHistorial({
-          condominio: condo!.nombre,
-          direccion: condo!.direccion,
-          unidad: u.etiqueta,
-          residente: nombre(u),
-          cargos: cargos.filter((c) => c.unidadId === u.id),
-          pagos: pagos.filter((p) => p.unidadId === u.id),
-          hoy: hoy(),
-          generadoPor: firmaReporte,
-        });
-      } finally {
-        setBajando(null);
-      }
-    }, `Historial de ${u.etiqueta} descargado`);
+  const abrir = (u: (typeof unidades)[number]) =>
+    setHistorial({
+      condominio: condo!.nombre,
+      direccion: condo!.direccion,
+      unidad: u.etiqueta,
+      residente: nombre(u),
+      cargos: cargos.filter((c) => c.unidadId === u.id),
+      pagos: pagos.filter((p) => p.unidadId === u.id),
+      hoy: h,
+      generadoPor: firmaReporte,
+    });
 
   return (
     <section className="panel">
@@ -559,23 +618,29 @@ function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] 
       {contactos.loading && !contactos.data ? (
         <Loading />
       ) : lista.length ? (
-        <ul className="list">
-          {lista.map((u) => (
-            <li key={u.id}>
-              <div className="list-main">
-                <strong>{u.etiqueta}</strong>
-                <div className="list-sub">{nombre(u) || 'Sin residente registrado'}</div>
-              </div>
-              <button className="btn-app sm secondary" disabled={bajando === u.id} onClick={() => historial(u)}>
-                <Icon name="download" />
-                {bajando === u.id ? 'Generando…' : 'Historial de pagos (PDF)'}
-              </button>
-            </li>
-          ))}
+        <ul className="list mascotas-lista">
+          {lista.map((u) => {
+            const vencido = vencidoDe(u.id);
+            return (
+              <li key={u.id}>
+                <button type="button" className="mascota-fila" onClick={() => abrir(u)} aria-label={`Ver historial de pagos de ${u.etiqueta}`}>
+                  <span className="list-main">
+                    <strong>{u.etiqueta}</strong>
+                    <span className="list-sub">{nombre(u) || 'Sin residente registrado'}</span>
+                  </span>
+                  <span className="mascota-fila-estado">
+                    <span className={`pill ${vencido > 0 ? 'mal' : 'ok'}`}>{vencido > 0 ? `Debe ${money(vencido)}` : 'Al corriente'}</span>
+                  </span>
+                  <Icon name="chevron-right" />
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <Empty icon="building">{q ? 'Sin resultados.' : 'El condominio no tiene casas o departamentos.'}</Empty>
       )}
+      {historial && <HistorialVista datos={historial} onClose={() => setHistorial(null)} />}
     </section>
   );
 }

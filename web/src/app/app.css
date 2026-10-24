@@ -2837,3 +2837,10 @@ table.tbl {
   width: 16px;
   height: 16px;
 }
+
+/* Historial de pagos: lista de recibos */
+.hist-titulo {
+  margin: 4px 0 2px;
+  font-size: 1rem;
+  color: var(--slate);
+}

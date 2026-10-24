@@ -1,7 +1,9 @@
 // Historial de pagos en pantalla (mismo cálculo que el PDF): para revisarlo mientras se atiende al residente y,
-// si lo pide, descargarlo en PDF desde aquí.
-import { Icon, Modal, fecha, money, useAction } from './ui';
-import { calcularHistorial, type DatosHistorial } from './historialPdf';
+// si lo pide, descargarlo en PDF desde aquí. Cada recibo aprobado se ve en la misma ventana (y se descarga).
+import { useState } from 'react';
+import { Archivo, Icon, Modal, fecha, money, useAction } from './ui';
+import { calcularHistorial, type DatosHistorial, type PagoHistorial } from './historialPdf';
+import { Recibo, type ReciboData } from './Recibo';
 
 const ESTADO: Record<string, { texto: string; clase: string }> = {
   PAGADO: { texto: 'Pagado', clase: 'ok' },
@@ -19,18 +21,49 @@ const mes = (p?: string | null) => {
 export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onClose: () => void }) {
   const h = calcularHistorial(datos);
   const { run, busy } = useAction();
+  const [recibo, setRecibo] = useState<{ data: ReciboData; comprobante?: string | null } | null>(null);
   const descargar = () =>
     run(async () => {
       const { descargarHistorial } = await import('./historialPdf');
       await descargarHistorial(datos);
     }, 'Historial descargado');
+  const recibos = datos.pagos
+    .filter((p) => p.estado === 'VALIDADO')
+    .sort((a, b) => String(b.fecha ?? b.validadoEn ?? '').localeCompare(String(a.fecha ?? a.validadoEn ?? '')));
+  const ver = (p: PagoHistorial) =>
+    setRecibo({
+      data: {
+        pago: { id: p.id, folio: p.folio ?? '', monto: p.monto, fecha: p.fecha ?? undefined, referencia: p.referencia ?? undefined, validadoEn: p.validadoEn ?? undefined },
+        cargos: datos.cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => ({ id: c.id, concepto: c.concepto, monto: c.monto })),
+        condominio: { nombre: datos.condominio, direccion: datos.direccion ?? undefined },
+        unidad: { etiqueta: datos.unidad, propietario: datos.residente ?? undefined },
+      },
+      comprobante: p.comprobantePath,
+    });
+
+  if (recibo)
+    return (
+      <Modal title={`Recibo ${recibo.data.pago.folio} · ${datos.unidad}`} onClose={onClose} wide>
+        <div className="stack">
+          <div className="row-actions" style={{ justifyContent: 'space-between' }}>
+            <button className="btn-app sm secondary" onClick={() => setRecibo(null)}>
+              <Icon name="chevron-left" />
+              Volver al historial
+            </button>
+            <Archivo path={recibo.comprobante} origen={{ model: 'Pago', id: recibo.data.pago.id }} label="Ver comprobante del residente" />
+          </div>
+          <Recibo data={recibo.data} />
+        </div>
+      </Modal>
+    );
 
   return (
     <Modal title={`Historial de pagos · ${datos.unidad}`} onClose={onClose} wide>
       <div className="stack">
         <div className="row-actions" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">
-            {datos.residente || 'Sin residente'} · {datos.condominio}
+            {datos.residente || 'Sin residente'} · {datos.condominio}{' '}
+            <span className={`pill ${h.vencido > 0 ? 'mal' : 'ok'}`}>{h.vencido > 0 ? 'Con adeudo vencido' : 'Al corriente'}</span>
           </span>
           <button className="btn-app sm" disabled={busy} onClick={descargar}>
             <Icon name="download" />
@@ -81,7 +114,15 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
                       <span className={`pill ${ESTADO[x.clave].clase}`}>{ESTADO[x.clave].texto}</span>
                     </td>
                     <td data-label="Pagado el">{x.pagadoEl ? fecha(x.pagadoEl) : '—'}</td>
-                    <td data-label="Recibo">{x.p?.folio ?? '—'}</td>
+                    <td data-label="Recibo">
+                      {x.p ? (
+                        <button className="linklike" style={{ whiteSpace: 'nowrap' }} onClick={() => ver(x.p!)}>
+                          {x.p.folio ?? 'Ver recibo'}
+                        </button>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
                   </tr>
                 ))
               ) : (
@@ -93,6 +134,32 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
               )}
             </tbody>
           </table>
+        </div>
+        <div>
+          <h3 className="hist-titulo">Recibos de pago ({recibos.length})</h3>
+          {recibos.length ? (
+            <ul className="list mascotas-lista">
+              {recibos.map((p) => (
+                <li key={p.id}>
+                  <button type="button" className="mascota-fila" onClick={() => ver(p)} aria-label={`Ver recibo ${p.folio ?? ''}`}>
+                    <span className="photo-thumb sin-foto">
+                      <Icon name="file" />
+                    </span>
+                    <span className="list-main">
+                      <strong>{p.folio ?? 'Recibo'}</strong>
+                      <span className="list-sub">Pagado el {fecha(p.fecha ?? p.validadoEn)}</span>
+                    </span>
+                    <span className="mascota-fila-estado">
+                      <strong>{money(p.monto)}</strong>
+                    </span>
+                    <Icon name="chevron-right" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="small muted">Aún no hay recibos aprobados.</p>
+          )}
         </div>
       </div>
     </Modal>

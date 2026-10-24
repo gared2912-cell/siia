@@ -1,5 +1,5 @@
 // Recibo de pago imprimible (se genera a partir de un pago validado con folio).
-import { Icon, fecha, money } from './ui';
+import { Icon, fecha, money, useAction } from './ui';
 
 export type ReciboData = {
   pago: { id: string; folio?: string; monto: number; fecha?: string; referencia?: string; validadoEn?: string };
@@ -15,6 +15,12 @@ export function Recibo({ data }: { data: ReciboData }) {
     window.print();
     setTimeout(() => document.body.classList.remove('printing'), 500);
   };
+  const { run, busy } = useAction();
+  const descargar = () =>
+    run(async () => {
+      const { descargarRecibo } = await import('./reciboPdf');
+      await descargarRecibo(data);
+    }, 'Recibo descargado');
   return (
     <>
       <div className="recibo">
@@ -68,9 +74,13 @@ export function Recibo({ data }: { data: ReciboData }) {
         </p>
       </div>
       <div className="row-actions" style={{ marginTop: 12 }}>
-        <button className="btn-app" onClick={imprimir}>
+        <button className="btn-app" disabled={busy} onClick={descargar}>
+          <Icon name="download" />
+          {busy ? 'Generando…' : 'Descargar PDF'}
+        </button>
+        <button className="btn-app secondary" onClick={imprimir}>
           <Icon name="print" />
-          Imprimir o guardar PDF
+          Imprimir
         </button>
       </div>
     </>

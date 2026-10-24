@@ -124,8 +124,8 @@ export function calcularCobranza(o: OpcionesCobranza) {
   };
 }
 
-// ---------- Formato ----------
-function encabezado(wb: Workbook, ws: Worksheet, logo: string | undefined, ultimaCol: number, titulo: string, lineas: [string, string]) {
+// ---------- Formato (también lo usan los Excel de pagos, ver excelPagos.ts) ----------
+export function encabezado(wb: Workbook, ws: Worksheet, logo: string | undefined, ultimaCol: number, titulo: string, lineas: [string, string]) {
   [1, 2, 3].forEach((r) => (ws.getRow(r).height = 22));
   if (logo) ws.addImage(wb.addImage({ base64: logo, extension: 'png' }), { tl: { col: 0.15, row: 0.25 }, ext: { width: 175, height: 59 } });
   const desde = Math.max(3, ultimaCol - 4);
@@ -145,7 +145,7 @@ function encabezado(wb: Workbook, ws: Worksheet, logo: string | undefined, ultim
 }
 
 /** Recuadros de indicadores en una fila: [titulo, valor, detalle, formato, colorDeFondo]. */
-function indicadores(ws: Worksheet, r: number, cajas: { titulo: string; valor: number; detalle: string; fmt: string; fill: string; color?: string; desde: number; hasta: number }[]) {
+export function indicadores(ws: Worksheet, r: number, cajas: { titulo: string; valor: number; detalle: string; fmt: string; fill: string; color?: string; desde: number; hasta: number }[]) {
   ws.getRow(r).height = 18;
   ws.getRow(r + 1).height = 28;
   ws.getRow(r + 2).height = 16;
@@ -164,8 +164,8 @@ function indicadores(ws: Worksheet, r: number, cajas: { titulo: string; valor: n
   }
 }
 
-type Col = { header: string; width?: number; fmt?: string; h?: 'left' | 'center' | 'right'; wrap?: boolean };
-function encabezadosTabla(ws: Worksheet, r: number, cols: Col[], desde = 1) {
+export type Col = { header: string; width?: number; fmt?: string; h?: 'left' | 'center' | 'right'; wrap?: boolean };
+export function encabezadosTabla(ws: Worksheet, r: number, cols: Col[], desde = 1) {
   ws.getRow(r).height = 30;
   cols.forEach((c, i) => {
     const cell = ws.getCell(r, desde + i);
@@ -173,7 +173,7 @@ function encabezadosTabla(ws: Worksheet, r: number, cols: Col[], desde = 1) {
     estilo(cell, { b: true, size: 10, color: C.blanco, fill: C.tealOscuro, h: c.h ?? (c.fmt === PESOS ? 'right' : 'left'), wrap: true });
   });
 }
-function filaTabla(ws: Worksheet, r: number, cols: Col[], valores: (string | number | Date | null)[], cebra: boolean, desde = 1) {
+export function filaTabla(ws: Worksheet, r: number, cols: Col[], valores: (string | number | Date | null)[], cebra: boolean, desde = 1) {
   valores.forEach((v, i) => {
     const c = cols[i];
     const cell = ws.getCell(r, desde + i);
@@ -182,7 +182,7 @@ function filaTabla(ws: Worksheet, r: number, cols: Col[], valores: (string | num
     bordeAbajo(cell);
   });
 }
-function filaTotal(ws: Worksheet, r: number, n: number, etiqueta: string, valores: Record<number, number | string>, desde = 1) {
+export function filaTotal(ws: Worksheet, r: number, n: number, etiqueta: string, valores: Record<number, number | string>, desde = 1) {
   ws.getRow(r).height = 22;
   for (let i = 0; i < n; i++) {
     const cell = ws.getCell(r, desde + i);
@@ -193,7 +193,7 @@ function filaTotal(ws: Worksheet, r: number, n: number, etiqueta: string, valore
     bordeAbajo(cell, C.tealOscuro, 'medium');
   }
 }
-function tituloSeccion(ws: Worksheet, r: number, n: number, texto: string, sub?: string) {
+export function tituloSeccion(ws: Worksheet, r: number, n: number, texto: string, sub?: string) {
   ws.mergeCells(r, 1, r, n);
   const c = ws.getCell(r, 1);
   c.value = texto;
@@ -207,7 +207,7 @@ function tituloSeccion(ws: Worksheet, r: number, n: number, texto: string, sub?:
     ws.getRow(r + 1).height = 28;
   }
 }
-const ESTADOS: Record<string, [string, string]> = {
+export const ESTADOS: Record<string, [string, string]> = {
   Pagado: [C.verde, C.verdeClaro],
   'Al corriente': [C.verde, C.verdeClaro],
   'Por aprobar': [C.ambar, C.ambarClaro],
@@ -216,8 +216,12 @@ const ESTADOS: Record<string, [string, string]> = {
   'Sin pago': [C.rojo, C.rojoClaro],
   Moroso: [C.rojo, C.rojoClaro],
   'Sin cargos': [C.gris, C.cebra],
+  Aprobado: [C.verde, C.verdeClaro],
+  Rechazado: [C.rojo, C.rojoClaro],
+  Pendiente: [C.ambar, C.ambarClaro],
+  Vencido: [C.rojo, C.rojoClaro],
 };
-function pintarEstado(ws: Worksheet, r: number, col: number) {
+export function pintarEstado(ws: Worksheet, r: number, col: number) {
   const cell = ws.getCell(r, col);
   const [color, fill] = ESTADOS[String(cell.value)] ?? [C.texto, C.blanco];
   estilo(cell, { b: true, h: 'center', color, fill });
