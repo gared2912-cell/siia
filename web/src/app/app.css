@@ -2726,3 +2726,114 @@ table.tbl {
   white-space: pre-wrap;
   font-style: italic;
 }
+
+/* Mascotas (admin): fila compacta que abre el detalle */
+.mascotas-lista > li {
+  padding: 0;
+}
+.mascota-fila {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.mascota-fila:hover {
+  background: rgb(0 167 167 / 0.06);
+}
+.mascota-fila:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+.mascota-fila .photo-thumb {
+  width: 48px;
+  height: 48px;
+}
+.mascota-fila .sin-foto {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.mascota-fila .list-main {
+  display: flex;
+  flex-direction: column;
+}
+.mascota-fila-estado {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.mascota-fila > .ico {
+  flex: none;
+  color: var(--muted);
+}
+.mascota-datos {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+.mascota-datos dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.mascota-datos dd {
+  margin: 0;
+  color: var(--slate);
+}
+@media (max-width: 420px) {
+  .mascota-datos {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .mascota-datos dd {
+    margin-bottom: 8px;
+  }
+}
+
+/* Foto grande dentro de un detalle; al tocarla se abre en pantalla completa */
+.foto-grande {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 200px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-soft);
+  cursor: zoom-in;
+}
+/* Foto completa, sin recortar (las de celular suelen ser verticales) */
+.foto-grande img {
+  width: 100%;
+  max-height: min(60vh, 460px);
+  object-fit: contain;
+  display: block;
+}
+.foto-grande-zoom {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgb(15 17 28 / 0.62);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.foto-grande-zoom .ico {
+  width: 16px;
+  height: 16px;
+}

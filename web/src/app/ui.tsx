@@ -303,14 +303,18 @@ export function Archivo({
   path,
   label = 'Ver archivo',
   thumb,
+  grande,
   origen,
 }: {
   path?: string | null;
   label?: string;
   thumb?: boolean;
+  /** Foto a todo lo ancho; al tocarla se ve en pantalla completa. */
+  grande?: boolean;
   origen?: { model: 'Pago' | 'Incidente' | 'Mascota'; id: string };
 }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [ampliada, setAmpliada] = useState(false);
   useEffect(() => {
     let vivo = true;
     if (path) (origen ? urlArchivoAdmin(origen.model, origen.id) : urlArchivo(path)).then((u) => vivo && setUrl(u)).catch(() => undefined);
@@ -321,6 +325,20 @@ export function Archivo({
   }, [path, origen?.id]);
   if (!path) return null;
   const esImagen = /\.(png|jpe?g|webp|gif|heic)$/i.test(path);
+  if (grande && esImagen)
+    return url ? (
+      <>
+        <button type="button" className="foto-grande" onClick={() => setAmpliada(true)} aria-label="Ver foto en pantalla completa">
+          <img src={url} alt="" />
+          <span className="foto-grande-zoom">
+            <Icon name="image" /> Toca para ampliar
+          </span>
+        </button>
+        {ampliada && <VerImagen src={url} onClose={() => setAmpliada(false)} />}
+      </>
+    ) : (
+      <span className="foto-grande" />
+    );
   if (thumb && esImagen) return url ? <img className="photo-thumb" src={url} alt="" /> : <span className="photo-thumb" />;
   return url ? (
     <a href={url} target="_blank" rel="noopener" className="small">

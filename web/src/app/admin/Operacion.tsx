@@ -870,6 +870,7 @@ export function MascotasAdmin() {
     [condo!.id],
   );
   const { run, busy } = useAction();
+  const [abierta, setAbierta] = useState<Mascota | null>(null);
   const resolver = (m: Mascota, estado: 'APROBADA' | 'RECHAZADA') => {
     const nota = estado === 'RECHAZADA' ? prompt('Motivo (lo verá el residente):') : '';
     if (nota === null) return;
@@ -883,6 +884,7 @@ export function MascotasAdmin() {
           nota,
           'MASCOTA',
         );
+        setAbierta(null);
         reload(true);
       },
       estado === 'APROBADA' ? 'Mascota aprobada' : 'Registro rechazado',
@@ -900,29 +902,27 @@ export function MascotasAdmin() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <ul className="list">
+            <ul className="list mascotas-lista">
               {lista.map((m) => (
                 <li key={m.id}>
-                  <Archivo path={m.fotoPath} origen={{ model: 'Mascota', id: m.id }} thumb />
-                  <div className="list-main">
-                    <strong>{m.nombre}</strong> <Badge estado={m.estado} /> {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
-                    <div className="list-sub">
-                      {etiqueta(m.unidadId)} · {[m.especie, m.raza, m.color].filter(Boolean).join(' · ')}
-                    </div>
-                    <div className="list-sub">Vacuna antirrábica: {fecha(m.vacunaAntirrabica)}</div>
-                    {m.notas && <div className="small">{m.notas}</div>}
-                    <Firma item={m} alta={false} />
-                  </div>
-                  {puede('mascotas', 'editar') && m.estado === 'PENDIENTE' && (
-                    <div className="row-actions">
-                      <button className="btn-app sm" disabled={busy} onClick={() => resolver(m, 'APROBADA')}>
-                        Aprobar
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(m, 'RECHAZADA')}>
-                        Rechazar
-                      </button>
-                    </div>
-                  )}
+                  <button type="button" className="mascota-fila" onClick={() => setAbierta(m)}>
+                    {m.fotoPath ? (
+                      <Archivo path={m.fotoPath} origen={{ model: 'Mascota', id: m.id }} thumb />
+                    ) : (
+                      <span className="photo-thumb sin-foto">
+                        <Icon name="paw" />
+                      </span>
+                    )}
+                    <span className="list-main">
+                      <strong>{m.nombre}</strong>
+                      <span className="list-sub">{etiqueta(m.unidadId)}</span>
+                    </span>
+                    <span className="mascota-fila-estado">
+                      <Badge estado={m.estado} />
+                      {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
+                    </span>
+                    <Icon name="chevron-right" />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -930,6 +930,44 @@ export function MascotasAdmin() {
             <Empty icon="paw">Sin mascotas registradas.</Empty>
           )}
         </section>
+      )}
+      {abierta && (
+        <Modal title={abierta.nombre ?? 'Mascota'} onClose={() => setAbierta(null)}>
+          <div className="stack">
+            <Archivo path={abierta.fotoPath} origen={{ model: 'Mascota', id: abierta.id }} grande />
+            {!abierta.fotoPath && <p className="small muted">Sin foto.</p>}
+            <div>
+              <Badge estado={abierta.estado} /> {abierta.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
+            </div>
+            <dl className="mascota-datos">
+              <dt>Departamento</dt>
+              <dd>{etiqueta(abierta.unidadId)}</dd>
+              <dt>Especie y raza</dt>
+              <dd>{[abierta.especie, abierta.raza].filter(Boolean).join(' · ') || '—'}</dd>
+              <dt>Color</dt>
+              <dd>{abierta.color || '—'}</dd>
+              <dt>Vacuna antirrábica</dt>
+              <dd>{fecha(abierta.vacunaAntirrabica)}</dd>
+              {abierta.notas && (
+                <>
+                  <dt>Notas</dt>
+                  <dd>{abierta.notas}</dd>
+                </>
+              )}
+            </dl>
+            <Firma item={abierta} alta={false} />
+            {puede('mascotas', 'editar') && abierta.estado === 'PENDIENTE' && (
+              <div className="row-actions">
+                <button className="btn-app" disabled={busy} onClick={() => resolver(abierta, 'APROBADA')}>
+                  Aprobar
+                </button>
+                <button className="btn-app danger" disabled={busy} onClick={() => resolver(abierta, 'RECHAZADA')}>
+                  Rechazar
+                </button>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   );
