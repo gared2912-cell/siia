@@ -41,7 +41,7 @@ export function TarjetaTurno({ t, onNota }: { t: Turno; onNota?: () => void }) {
   const [foto, setFoto] = useState<string | null>(null);
   const notas = notasDe(t);
   return (
-    <article className="turno">
+    <article className={`turno ${t.casetaLimpia ? 't-ok' : 't-warn'}`}>
       <div className="turno-cab">
         <div>
           <strong>{fechaHora(t.createdAt)}</strong>

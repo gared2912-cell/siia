@@ -1,7 +1,8 @@
 // Ficha del condominio › Datos generales: qué administradores lo administran (solo superadministrador).
 // Asignar o quitar aquí equivale a marcar el condominio en Administradores › Editar.
+import { useState } from 'react';
 import { adminCall } from '../api';
-import { Badge, Empty, ErrorBox, Field, Loading, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Loading, Modal, Tarjeta, TarjetaIcono, Tarjetas, useAction, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 
 type Admin = { userId: string; nombre: string | null; email: string; estado: string; rol: string; todos: boolean; asignado: boolean; condominios: number | null };
@@ -12,6 +13,8 @@ export function AdminsCondominio() {
   const { data, error, loading, reload } = useLoad(() => adminCall<Admin[]>('condominios.administradores', { condominioId: condo!.id }), [condo?.id]);
   const asignados = (data ?? []).filter((a) => a.asignado);
   const disponibles = (data ?? []).filter((a) => !a.asignado);
+  const [ficha, setFicha] = useState<string | null>(null);
+  const fichaA = asignados.find((a) => a.userId === ficha);
 
   async function cambiar(a: Admin, asignar: boolean) {
     const ok = await run(
@@ -36,26 +39,53 @@ export function AdminsCondominio() {
       ) : (
         <>
           {asignados.length ? (
-            <ul className="list">
+            <Tarjetas>
               {asignados.map((a) => (
-                <li key={a.userId}>
-                  <div className="list-main">
-                    <strong>{a.nombre || a.email}</strong> <Badge>{a.rol}</Badge> {a.estado !== 'APROBADO' && <Badge estado={a.estado} />}
-                    <div className="list-sub" style={{ overflowWrap: 'anywhere' }}>
-                      {a.email}
-                      {a.todos ? ' · todos los condominios' : a.condominios && a.condominios > 1 ? ` · ${a.condominios} condominios` : ''}
-                    </div>
-                  </div>
-                  {!a.todos && (
-                    <button className="linklike" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => cambiar(a, false)}>
-                      Quitar
-                    </button>
-                  )}
-                </li>
+                <Tarjeta
+                  key={a.userId}
+                  tono={a.estado === 'APROBADO' ? 'ok' : 'mal'}
+                  onClick={() => setFicha(a.userId)}
+                  media={<TarjetaIcono name="users" />}
+                  titulo={a.nombre || a.email}
+                  sub={`${a.email}${a.todos ? ' · todos los condominios' : a.condominios && a.condominios > 1 ? ` · ${a.condominios} condominios` : ''}`}
+                  lado={
+                    <>
+                      <Badge>{a.rol}</Badge>
+                      {a.estado !== 'APROBADO' && <Badge estado={a.estado} />}
+                    </>
+                  }
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="shield">Ningún administrador asignado; solo los superadministradores lo ven.</Empty>
+          )}
+          {fichaA && (
+            <Modal title={fichaA.nombre || fichaA.email} onClose={() => setFicha(null)}>
+              <div className="stack">
+                <div className="row-actions">
+                  <Badge>{fichaA.rol}</Badge>
+                  {fichaA.estado !== 'APROBADO' && <Badge estado={fichaA.estado} />}
+                </div>
+                <Datos
+                  items={[
+                    ['Correo', fichaA.email],
+                    ['Condominios', fichaA.todos ? 'Todos los condominios' : fichaA.condominios ? String(fichaA.condominios) : null],
+                  ]}
+                />
+                {fichaA.todos ? (
+                  <p className="small muted" style={{ margin: 0 }}>
+                    Atiende todos los condominios; se cambia en Administradores.
+                  </p>
+                ) : (
+                  <Acciones>
+                    <button className="btn-app danger" disabled={busy} onClick={() => (setFicha(null), cambiar(fichaA, false))}>
+                      Quitar de este condominio
+                    </button>
+                  </Acciones>
+                )}
+              </div>
+            </Modal>
           )}
           {disponibles.length > 0 && (
             <Field label="Asignar administrador">

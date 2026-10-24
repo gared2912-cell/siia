@@ -2,7 +2,7 @@
 // bitácora de trabajo, por proveedor y por mes. Los proveedores entran en siia.casa/proveedores (ver shared/proveedores.ts).
 import { useState } from 'react';
 import { adminCall } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, hoy, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, hoy, useAction, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 import { BotonesAlta, Contrasena, avisoAlta, conCorreo } from './Residentes';
 import { TarjetaReporte } from '../proveedores/ProveedoresApp';
@@ -116,51 +116,77 @@ function Reportes({ proveedores }: { proveedores: Proveedor[] }) {
 function ListaProveedores({ proveedores, gestiona, recargar }: { proveedores: Proveedor[]; gestiona: boolean; recargar: () => void }) {
   const [editar, setEditar] = useState<Proveedor | null>(null);
   const [contrasena, setContrasena] = useState<Proveedor | null>(null);
+  const [ficha, setFicha] = useState<string | null>(null);
   const { run, busy } = useAction();
   const accion = (a: string, p: Proveedor, msg: string) => run(() => adminCall(a, { userId: p.userId }).then(recargar), msg);
+  const fichaP = proveedores.find((p) => p.userId === ficha);
   return (
     <section className="panel">
       {proveedores.length ? (
-        <ul className="list">
+        <Tarjetas>
           {proveedores.map((p) => (
-            <li key={p.userId}>
-              <div className="list-main">
-                <strong>{p.nombre || p.email}</strong>{' '}
-                <Badge estado={p.estado === 'APROBADO' ? 'APROBADO' : 'SUSPENDIDO'}>{p.estado === 'APROBADO' ? 'Activo' : 'Suspendido'}</Badge>
-                {p.estado === 'APROBADO' && p.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
-                <div className="list-sub">
-                  {p.empresa || 'Personal propio'} · {p.email}
-                  {p.telefono && ` · ${p.telefono}`}
-                </div>
-                <div className="small muted">{(p.servicios ?? []).filter(Boolean).join(' · ')}</div>
-              </div>
-              {gestiona && (
-                <div className="row-actions">
-                  <button className="btn-app sm secondary" onClick={() => setEditar(p)}>
-                    Editar
-                  </button>
-                  {p.estado === 'APROBADO' ? (
-                    <>
-                      <button className="btn-app sm secondary" onClick={() => setContrasena(p)}>
-                        <Icon name="shield" />
-                        Contraseña
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => confirm(`¿Suspender el acceso de ${p.nombre || p.email}?`) && accion('suspender', p, 'Acceso suspendido')}>
-                        Suspender
-                      </button>
-                    </>
-                  ) : (
-                    <button className="btn-app sm secondary" disabled={busy} onClick={() => accion('reactivar', p, 'Acceso reactivado')}>
-                      Reactivar
-                    </button>
-                  )}
-                </div>
-              )}
-            </li>
+            <Tarjeta
+              key={p.userId}
+              tono={p.estado !== 'APROBADO' ? 'mal' : p.accesoSinEnviar ? 'warn' : 'ok'}
+              onClick={() => setFicha(p.userId)}
+              media={<TarjetaIcono name="package" />}
+              titulo={p.nombre || p.email}
+              sub={`${p.empresa || 'Personal propio'} · ${(p.servicios ?? []).filter(Boolean).join(' · ')}`}
+              lado={
+                <>
+                  <Badge estado={p.estado === 'APROBADO' ? 'APROBADO' : 'SUSPENDIDO'}>{p.estado === 'APROBADO' ? 'Activo' : 'Suspendido'}</Badge>
+                  {p.estado === 'APROBADO' && p.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
+                </>
+              }
+            />
           ))}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="package">Este condominio aún no tiene proveedores. Usa «Crear proveedor».</Empty>
+      )}
+      {fichaP && (
+        <Modal title={fichaP.nombre || fichaP.email || 'Proveedor'} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <Badge estado={fichaP.estado === 'APROBADO' ? 'APROBADO' : 'SUSPENDIDO'}>{fichaP.estado === 'APROBADO' ? 'Activo' : 'Suspendido'}</Badge>
+              {fichaP.estado === 'APROBADO' && fichaP.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
+            </div>
+            <Datos
+              items={[
+                ['Empresa', fichaP.empresa || 'Personal propio'],
+                ['Correo', fichaP.email],
+                ['Teléfono', fichaP.telefono],
+                ['Servicios', (fichaP.servicios ?? []).filter(Boolean).join(' · ')],
+              ]}
+            />
+            {gestiona && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => (setEditar(fichaP), setFicha(null))}>
+                  Editar
+                </button>
+                {fichaP.estado === 'APROBADO' ? (
+                  <>
+                    <button className="btn-app secondary" onClick={() => (setContrasena(fichaP), setFicha(null))}>
+                      <Icon name="shield" />
+                      Contraseña
+                    </button>
+                    <button
+                      className="btn-app danger"
+                      disabled={busy}
+                      onClick={() => confirm(`¿Suspender el acceso de ${fichaP.nombre || fichaP.email}?`) && accion('suspender', fichaP, 'Acceso suspendido')}
+                    >
+                      Suspender
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn-app secondary" disabled={busy} onClick={() => accion('reactivar', fichaP, 'Acceso reactivado')}>
+                    Reactivar
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {editar && <EditarProveedor p={editar} onClose={() => setEditar(null)} onDone={() => (setEditar(null), recargar())} />}
       {contrasena && <Contrasena p={contrasena} sinPrimerIngreso={contrasena.cuenta === 'FORCE_CHANGE_PASSWORD'} onClose={() => (setContrasena(null), recargar())} />}

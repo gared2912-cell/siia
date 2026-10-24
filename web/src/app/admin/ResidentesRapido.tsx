@@ -3,7 +3,7 @@
 // historial de pagos, chat, control de accesos y contraseña. La gestión completa está en Condominios › Residentes.
 import { useState } from 'react';
 import { adminCall, all, db, type Schema } from '../api';
-import { Empty, ErrorBox, Icon, Loading, Modal, PageHead, hoy, money, useAction, useLoad } from '../ui';
+import { Acciones, Empty, ErrorBox, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, hoy, money, useAction, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 import { ChatUnidad } from './Comunicacion';
 import { Contrasena } from './Residentes';
@@ -45,6 +45,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
   const [contrasena, setContrasena] = useState<Perfil | null>(null);
   const [accesos, setAccesos] = useState<{ p: Perfil; unidad: string } | null>(null);
   const [historial, setHistorial] = useState<DatosHistorial | null>(null);
+  const [ficha, setFicha] = useState<string | null>(null);
   const [importar, setImportar] = useState(false);
   const [registro, setRegistro] = useState(false);
   const { run, busy } = useAction();
@@ -62,6 +63,7 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
   const filas = unidades
     .map((u) => ({ u, rs: perfiles.filter((p) => p.unidadId === u.id) }))
     .filter(({ u, rs }) => !q || `${u.etiqueta} ${rs.map((p) => `${p.nombre ?? ''} ${p.email}`).join(' ')}`.toLowerCase().includes(q));
+  const fichaU = filas.find((x) => x.u.id === ficha) ?? (ficha ? { u: unidades.find((u) => u.id === ficha)!, rs: perfiles.filter((p) => p.unidadId === ficha) } : null);
   const abrirHistorial = (u: Unidad, rs: Perfil[]) =>
     setHistorial({
       condominio: condo!.nombre,
@@ -121,75 +123,35 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
           <input className="input" style={{ maxWidth: 260 }} placeholder="Buscar casa o nombre…" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
         </div>
         {filas.length ? (
-          <ul className="res-lista">
+          <Tarjetas>
             {filas.map(({ u, rs }) => {
               const vencido = vencidoDe(u.id);
+              const suspendido = rs.some((p) => p.estado !== 'APROBADO');
               return (
-                <li key={u.id} className="res-unidad">
-                  <div className="res-cab">
-                    <div className="res-titulo">
-                      <strong>{u.etiqueta}</strong>
+                <Tarjeta
+                  key={u.id}
+                  tono={veFinanzas ? (vencido > 0 ? 'mal' : 'ok') : !rs.length ? 'neutro' : suspendido ? 'mal' : 'ok'}
+                  onClick={() => setFicha(u.id)}
+                  media={<TarjetaIcono name="building" />}
+                  titulo={u.etiqueta}
+                  sub={nombres(rs) || 'Sin residente con acceso'}
+                  lado={
+                    <>
                       {veFinanzas &&
                         (vencido > 0 ? (
                           <span className="pill mal">
-                            Saldo pendiente <b>{money(vencido)}</b>
+                            Debe <b>{money(vencido)}</b>
                           </span>
                         ) : (
                           <span className="pill ok">Al corriente</span>
                         ))}
-                    </div>
-                    <div className="res-acciones">
-                      {veFinanzas && (
-                        <button className="btn-app sm secondary" onClick={() => abrirHistorial(u, rs)}>
-                          <Icon name="file" />
-                          Historial
-                        </button>
-                      )}
-                      {veChat && rs.length > 0 && (
-                        <button className="btn-app sm" onClick={() => setChat({ unidadId: u.id, titulo: `${u.etiqueta} · ${nombres(rs)}` })}>
-                          <Icon name="chat" />
-                          Chat
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {rs.length ? (
-                    rs.map((p) => (
-                      <div key={p.userId} className="res-persona">
-                        <div className="res-persona-info">
-                          <span className="res-nombre">{p.nombre || p.email}</span>
-                          <span className={`pill sm ${p.estado === 'APROBADO' ? 'ok' : 'mal'}`}>
-                            <span className="pill-punto" />
-                            {p.estado === 'APROBADO' ? 'Acceso activado' : 'Acceso suspendido'}
-                          </span>
-                          {p.estado === 'APROBADO' && p.accesoSinEnviar && <span className="pill sm mal">Accesos sin enviar</span>}
-                          <ListaAccesos p={p} />
-                        </div>
-                        {cambiaContrasena && (
-                          <div className="res-acciones">
-                            <button className="btn-app sm secondary" onClick={() => setAccesos({ p, unidad: u.etiqueta })}>
-                              <Icon name="package" />
-                              Control de accesos
-                            </button>
-                            {p.estado === 'APROBADO' && (
-                              <button className="btn-app sm secondary" onClick={() => setContrasena(p)}>
-                                <Icon name="shield" />
-                                Contraseña
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="res-persona">
-                      <span className="small muted">Sin residente con acceso</span>
-                    </div>
-                  )}
-                </li>
+                      {suspendido && <span className="pill sm mal">Acceso suspendido</span>}
+                    </>
+                  }
+                />
               );
             })}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="users">{q ? 'Sin resultados.' : `El condominio no tiene ${titulo.toLowerCase()}.`}</Empty>
         )}
@@ -201,6 +163,72 @@ export function ResidentesRapido({ go }: { go: (k: string) => void }) {
           onClose={() => setImportar(false)}
           onDone={() => (setImportar(false), datos.reload(true))}
         />
+      )}
+      {fichaU && (
+        <Modal title={fichaU.u.etiqueta} onClose={() => setFicha(null)}>
+          <div className="stack">
+            {veFinanzas && (
+              <div>
+                {vencidoDe(fichaU.u.id) > 0 ? (
+                  <span className="pill mal">
+                    Saldo pendiente <b>{money(vencidoDe(fichaU.u.id))}</b>
+                  </span>
+                ) : (
+                  <span className="pill ok">Al corriente</span>
+                )}
+              </div>
+            )}
+            {fichaU.rs.length ? (
+              fichaU.rs.map((p) => (
+                <div key={p.userId} className="res-persona">
+                  <div className="res-persona-info">
+                    <span className="res-nombre">{p.nombre || p.email}</span>
+                    <span className={`pill sm ${p.estado === 'APROBADO' ? 'ok' : 'mal'}`}>
+                      <span className="pill-punto" />
+                      {p.estado === 'APROBADO' ? 'Acceso activado' : 'Acceso suspendido'}
+                    </span>
+                    {p.estado === 'APROBADO' && p.accesoSinEnviar && <span className="pill sm mal">Accesos sin enviar</span>}
+                    <ListaAccesos p={p} />
+                  </div>
+                  {cambiaContrasena && (
+                    <div className="res-acciones">
+                      <button className="btn-app sm secondary" onClick={() => (setAccesos({ p, unidad: fichaU.u.etiqueta }), setFicha(null))}>
+                        <Icon name="package" />
+                        Control de accesos
+                      </button>
+                      {p.estado === 'APROBADO' && (
+                        <button className="btn-app sm secondary" onClick={() => (setContrasena(p), setFicha(null))}>
+                          <Icon name="shield" />
+                          Contraseña
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="small muted" style={{ margin: 0 }}>
+                Sin residente con acceso.
+              </p>
+            )}
+            {(veFinanzas || (veChat && fichaU.rs.length > 0)) && (
+              <Acciones>
+                {veFinanzas && (
+                  <button className="btn-app secondary" onClick={() => (abrirHistorial(fichaU.u, fichaU.rs), setFicha(null))}>
+                    <Icon name="file" />
+                    Historial de pagos
+                  </button>
+                )}
+                {veChat && fichaU.rs.length > 0 && (
+                  <button className="btn-app" onClick={() => (setChat({ unidadId: fichaU.u.id, titulo: `${fichaU.u.etiqueta} · ${nombres(fichaU.rs)}` }), setFicha(null))}>
+                    <Icon name="chat" />
+                    Chat
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {historial && <HistorialVista datos={historial} onClose={() => setHistorial(null)} />}
       {chat && (

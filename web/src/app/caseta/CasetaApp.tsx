@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ChatBox, type Msg } from '../ChatBox';
 import { Shell, useHashNav, type NavItem } from '../Shell';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, etiquetaEstado, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, etiquetaEstado, fecha, fechaHora, tonoDe, useAction, useLoad, usePoll } from '../ui';
 import type { PerfilResp } from '../portal/PortalApp';
 import type { Visita } from '../portal/Visitas';
 import { useInsigniaApp } from '../AppMovil';
@@ -335,20 +335,23 @@ function Escanear({ onCambio }: { onCambio: () => void }) {
 
 function Hoy({ panel, onCambio }: { panel: Panel; onCambio: () => void }) {
   const { run, busy } = useAction();
-  const salida = (v: V) => run(() => portal('caseta.salida', { visitaId: v.id }).then(onCambio), `Salida de ${v.nombre} registrada`);
-  const entrada = (v: V) => run(() => portal('caseta.entrada', { visitaId: v.id }).then(onCambio), `Entrada de ${v.nombre} registrada`);
-  const fila = (v: V, accion?: React.ReactNode) => (
-    <li key={v.id}>
-      <div className="list-main">
-        <strong>{v.nombre}</strong> <Badge estado={v.estado} />
-        <div className="list-sub">
-          {v.unidad} · {etiquetaEstado(v.tipo)} {v.ocupaLugar ? '· 🚗 ocupa lugar' : v.enAuto ? '· en auto' : ''} {v.placas && `· ${v.placas}`}{' '}
-          {v.entradaEn && `· Entrada ${fechaHora(v.entradaEn)}`}{' '}
-          {v.salidaEn && `· Salida ${fechaHora(v.salidaEn)}`}
-        </div>
-      </div>
-      {accion}
-    </li>
+  const [ficha, setFicha] = useState<V | null>(null);
+  const salida = (v: V) => run(() => portal('caseta.salida', { visitaId: v.id }).then(() => (setFicha(null), onCambio())), `Salida de ${v.nombre} registrada`);
+  const entrada = (v: V) => run(() => portal('caseta.entrada', { visitaId: v.id }).then(() => (setFicha(null), onCambio())), `Entrada de ${v.nombre} registrada`);
+  const dentro = (v: V) => panel.dentro.some((x) => x.id === v.id);
+  const esperada = (v: V) => panel.esperadas.some((x) => x.id === v.id);
+  const fila = (v: V) => (
+    <Tarjeta
+      key={v.id}
+      tono={dentro(v) ? 'ok' : esperada(v) ? 'info' : tonoDe(v.estado)}
+      onClick={() => setFicha(v)}
+      media={<TarjetaIcono name={v.enAuto ? 'car' : v.tipo === 'PAQUETERIA' ? 'package' : 'users'} />}
+      titulo={v.nombre}
+      sub={[v.unidad, etiquetaEstado(v.tipo), v.ocupaLugar ? 'ocupa lugar' : v.enAuto ? 'en auto' : '', v.placas, v.entradaEn ? `Entrada ${fechaHora(v.entradaEn)}` : '', v.salidaEn ? `Salida ${fechaHora(v.salidaEn)}` : '']
+        .filter(Boolean)
+        .join(' · ')}
+      lado={<Badge estado={v.estado} />}
+    />
   );
   return (
     <div className="stack">
@@ -360,42 +363,50 @@ function Hoy({ panel, onCambio }: { panel: Panel; onCambio: () => void }) {
       </PageHead>
       <section className="panel">
         <h2>Dentro del condominio ({panel.dentro.length})</h2>
-        {panel.dentro.length ? (
-          <ul className="list">
-            {panel.dentro.map((v) =>
-              fila(
-                v,
-                <button className="btn-app sm secondary" disabled={busy} onClick={() => salida(v)}>
-                  Registrar salida
-                </button>,
-              ),
-            )}
-          </ul>
-        ) : (
-          <Empty icon="shield">Nadie registrado dentro.</Empty>
-        )}
+        {panel.dentro.length ? <Tarjetas>{panel.dentro.map(fila)}</Tarjetas> : <Empty icon="shield">Nadie registrado dentro.</Empty>}
       </section>
       <section className="panel">
         <h2>Esperadas hoy ({panel.esperadas.length})</h2>
-        {panel.esperadas.length ? (
-          <ul className="list">
-            {panel.esperadas.map((v) =>
-              fila(
-                v,
-                <button className="btn-app sm" disabled={busy} onClick={() => entrada(v)}>
-                  Registrar entrada
-                </button>,
-              ),
-            )}
-          </ul>
-        ) : (
-          <Empty icon="qr">Sin pases programados para hoy.</Empty>
-        )}
+        {panel.esperadas.length ? <Tarjetas>{panel.esperadas.map(fila)}</Tarjetas> : <Empty icon="qr">Sin pases programados para hoy.</Empty>}
       </section>
       <section className="panel">
         <h2>Bitácora del día</h2>
-        {panel.bitacora.length ? <ul className="list">{panel.bitacora.map((v) => fila(v))}</ul> : <Empty icon="file">Sin movimientos.</Empty>}
+        {panel.bitacora.length ? <Tarjetas>{panel.bitacora.map(fila)}</Tarjetas> : <Empty icon="file">Sin movimientos.</Empty>}
       </section>
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Casa o departamento', ficha.unidad],
+                ['Tipo', etiquetaEstado(ficha.tipo)],
+                ['Vehículo', ficha.ocupaLugar ? 'En auto · ocupa lugar' : ficha.enAuto ? 'En auto' : 'A pie'],
+                ['Placas', ficha.placas],
+                ['Entrada', ficha.entradaEn ? fechaHora(ficha.entradaEn) : null],
+                ['Salida', ficha.salidaEn ? fechaHora(ficha.salidaEn) : null],
+              ]}
+            />
+            {(dentro(ficha) || esperada(ficha)) && (
+              <Acciones>
+                {dentro(ficha) && (
+                  <button className="btn-app" disabled={busy} onClick={() => salida(ficha)}>
+                    Registrar salida
+                  </button>
+                )}
+                {esperada(ficha) && (
+                  <button className="btn-app" disabled={busy} onClick={() => entrada(ficha)}>
+                    <Icon name="check" />
+                    Registrar entrada
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -503,73 +514,94 @@ function Llegada({ unidades, onCambio }: { unidades: Panel['unidades']; onCambio
 /** Llegadas sin pase del día: esperando al residente, autorizadas (registrar entrada) o rechazadas. */
 function Solicitudes({ lista, est, onCambio }: { lista: V[]; est?: Estacionamiento; onCambio: () => void }) {
   const { run, busy } = useAction();
+  const [fichaId, setFichaId] = useState<string | null>(null);
   if (!lista.length) return null;
+  const ficha = lista.find((v) => v.id === fichaId);
+  const listo = () => (setFichaId(null), onCambio());
   const sinLugares = (v: V) => !!(v.enAuto && est?.total && est.libres === 0);
   const entrada = (v: V, sinLugar = false) =>
-    run(() => portal('caseta.entrada', { visitaId: v.id, sinLugar }).then(onCambio), `Entrada de ${v.nombre} registrada; se avisó al residente.`);
+    run(() => portal('caseta.entrada', { visitaId: v.id, sinLugar }).then(listo), `Entrada de ${v.nombre} registrada; se avisó al residente.`);
   const llamada = (v: V) => {
     const nota = prompt(`¿Con quién de ${v.unidad} hablaste por teléfono para autorizar a ${v.nombre}?`);
-    if (nota) run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'LLAMADA', nota }).then(onCambio), 'Acceso autorizado por llamada');
+    if (nota) run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'LLAMADA', nota }).then(listo), 'Acceso autorizado por llamada');
   };
   const cancelar = (v: V) =>
-    confirm(`¿Cancelar la solicitud de ${v.nombre}?`) && run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'CANCELAR' }).then(onCambio), 'Solicitud cancelada');
+    confirm(`¿Cancelar la solicitud de ${v.nombre}?`) && run(() => portal('caseta.solicitud', { visitaId: v.id, accion: 'CANCELAR' }).then(listo), 'Solicitud cancelada');
   return (
     <section className="panel">
       <h2>Solicitudes de acceso</h2>
-      <ul className="list">
+      <Tarjetas>
         {lista.map((v) => (
-          <li key={v.id} className={`solicitud ${v.estado.toLowerCase()}`}>
-            <div className="list-main">
-              <strong>{v.nombre}</strong>{' '}
-              {v.estado === 'POR_AUTORIZAR' ? (
-                <span className="pill warn">
-                  <span className="pill-punto parpadea" />
-                  Esperando al residente
-                </span>
-              ) : v.estado === 'AUTORIZADA' ? (
-                <span className="pill ok">Autorizada{v.respuestaVia === 'LLAMADA' ? ' por llamada' : ''}</span>
-              ) : (
-                <span className="pill mal">Rechazada</span>
-              )}
-              <div className="list-sub">
-                {v.unidad} · {etiquetaEstado(v.tipo)} {v.enAuto ? `· 🚗 ${v.placas ?? ''}` : '· a pie'} · pidió {fechaHora(v.solicitadoEn ?? v.createdAt)}
-              </div>
-              {v.respuestaPor && v.estado !== 'POR_AUTORIZAR' && (
-                <div className="small muted">
-                  {v.estado === 'RECHAZADA' ? 'Rechazó' : 'Autorizó'}: {v.respuestaPor}
-                  {v.respuestaNota && ` · «${v.respuestaNota}»`}
-                </div>
-              )}
-              {v.estado === 'AUTORIZADA' && sinLugares(v) && <div className="small" style={{ color: 'var(--danger)' }}>No hay lugares de estacionamiento de visitas libres.</div>}
-            </div>
-            <div className="row-actions">
-              {v.estado === 'POR_AUTORIZAR' && (
-                <>
-                  <button className="btn-app sm secondary" disabled={busy} onClick={() => llamada(v)}>
-                    <Icon name="phone" />
-                    Autorizado por llamada
-                  </button>
-                  <button className="btn-app sm danger" disabled={busy} onClick={() => cancelar(v)}>
-                    Cancelar
-                  </button>
-                </>
-              )}
-              {v.estado === 'AUTORIZADA' &&
-                (sinLugares(v) ? (
-                  <button className="btn-app sm secondary" disabled={busy} onClick={() => entrada(v, true)}>
-                    Entrada sin lugar de estacionamiento
-                  </button>
-                ) : (
-                  <button className="btn-app sm" disabled={busy} onClick={() => entrada(v)}>
-                    <Icon name="check" />
-                    Registrar entrada
-                  </button>
-                ))}
-            </div>
-          </li>
+          <Tarjeta
+            key={v.id}
+            tono={v.estado === 'POR_AUTORIZAR' ? 'warn' : v.estado === 'AUTORIZADA' ? 'ok' : 'mal'}
+            onClick={() => setFichaId(v.id)}
+            media={<TarjetaIcono name={v.enAuto ? 'car' : 'users'} />}
+            titulo={v.nombre}
+            sub={`${v.unidad} · ${etiquetaEstado(v.tipo)} ${v.enAuto ? `· ${v.placas ?? 'en auto'}` : '· a pie'} · pidió ${fechaHora(v.solicitadoEn ?? v.createdAt)}`}
+            lado={estadoSolicitud(v)}
+          />
         ))}
-      </ul>
+      </Tarjetas>
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFichaId(null)}>
+          <div className="stack">
+            <div>{estadoSolicitud(ficha)}</div>
+            <Datos
+              items={[
+                ['Casa o departamento', ficha.unidad],
+                ['Tipo', etiquetaEstado(ficha.tipo)],
+                ['Vehículo', ficha.enAuto ? `En auto${ficha.placas ? ` · ${ficha.placas}` : ''}` : 'A pie'],
+                ['Pidió acceso', fechaHora(ficha.solicitadoEn ?? ficha.createdAt)],
+                [ficha.estado === 'RECHAZADA' ? 'Rechazó' : 'Autorizó', ficha.respuestaPor && ficha.estado !== 'POR_AUTORIZAR' ? `${ficha.respuestaPor}${ficha.respuestaNota ? ` · «${ficha.respuestaNota}»` : ''}` : null],
+              ]}
+            />
+            {ficha.estado === 'AUTORIZADA' && sinLugares(ficha) && (
+              <div className="alert error small">No hay lugares de estacionamiento de visitas libres.</div>
+            )}
+            {(ficha.estado === 'POR_AUTORIZAR' || ficha.estado === 'AUTORIZADA') && (
+              <Acciones>
+                {ficha.estado === 'POR_AUTORIZAR' && (
+                  <>
+                    <button className="btn-app secondary" disabled={busy} onClick={() => llamada(ficha)}>
+                      <Icon name="phone" />
+                      Autorizado por llamada
+                    </button>
+                    <button className="btn-app danger" disabled={busy} onClick={() => cancelar(ficha)}>
+                      Cancelar solicitud
+                    </button>
+                  </>
+                )}
+                {ficha.estado === 'AUTORIZADA' &&
+                  (sinLugares(ficha) ? (
+                    <button className="btn-app secondary" disabled={busy} onClick={() => entrada(ficha, true)}>
+                      Entrada sin lugar de estacionamiento
+                    </button>
+                  ) : (
+                    <button className="btn-app" disabled={busy} onClick={() => entrada(ficha)}>
+                      <Icon name="check" />
+                      Registrar entrada
+                    </button>
+                  ))}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
     </section>
+  );
+}
+
+function estadoSolicitud(v: V) {
+  return v.estado === 'POR_AUTORIZAR' ? (
+    <span className="pill warn">
+      <span className="pill-punto parpadea" />
+      Esperando al residente
+    </span>
+  ) : v.estado === 'AUTORIZADA' ? (
+    <span className="pill ok">Autorizada{v.respuestaVia === 'LLAMADA' ? ' por llamada' : ''}</span>
+  ) : (
+    <span className="pill mal">Rechazada</span>
   );
 }
 
@@ -596,18 +628,18 @@ function ChatCaseta({ unidades, hilos, inicial }: { unidades: Panel['unidades'];
           </Field>
           <h3 style={{ marginTop: 16 }}>Recientes</h3>
           {hilos.data?.length ? (
-            <ul className="list">
+            <Tarjetas>
               {hilos.data.map((h) => (
-                <li key={h.unidadId} style={{ cursor: 'pointer' }} onClick={() => setUnidadId(h.unidadId)}>
-                  <div className="list-main">
-                    <strong>{h.unidad}</strong> {h.ultimo.autorRol === 'RESIDENTE' && <Badge estado="PENDIENTE">Por responder</Badge>}
-                    <div className="list-sub">
-                      {h.ultimo.texto.slice(0, 60)} · {fechaHora(h.ultimo.createdAt)}
-                    </div>
-                  </div>
-                </li>
+                <Tarjeta
+                  key={h.unidadId}
+                  tono={h.ultimo.autorRol === 'RESIDENTE' ? 'warn' : h.unidadId === unidadId ? 'info' : 'neutro'}
+                  onClick={() => setUnidadId(h.unidadId)}
+                  titulo={h.unidad}
+                  sub={`${h.ultimo.texto.slice(0, 60)} · ${fechaHora(h.ultimo.createdAt)}`}
+                  lado={h.ultimo.autorRol === 'RESIDENTE' ? <Badge estado="PENDIENTE">Por responder</Badge> : undefined}
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="chat">Sin conversaciones.</Empty>
           )}

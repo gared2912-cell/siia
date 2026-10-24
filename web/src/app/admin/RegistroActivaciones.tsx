@@ -3,7 +3,7 @@
 // hecho lo que quedó por desactivar o por activar.
 import { useState } from 'react';
 import { adminCall } from '../api';
-import { Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fechaHora, money, useAction, useLoad } from '../ui';
+import { Acciones, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, fechaHora, money, useAction, useLoad } from '../ui';
 import { MIN_CUOTAS_DEFECTO, textoCriterio, type Corte } from '../../../amplify/functions/shared/cortes';
 import { useAdmin } from './AdminApp';
 
@@ -25,6 +25,8 @@ export function RegistroActivaciones({ onBack, puedeCortar }: { onBack: () => vo
     }, `Corte #${c.numero} descargado`);
 
   const ultimo = data?.cortes[0];
+  const [ficha, setFicha] = useState<string | null>(null);
+  const fichaC = data?.cortes.find((c) => c.id === ficha);
   return (
     <div className="stack">
       <div>
@@ -56,27 +58,18 @@ export function RegistroActivaciones({ onBack, puedeCortar }: { onBack: () => vo
           <section className="panel">
             <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Cortes</h2>
             {data!.cortes.length ? (
-              <ul className="list">
+              <Tarjetas>
                 {data!.cortes.map((c) => (
-                  <li key={c.id}>
-                    <div className="list-main">
-                      <strong>
-                        Corte #{c.numero} · {fechaHora(c.fecha)}
-                      </strong>
-                      <div className="list-sub">
-                        {c.resumen.morosos} moroso(s) · {money(c.resumen.monto)} · <b>{c.resumen.porDesactivar} por desactivar</b> · <b>{c.resumen.porActivar} por activar</b> ·{' '}
-                        {c.resumen.desactivados} desactivado(s)
-                        {c.porNombre && <> · {c.porNombre}</>}
-                      </div>
-                      <div className="small muted">{textoCriterio(c.criterio)}</div>
-                    </div>
-                    <button type="button" className="btn-app sm secondary" disabled={busy} onClick={() => volverADescargar(c)}>
-                      <Icon name="download" />
-                      Excel
-                    </button>
-                  </li>
+                  <Tarjeta
+                    key={c.id}
+                    tono={c === ultimo && (c.resumen.porDesactivar > 0 || c.resumen.porActivar > 0) ? 'warn' : 'neutro'}
+                    onClick={() => setFicha(c.id)}
+                    media={<TarjetaIcono name="clock" />}
+                    titulo={`Corte #${c.numero} · ${fechaHora(c.fecha)}`}
+                    sub={`${c.resumen.morosos} moroso(s) · ${money(c.resumen.monto)} · ${c.resumen.porDesactivar} por desactivar · ${c.resumen.porActivar} por activar`}
+                  />
                 ))}
-              </ul>
+              </Tarjetas>
             ) : (
               <Empty icon="clock">Aún no hay cortes. Con «Hacer corte» descargas la lista de morosos y de accesos por desactivar.</Empty>
             )}
@@ -84,6 +77,32 @@ export function RegistroActivaciones({ onBack, puedeCortar }: { onBack: () => vo
         </>
       )}
 
+      {fichaC && (
+        <Modal title={`Corte #${fichaC.numero}`} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <Datos
+              items={[
+                ['Fecha', fechaHora(fichaC.fecha)],
+                ['Morosos', String(fichaC.resumen.morosos)],
+                ['Adeudo', money(fichaC.resumen.monto)],
+                ['Por desactivar', String(fichaC.resumen.porDesactivar)],
+                ['Por activar', String(fichaC.resumen.porActivar)],
+                ['Desactivados', String(fichaC.resumen.desactivados)],
+                ['Hizo el corte', fichaC.porNombre],
+              ]}
+            />
+            <p className="small muted" style={{ margin: 0 }}>
+              {textoCriterio(fichaC.criterio)}
+            </p>
+            <Acciones>
+              <button type="button" className="btn-app secondary" disabled={busy} onClick={() => volverADescargar(fichaC)}>
+                <Icon name="download" />
+                Descargar Excel
+              </button>
+            </Acciones>
+          </div>
+        </Modal>
+      )}
       {nuevo && data && (
         <NuevoCorte
           tipos={data.tipos}

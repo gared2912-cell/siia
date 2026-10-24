@@ -4,7 +4,7 @@ import { ChatBox, type Msg } from '../ChatBox';
 import { ComunicadoCompleto, TarjetaComunicado, type Adjunto } from '../ComunicadoVista';
 import { nombreAdjunto } from '../../../amplify/functions/shared/comunicados';
 import { ElegirArchivo } from '../ElegirArchivo';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
+import { Acciones, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, useAction, useLoad, usePoll } from '../ui';
 import { Firma, leerFirma } from './Firma';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { descargarReporteEncuesta } from './excel';
@@ -58,10 +58,11 @@ export function ComunicadosAdmin() {
               acciones={
                 gestiona && (
                   <>
-                    <button className="btn-app sm secondary" onClick={() => setEditar(c)}>
+                    <button className="btn-app secondary" onClick={() => setEditar(c)}>
                       Editar
                     </button>
-                    <button className="btn-app sm danger" onClick={() => borrar(c)}>
+                    <button className="btn-app danger" onClick={() => borrar(c)}>
+                      <Icon name="trash" />
                       Eliminar
                     </button>
                   </>
@@ -103,10 +104,22 @@ function ComunicadoAdmin({ c, acciones }: { c: Comunicado; acciones: React.React
         urls={urls}
         adjuntos={adjuntos}
         onAbrir={() => setAbierto(true)}
-        acciones={acciones || undefined}
         firma={<Firma item={c} alta="Publicado por" altaAntes={c.autor} />}
       />
-      {abierto && <ComunicadoCompleto c={datos} urls={urls} adjuntos={adjuntos} onClose={() => setAbierto(false)} />}
+      {abierto && (
+        <ComunicadoCompleto
+          c={datos}
+          urls={urls}
+          adjuntos={adjuntos}
+          onClose={() => setAbierto(false)}
+          pie={
+            <>
+              <Firma item={c} alta="Publicado por" altaAntes={c.autor} />
+              {acciones && <Acciones>{acciones}</Acciones>}
+            </>
+          }
+        />
+      )}
     </>
   );
 }
@@ -275,6 +288,8 @@ export function EncuestasAdmin() {
       .sort((a, b) => String(b.e.createdAt).localeCompare(String(a.e.createdAt)));
   }, [condo!.id]);
   const [nueva, setNueva] = useState(false);
+  const [ficha, setFicha] = useState<string | null>(null);
+  const fichaE = data?.find((x) => x.e.id === ficha);
   const { run } = useAction();
 
   const cerrar = (e: Encuesta) =>
@@ -286,6 +301,7 @@ export function EncuestasAdmin() {
     confirm('¿Eliminar la encuesta y sus votos?') &&
     run(async () => {
       ok(await db.models.Encuesta.delete({ id: e.id }));
+      setFicha(null);
       reload(true);
     }, 'Encuesta eliminada');
   // Excel de una encuesta cerrada: ganador, votos por opción, quién votó y por cuál opción, y quién no votó.
@@ -325,60 +341,81 @@ export function EncuestasAdmin() {
       ) : error ? (
         <ErrorBox error={error} retry={reload} />
       ) : data!.length ? (
-        data!.map(({ e, votos }) => (
-          <article key={e.id} className="panel">
-            <div className="panel-head">
-              <h2>{e.pregunta}</h2>
-              <div className="row-actions">
-                <Badge estado={e.estado} />
-                {gestiona && (
-                  <>
-                    <button className="linklike" onClick={() => cerrar(e)}>
-                      {e.estado === 'CERRADA' ? 'Reabrir' : 'Cerrar'}
-                    </button>
-                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(e)}>
-                      Eliminar
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-            {e.descripcion && <p className="small pre">{e.descripcion}</p>}
-            <Firma item={e} alta="Creada por" cambio={e.estado === 'CERRADA' ? 'Cerrada por' : undefined} />
-            {e.estado === 'CERRADA' && (
-              <div className="row-actions" style={{ marginBottom: 8 }}>
-                <button className="btn-app sm secondary" disabled={descargando === e.id} onClick={() => excel(e, votos)}>
-                  <Icon name="download" />
-                  {descargando === e.id ? 'Generando…' : 'Descargar resultados en Excel'}
-                </button>
-              </div>
-            )}
-            <p className="small muted">
-              Participación: {votos.length} de {unidades.length} unidades {e.cierra && `· Cierra ${fecha(e.cierra)}`}
-            </p>
-            {(e.opciones ?? []).filter(Boolean).map((o) => {
-              const n = votos.filter((v) => v.opcion === o).length;
-              const pct = votos.length ? Math.round((n / votos.length) * 100) : 0;
-              return (
-                <div key={o} style={{ marginBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{o}</span>
-                    <span className="small muted">
-                      {n} · {pct}%
-                    </span>
-                  </div>
-                  <div className="bar">
-                    <i style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </article>
-        ))
+        <Tarjetas>
+          {data!.map(({ e, votos }) => (
+            <Tarjeta
+              key={e.id}
+              tono={e.estado === 'ABIERTA' ? 'info' : 'neutro'}
+              onClick={() => setFicha(e.id)}
+              media={<TarjetaIcono name="vote" />}
+              titulo={e.pregunta}
+              sub={`Participación: ${votos.length} de ${unidades.length} unidades${e.cierra ? ` · Cierra ${fecha(e.cierra)}` : ''}`}
+              lado={<Badge estado={e.estado} />}
+            >
+              <span className="bar" style={{ marginTop: 4 }}>
+                <i style={{ width: `${unidades.length ? Math.round((votos.length / unidades.length) * 100) : 0}%` }} />
+              </span>
+            </Tarjeta>
+          ))}
+        </Tarjetas>
       ) : (
         <section className="panel">
           <Empty icon="vote">Sin encuestas.</Empty>
         </section>
+      )}
+      {fichaE && (
+        <Modal title={fichaE.e.pregunta} onClose={() => setFicha(null)} wide>
+          <div className="stack">
+            <div>
+              <Badge estado={fichaE.e.estado} />
+            </div>
+            {fichaE.e.descripcion && <p className="small pre" style={{ margin: 0 }}>{fichaE.e.descripcion}</p>}
+            <p className="small muted" style={{ margin: 0 }}>
+              Participación: {fichaE.votos.length} de {unidades.length} unidades {fichaE.e.cierra && `· Cierra ${fecha(fichaE.e.cierra)}`}
+            </p>
+            <div>
+              {(fichaE.e.opciones ?? []).filter(Boolean).map((o) => {
+                const n = fichaE.votos.filter((v) => v.opcion === o).length;
+                const pct = fichaE.votos.length ? Math.round((n / fichaE.votos.length) * 100) : 0;
+                return (
+                  <div key={o} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{o}</span>
+                      <span className="small muted">
+                        {n} · {pct}%
+                      </span>
+                    </div>
+                    <div className="bar">
+                      <i style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <Firma item={fichaE.e} alta="Creada por" cambio={fichaE.e.estado === 'CERRADA' ? 'Cerrada por' : undefined} />
+            {(gestiona || fichaE.e.estado === 'CERRADA') && (
+              <Acciones>
+                {fichaE.e.estado === 'CERRADA' && (
+                  <button className="btn-app secondary" disabled={descargando === fichaE.e.id} onClick={() => excel(fichaE.e, fichaE.votos)}>
+                    <Icon name="download" />
+                    {descargando === fichaE.e.id ? 'Generando…' : 'Descargar resultados en Excel'}
+                  </button>
+                )}
+                {gestiona && (
+                  <>
+                    <button className="btn-app secondary" onClick={() => cerrar(fichaE.e)}>
+                      {fichaE.e.estado === 'CERRADA' ? 'Reabrir encuesta' : 'Cerrar encuesta'}
+                    </button>
+                    <button className="btn-app danger" onClick={() => borrar(fichaE.e)}>
+                      <Icon name="trash" />
+                      Eliminar
+                    </button>
+                  </>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {nueva && <NuevaEncuesta onClose={() => setNueva(false)} onDone={() => (setNueva(false), reload(true))} />}
     </div>
@@ -476,18 +513,18 @@ export function ChatAdmin({ onCambio, inicial }: { onCambio?: () => void; inicia
           </Field>
           <h3 style={{ marginTop: 16 }}>Recientes</h3>
           {recientes.length ? (
-            <ul className="list">
+            <Tarjetas>
               {recientes.map((m) => (
-                <li key={m.unidadId} style={{ cursor: 'pointer' }} onClick={() => setUnidadId(m.unidadId)}>
-                  <div className="list-main">
-                    <strong>{etiqueta(m.unidadId)}</strong> {m.autorRol === 'RESIDENTE' && <Badge estado="PENDIENTE">Por responder</Badge>}
-                    <div className="list-sub">
-                      {m.texto.slice(0, 70)} · {fechaHora(m.createdAt)}
-                    </div>
-                  </div>
-                </li>
+                <Tarjeta
+                  key={m.unidadId}
+                  tono={m.autorRol === 'RESIDENTE' ? 'warn' : m.unidadId === unidadId ? 'info' : 'neutro'}
+                  onClick={() => setUnidadId(m.unidadId)}
+                  titulo={etiqueta(m.unidadId)}
+                  sub={`${m.texto.slice(0, 70)} · ${fechaHora(m.createdAt)}`}
+                  lado={m.autorRol === 'RESIDENTE' ? <Badge estado="PENDIENTE">Por responder</Badge> : undefined}
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="chat">Sin conversaciones.</Empty>
           )}

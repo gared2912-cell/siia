@@ -2,7 +2,7 @@
 // admin-api firma la subida directa a S3 y la descarga; aquí solo se guarda la referencia en el condominio.
 import { useRef, useState } from 'react';
 import { adminCall } from '../api';
-import { Icon, errMsg, fecha, useToast } from '../ui';
+import { Acciones, Badge, Field, Icon, Modal, Tarjeta, TarjetaIcono, errMsg, fecha, useToast } from '../ui';
 import { useAdmin } from './AdminApp';
 import { SLOTS_DOC, SLOTS_GENERALES, documentosDe, type Documento } from '../../../amplify/functions/shared/documentos';
 
@@ -30,7 +30,7 @@ export function Documentos({
       <p className="small muted" style={{ marginTop: 0 }}>
         {nota ? `${nota} ` : ''}PDF, Word, Excel o imagen, máximo 20 MB cada uno.
       </p>
-      <ul className="list">
+      <ul className="tarjetas">
         {SLOTS.filter((s) => slots.includes(s.slot)).map((s) => (
           <Fila key={`${condo!.id}-${s.slot}`} conf={s} doc={docs.find((d) => d.slot === s.slot)} gestiona={gestiona} onCambio={reloadCondos} />
         ))}
@@ -55,6 +55,7 @@ function Fila({
   const input = useRef<HTMLInputElement>(null);
   const [titulo, setTitulo] = useState(conf.titulo ?? doc?.titulo ?? '');
   const [busy, setBusy] = useState('');
+  const [abierta, setAbierta] = useState(false);
   const fijo = !!conf.titulo;
 
   async function accion(etiqueta: string, fn: () => Promise<unknown>, ok: string) {
@@ -105,78 +106,84 @@ function Fila({
 
   const tituloCambio = !fijo && doc && titulo.trim() && titulo.trim() !== doc.titulo;
 
+  const nombre = fijo ? conf.titulo : doc?.titulo || conf.placeholder;
   return (
-    <li style={{ display: 'block' }}>
-      <div className="row-actions" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
-          {fijo ? (
-            <strong style={{ color: 'var(--slate)' }}>{conf.titulo}</strong>
-          ) : (
-            <input
-              className="input"
-              style={{ maxWidth: 320 }}
-              maxLength={80}
-              placeholder={`Título · ${conf.placeholder}`}
-              value={titulo}
-              disabled={!gestiona || !!busy}
-              onChange={(e) => setTitulo(e.target.value)}
-              aria-label="Título del documento"
-            />
-          )}
-          <div className="list-sub" style={{ overflowWrap: 'anywhere', marginTop: 4 }}>
-            {doc ? `${doc.nombre} · ${peso(doc.tamano)} · subido ${fecha(doc.subido)}` : 'Sin archivo'}
-          </div>
-        </div>
-        <div className="row-actions">
-          {tituloCambio && gestiona && (
-            <button
-              className="btn-app sm"
-              disabled={!!busy}
-              onClick={() =>
-                accion('titulo', () => adminCall('documentos.guardar', { condominioId: condoId, slot: conf.slot, titulo }), 'Título guardado')
-              }
-            >
-              Guardar título
-            </button>
-          )}
-          {doc && (
-            <button className="btn-app sm secondary" onClick={ver}>
-              <Icon name="file" />
-              Ver
-            </button>
-          )}
-          {gestiona && (
-            <>
-              <input
-                ref={input}
-                type="file"
-                hidden
-                accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
-                onChange={(e) => {
-                  subir(e.target.files?.[0]);
-                  e.target.value = '';
-                }}
-              />
-              <button className="btn-app sm secondary" disabled={!!busy} onClick={() => input.current?.click()}>
-                <Icon name="upload" />
-                {busy === 'subir' ? 'Subiendo…' : doc ? 'Reemplazar' : 'Subir archivo'}
-              </button>
-              {doc && (
+    <>
+      <Tarjeta
+        tono={doc ? 'ok' : 'warn'}
+        onClick={() => setAbierta(true)}
+        media={<TarjetaIcono name="file" />}
+        titulo={nombre}
+        sub={doc ? `${doc.nombre} · ${peso(doc.tamano)} · subido ${fecha(doc.subido)}` : 'Sin archivo'}
+        lado={doc ? <Badge estado="APROBADO">Cargado</Badge> : <Badge estado="PENDIENTE">Falta</Badge>}
+      />
+      {abierta && (
+        <Modal title={nombre ?? 'Documento'} onClose={() => setAbierta(false)}>
+          <div className="stack">
+            {!fijo && (
+              <Field label="Título del documento">
+                <input
+                  maxLength={80}
+                  placeholder={conf.placeholder}
+                  value={titulo}
+                  disabled={!gestiona || !!busy}
+                  onChange={(e) => setTitulo(e.target.value)}
+                />
+              </Field>
+            )}
+            <p className="small muted" style={{ margin: 0, overflowWrap: 'anywhere' }}>
+              {doc ? `${doc.nombre} · ${peso(doc.tamano)} · subido ${fecha(doc.subido)}` : 'Aún no se sube el archivo.'}
+            </p>
+            <Acciones>
+              {tituloCambio && gestiona && (
                 <button
-                  className="btn-app sm danger"
+                  className="btn-app"
                   disabled={!!busy}
-                  onClick={() =>
-                    confirm(`¿Quitar «${doc.titulo}»?`) &&
-                    accion('quitar', () => adminCall('documentos.quitar', { condominioId: condoId, slot: conf.slot }), 'Documento quitado')
-                  }
+                  onClick={() => accion('titulo', () => adminCall('documentos.guardar', { condominioId: condoId, slot: conf.slot, titulo }), 'Título guardado')}
                 >
-                  Quitar
+                  Guardar título
                 </button>
               )}
-            </>
-          )}
-        </div>
-      </div>
-    </li>
+              {doc && (
+                <button className="btn-app secondary" onClick={ver}>
+                  <Icon name="file" />
+                  Ver
+                </button>
+              )}
+              {gestiona && (
+                <>
+                  <input
+                    ref={input}
+                    type="file"
+                    hidden
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                    onChange={(e) => {
+                      subir(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button className="btn-app secondary" disabled={!!busy} onClick={() => input.current?.click()}>
+                    <Icon name="upload" />
+                    {busy === 'subir' ? 'Subiendo…' : doc ? 'Reemplazar' : 'Subir archivo'}
+                  </button>
+                  {doc && (
+                    <button
+                      className="btn-app danger"
+                      disabled={!!busy}
+                      onClick={() =>
+                        confirm(`¿Quitar «${doc.titulo}»?`) &&
+                        accion('quitar', () => adminCall('documentos.quitar', { condominioId: condoId, slot: conf.slot }), 'Documento quitado')
+                      }
+                    >
+                      Quitar
+                    </button>
+                  )}
+                </>
+              )}
+            </Acciones>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

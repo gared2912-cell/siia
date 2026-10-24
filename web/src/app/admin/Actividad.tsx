@@ -2,7 +2,7 @@
 // cambió. Lo escribe el servidor en cada acción de la administración (ver amplify/functions/shared/firma.ts).
 import { useMemo, useState } from 'react';
 import { adminCall } from '../api';
-import { Empty, ErrorBox, Field, Loading, PageHead, Seg, hoy, useLoad } from '../ui';
+import { Empty, ErrorBox, Field, Loading, Modal, PageHead, Seg, Tarjeta, Tarjetas, hoy, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 
 type Campo = { campo: string; antes: unknown; despues: unknown };
@@ -45,6 +45,7 @@ export function Actividad() {
   );
   const personas = useMemo(() => [...new Set((data ?? []).map((e) => e.porNombre || '—'))].sort(), [data]);
   const lista = (data ?? []).filter((e) => !quien || (e.porNombre || '—') === quien);
+  const abiertoE = lista.find((e) => e.id === abierto);
   // Las unidades y condominios se guardan por id: se muestran por su nombre.
   const nombreDe = (campo: string, v: unknown) => {
     if (campo === 'unidadId') return unidades.find((u) => u.id === v)?.etiqueta ?? valor(v);
@@ -95,63 +96,68 @@ export function Actividad() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <ul className="list">
+            <Tarjetas>
               {lista.map((e) => (
-                <li key={e.id} style={{ display: 'block' }}>
-                  <button type="button" className="fila-click" style={{ padding: 0 }} onClick={() => setAbierto(abierto === e.id ? null : e.id)}>
-                    <span className="list-main">
-                      <strong>{e.resumen || e.accion}</strong>
-                      <span className="list-sub" style={{ display: 'block' }}>
-                        {e.porNombre}
-                        {e.porRol === 'SUPERADMIN' && ' (Superadmin)'}
-                        {e.porEmail && ` · ${e.porEmail}`} · {fechaHora(e.fecha)}
-                      </span>
-                      <span className="small muted" style={{ display: 'block' }}>
-                        {e.cambios
-                          .slice(0, 3)
-                          .map((c) => `${c.tipo ?? c.modelo}${c.etiqueta ? `: ${c.etiqueta}` : ''}`)
-                          .join(' · ')}
-                        {e.cambios.length > 3 && ` y ${e.cambios.length - 3} más`}
-                      </span>
-                    </span>
-                  </button>
-                  {abierto === e.id && (
-                    <div className="actividad-detalle">
-                      {e.cambios.map((c, i) => (
-                        <div key={i} className="actividad-cambio">
-                          <div className="small">
-                            <strong>
-                              {OP[c.op]} · {c.tipo ?? c.modelo}
-                            </strong>
-                            {c.etiqueta && ` · ${c.etiqueta}`}
-                          </div>
-                          {c.campos.length > 0 && (
-                            <ul className="actividad-campos">
-                              {c.campos.map((f) => (
-                                <li key={f.campo}>
-                                  <span className="muted">{CAMPOS[f.campo] ?? f.campo}:</span>{' '}
-                                  {c.op === 'cambio' ? (
-                                    <>
-                                      <s>{nombreDe(f.campo, f.antes)}</s> → {nombreDe(f.campo, f.despues)}
-                                    </>
-                                  ) : (
-                                    nombreDe(f.campo, c.op === 'baja' ? f.antes : f.despues)
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </li>
+                <Tarjeta
+                  key={e.id}
+                  tono={e.cambios.some((c) => c.op === 'baja') ? 'mal' : e.cambios.every((c) => c.op === 'alta') ? 'ok' : 'info'}
+                  onClick={() => setAbierto(e.id)}
+                  titulo={e.resumen || e.accion}
+                  sub={`${e.porNombre}${e.porRol === 'SUPERADMIN' ? ' (Superadmin)' : ''}${e.porEmail ? ` · ${e.porEmail}` : ''} · ${fechaHora(e.fecha)}`}
+                >
+                  <span className="small muted">
+                    {e.cambios
+                      .slice(0, 3)
+                      .map((c) => `${c.tipo ?? c.modelo}${c.etiqueta ? `: ${c.etiqueta}` : ''}`)
+                      .join(' · ')}
+                    {e.cambios.length > 3 && ` y ${e.cambios.length - 3} más`}
+                  </span>
+                </Tarjeta>
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="clock">Sin actividad en esas fechas.</Empty>
           )}
         </section>
+      )}
+      {abiertoE && (
+        <Modal title={abiertoE.resumen || abiertoE.accion} onClose={() => setAbierto(null)} wide>
+          <div className="stack">
+            <p className="small muted" style={{ margin: 0 }}>
+              {abiertoE.porNombre}
+              {abiertoE.porRol === 'SUPERADMIN' && ' (Superadmin)'}
+              {abiertoE.porEmail && ` · ${abiertoE.porEmail}`} · {fechaHora(abiertoE.fecha)}
+            </p>
+                    <div className="actividad-detalle">
+              {abiertoE.cambios.map((c, i) => (
+                <div key={i} className="actividad-cambio">
+                  <div className="small">
+                    <strong>
+                      {OP[c.op]} · {c.tipo ?? c.modelo}
+                    </strong>
+                    {c.etiqueta && ` · ${c.etiqueta}`}
+                  </div>
+                  {c.campos.length > 0 && (
+                    <ul className="actividad-campos">
+                      {c.campos.map((f) => (
+                        <li key={f.campo}>
+                          <span className="muted">{CAMPOS[f.campo] ?? f.campo}:</span>{' '}
+                          {c.op === 'cambio' ? (
+                            <>
+                              <s>{nombreDe(f.campo, f.antes)}</s> → {nombreDe(f.campo, f.despues)}
+                            </>
+                          ) : (
+                            nombreDe(f.campo, c.op === 'baja' ? f.antes : f.despues)
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -100,6 +100,93 @@ export function Badge({ estado, children }: { estado?: string | null; children?:
   return <span className={`badge ${TONO[estado ?? ''] ?? ''}`}>{children ?? etiquetaEstado(estado)}</span>;
 }
 
+// ---------- Tarjetas ----------
+/** Color de la orilla de una tarjeta: verde = bien, rojo = adeudo o rechazo, ámbar = pendiente, teal = en curso, gris = neutro. */
+export type Tono = 'ok' | 'mal' | 'warn' | 'info' | 'neutro';
+const TONO_TARJETA: Record<string, Tono> = { ok: 'ok', warn: 'warn', bad: 'mal', info: 'info' };
+/** Tono de tarjeta según el estado de un registro (el mismo color que su insignia). */
+export const tonoDe = (estado?: string | null): Tono => TONO_TARJETA[TONO[estado ?? ''] ?? ''] ?? 'neutro';
+
+export function Tarjetas({ children, className }: { children: ReactNode; className?: string }) {
+  return <ul className={className ? `tarjetas ${className}` : 'tarjetas'}>{children}</ul>;
+}
+/**
+ * Tarjeta de una lista: toda la tarjeta se toca para abrir su detalle (onClick). La orilla izquierda toma el color
+ * del estado. `media`: foto o icono a la izquierda; `lado`: insignias o montos a la derecha.
+ */
+export function Tarjeta({
+  tono = 'neutro',
+  onClick,
+  media,
+  titulo,
+  sub,
+  lado,
+  children,
+  label,
+}: {
+  tono?: Tono;
+  onClick?: () => void;
+  media?: ReactNode;
+  titulo: ReactNode;
+  sub?: ReactNode;
+  lado?: ReactNode;
+  children?: ReactNode;
+  label?: string;
+}) {
+  const cuerpo = (
+    <>
+      {media && <span className="tarjeta-media">{media}</span>}
+      <span className="tarjeta-main">
+        <strong className="tarjeta-titulo">{titulo}</strong>
+        {sub && <span className="tarjeta-sub">{sub}</span>}
+        {children}
+      </span>
+      {lado && <span className="tarjeta-lado">{lado}</span>}
+    </>
+  );
+  return (
+    <li className={`tarjeta t-${tono}`}>
+      {onClick ? (
+        <button type="button" className="tarjeta-in tocable" onClick={onClick} aria-label={label}>
+          {cuerpo}
+        </button>
+      ) : (
+        <div className="tarjeta-in">{cuerpo}</div>
+      )}
+    </li>
+  );
+}
+/** Icono dentro del cuadrito de la tarjeta (cuando no hay foto). */
+export const TarjetaIcono = ({ name }: { name: string }) => (
+  <span className="tarjeta-icono">
+    <Icon name={name} />
+  </span>
+);
+/** Datos generales en el detalle de una tarjeta: etiqueta y valor (se omiten los vacíos). */
+export function Datos({ items }: { items: [string, ReactNode][] }) {
+  const l = items.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false);
+  if (!l.length) return null;
+  return (
+    <dl className="datos">
+      {l.map(([k, v]) => (
+        <div key={k}>
+          <dt>{k}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+/** Acciones dentro del detalle de una tarjeta (los botones que antes estaban afuera). */
+export function Acciones({ children, titulo = 'Acciones' }: { children: ReactNode; titulo?: string }) {
+  return (
+    <div className="acciones-ficha">
+      <span className="acciones-titulo">{titulo}</span>
+      <div className="acciones-botones">{children}</div>
+    </div>
+  );
+}
+
 // ---------- Carga de datos ----------
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | undefined>();

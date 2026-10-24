@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { portal } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, fechaHora, hoy, money, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, hoy, money, tonoDe, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 export type Amenidad = {
@@ -124,6 +124,7 @@ function Documentos({ docs }: { docs: Doc[] }) {
 export function Amenidades(_: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<{ amenidades: Amenidad[]; documentos: Doc[]; misReservas: Reserva[] }>('amenidades.lista'));
   const [reservar, setReservar] = useState<Amenidad | null>(null);
+  const [fichaR, setFichaR] = useState<string | null>(null);
   const { run } = useAction();
 
   if (loading && !data) return <Loading />;
@@ -138,6 +139,7 @@ export function Amenidades(_: ModProps) {
     return a ? (padre ? `${a.nombre} · ${padre.nombre}` : a.nombre) : 'Amenidad';
   };
   const hoyStr = hoy();
+  const fichaRes = misReservas.find((r) => r.id === fichaR);
 
   const cancelar = (r: Reserva) =>
     confirm('¿Cancelar esta reserva?') && run(() => portal('amenidades.cancelar', { reservaId: r.id }).then(() => reload(true)), 'Reserva cancelada');
@@ -152,39 +154,39 @@ export function Amenidades(_: ModProps) {
       )}
 
       {principales.length ? (
-        <div className="grid-cards">
+        <Tarjetas>
           {principales.map((a) => {
             const sec = secciones(a.id);
+            const detalle = [
+              (a.horaApertura || a.horaCierre) && `Horario ${a.horaApertura ?? '00:00'} – ${a.horaCierre ?? '23:59'}`,
+              a.maxHoras ? `Máximo ${a.maxHoras} h` : '',
+              a.capacidad ? `Capacidad ${a.capacidad} personas` : '',
+              sec.length ? `Completa o por secciones: ${sec.map((x) => x.nombre).join(', ')}` : '',
+              a.requiereAprobacion ? 'Requiere aprobación' : '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
-              <article key={a.id} className="panel" style={{ marginTop: 0 }}>
-                <h3>{a.nombre}</h3>
-                {a.descripcion && <p className="small">{a.descripcion}</p>}
-                <ul className="small muted" style={{ paddingLeft: 18, margin: '0 0 12px' }}>
-                  {(a.horaApertura || a.horaCierre) && (
-                    <li>
-                      Horario {a.horaApertura ?? '00:00'} – {a.horaCierre ?? '23:59'}
-                    </li>
-                  )}
-                  {a.maxHoras ? <li>Máximo {a.maxHoras} h por reserva</li> : null}
-                  {a.capacidad ? <li>Capacidad {a.capacidad} personas</li> : null}
-                  {a.costo ? <li>{sec.length ? 'Completa' : 'Costo'}: {money(a.costo)}</li> : null}
-                  {sec.map((x) => (
-                    <li key={x.id}>
-                      {x.nombre}
-                      {x.costo ? `: ${money(x.costo)}` : ''}
-                    </li>
-                  ))}
-                  {a.requiereAprobacion && <li>Requiere aprobación de la administración</li>}
-                </ul>
-                {sec.length > 0 && <p className="small" style={{ margin: '0 0 12px' }}>Puedes reservarla completa o solo las secciones que necesites.</p>}
-                <button className="btn-app sm" onClick={() => setReservar(a)}>
-                  <Icon name="calendar" />
-                  Reservar
-                </button>
-              </article>
+              <Tarjeta
+                key={a.id}
+                tono="info"
+                onClick={() => setReservar(a)}
+                label={`Reservar ${a.nombre}`}
+                media={<TarjetaIcono name="calendar" />}
+                titulo={a.nombre}
+                sub={a.descripcion ? `${a.descripcion} · ${detalle}` : detalle}
+                lado={
+                  <>
+                    <strong>{a.costo ? money(a.costo) : 'Sin costo'}</strong>
+                    <span className="small" style={{ color: 'var(--teal-dark)', fontWeight: 700 }}>
+                      Reservar
+                    </span>
+                  </>
+                }
+              />
             );
           })}
-        </div>
+        </Tarjetas>
       ) : (
         <section className="panel">
           <Empty icon="calendar">La administración aún no da de alta amenidades.</Empty>
@@ -194,36 +196,54 @@ export function Amenidades(_: ModProps) {
       <section className="panel">
         <h2>Mis reservas</h2>
         {misReservas.length ? (
-          <ul className="list">
+          <Tarjetas>
             {misReservas.map((r) => (
-              <li key={r.id}>
-                <div className="list-main">
-                  <strong>{nombre(r.amenidadId)}</strong> <Badge estado={r.estado} />
-                  <div className="list-sub">
-                    {fecha(r.fecha, { weekday: 'long', day: 'numeric', month: 'long' })} · {r.horaInicio}–{r.horaFin}
-                    {r.invitados ? ` · ${r.invitados} invitados` : ''}
-                  </div>
-                  {r.estado === 'PENDIENTE_PAGO' && (
-                    <div className="small">
-                      Horario apartado para ti. Sube tu comprobante en Finanzas antes del{' '}
-                      <strong>{r.limitePago ? fechaHora(r.limitePago) : '—'}</strong> o la reserva se cancelará automáticamente.
-                    </div>
-                  )}
-                  {r.nota && <div className="small">{r.nota}</div>}
-                </div>
-                {['PENDIENTE_PAGO', 'SOLICITADA', 'APROBADA'].includes(r.estado) && r.fecha >= hoyStr && (
-                  <button className="btn-app sm danger" onClick={() => cancelar(r)}>
-                    Cancelar
-                  </button>
-                )}
-              </li>
+              <Tarjeta
+                key={r.id}
+                tono={r.estado === 'PENDIENTE_PAGO' ? 'warn' : tonoDe(r.estado)}
+                onClick={() => setFichaR(r.id)}
+                media={<TarjetaIcono name="calendar" />}
+                titulo={nombre(r.amenidadId)}
+                sub={`${fecha(r.fecha, { weekday: 'long', day: 'numeric', month: 'long' })} · ${r.horaInicio}–${r.horaFin}`}
+                lado={<Badge estado={r.estado} />}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="calendar">Aún no tienes reservas.</Empty>
         )}
       </section>
 
+      {fichaRes && (
+        <Modal title={nombre(fichaRes.amenidadId)} onClose={() => setFichaR(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={fichaRes.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Fecha', fecha(fichaRes.fecha, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })],
+                ['Horario', `${fichaRes.horaInicio}–${fichaRes.horaFin}`],
+                ['Invitados', fichaRes.invitados || null],
+                ['Nota', fichaRes.nota],
+              ]}
+            />
+            {fichaRes.estado === 'PENDIENTE_PAGO' && (
+              <div className="alert small">
+                Horario apartado para ti. Sube tu comprobante en Finanzas antes del <strong>{fichaRes.limitePago ? fechaHora(fichaRes.limitePago) : '—'}</strong> o la
+                reserva se cancelará automáticamente.
+              </div>
+            )}
+            {['PENDIENTE_PAGO', 'SOLICITADA', 'APROBADA'].includes(fichaRes.estado) && fichaRes.fecha >= hoyStr && (
+              <Acciones>
+                <button className="btn-app danger" onClick={() => (setFichaR(null), cancelar(fichaRes))}>
+                  Cancelar reserva
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {reservar && (
         <Reservar
           principal={reservar}
@@ -259,6 +279,7 @@ const mesLargo = (p: string) => {
 function FondoAmenidades() {
   const { data } = useLoad(() => portal<Fondo>('amenidades.fondo'));
   const { run } = useAction();
+  const [ficha, setFicha] = useState<Fondo['gastos'][number] | null>(null);
   if (!data || (!data.totalIngresos && !data.gastos.length)) return null;
   const abrir = (id: string, path: string) =>
     run(async () => {
@@ -295,30 +316,42 @@ function FondoAmenidades() {
       </div>
       <h3 style={{ marginTop: 18 }}>En qué se ha usado</h3>
       {data.gastos.length ? (
-        <ul className="list">
+        <Tarjetas>
           {data.gastos.map((g) => (
-            <li key={g.id} style={{ alignItems: 'flex-start' }}>
-              <div className="list-main">
-                <strong>
-                  {g.concepto} · {money(g.monto)}
-                </strong>
-                <div className="list-sub">
-                  {fecha(g.fecha)} · {g.categoria}
-                  {g.proveedor && ` · ${g.proveedor}`}
-                </div>
-                <div className="row-actions" style={{ marginTop: 4, gap: 10 }}>
-                  {g.evidencias.map((ev) => (
-                    <button key={ev.path} type="button" className="linklike small" onClick={() => abrir(g.id, ev.path)}>
-                      <Icon name="file" /> {ev.nombre.length > 28 ? `${ev.nombre.slice(0, 25)}…` : ev.nombre}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </li>
+            <Tarjeta
+              key={g.id}
+              tono="ok"
+              onClick={() => setFicha(g)}
+              media={<TarjetaIcono name="file" />}
+              titulo={g.concepto}
+              sub={[fecha(g.fecha), g.categoria, g.proveedor].filter(Boolean).join(' · ')}
+              lado={<strong>{money(g.monto)}</strong>}
+            />
           ))}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="money">Aún no se ha usado el fondo.</Empty>
+      )}
+      {ficha && (
+        <Modal title={ficha.concepto} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <strong>{money(ficha.monto)}</strong>
+            <Datos
+              items={[
+                ['Fecha', fecha(ficha.fecha)],
+                ['Categoría', ficha.categoria],
+                ['Proveedor', ficha.proveedor],
+              ]}
+            />
+            <Acciones titulo="Evidencia">
+              {ficha.evidencias.map((ev) => (
+                <button key={ev.path} type="button" className="btn-app secondary" onClick={() => abrir(ficha.id, ev.path)}>
+                  <Icon name="file" /> {ev.nombre.length > 28 ? `${ev.nombre.slice(0, 25)}…` : ev.nombre}
+                </button>
+              ))}
+            </Acciones>
+          </div>
+        </Modal>
       )}
     </section>
   );

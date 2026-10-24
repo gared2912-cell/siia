@@ -1,7 +1,7 @@
 // Finanzas › Egresos (gastos del condominio con su evidencia) y Finanzas › Balance mensual.
 import { useState } from 'react';
 import { adminCall, type Schema } from '../api';
-import { Empty, Field, Icon, Modal, fecha, hoy, money, periodoActual, useAction } from '../ui';
+import { Acciones, Datos, Empty, Field, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, hoy, money, periodoActual, useAction } from '../ui';
 import { Firma } from './Firma';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
@@ -57,6 +57,8 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
   const { run } = useAction();
   const lista = datos.egresos.filter((e) => e.fecha.slice(0, 7) === mes).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const total = lista.reduce((s, e) => s + e.monto, 0);
+  const [ficha, setFicha] = useState<string | null>(null);
+  const fichaE = datos.egresos.find((e) => e.id === ficha);
 
   const borrar = (e: Egreso) =>
     confirm(`¿Eliminar el egreso "${e.concepto}" por ${money(e.monto)}?`) &&
@@ -76,39 +78,26 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
         </div>
         <Mes value={mes} onChange={setMes} />
         {lista.length ? (
-          <ul className="list" style={{ marginTop: 12 }}>
-            {lista.map((e) => (
-              <li key={e.id} style={{ alignItems: 'flex-start' }}>
-                <div className="list-main">
-                  <strong>
-                    {e.concepto} · {money(e.monto)}
-                  </strong>{' '}
-                  {e.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
-                  <div className="list-sub">
-                    {fecha(e.fecha)} · {e.categoria}
-                    {e.proveedor && ` · ${e.proveedor}`}
-                    {e.formaPago && ` · ${e.formaPago}`}
-                  </div>
-                  <div className="row-actions" style={{ marginTop: 4, gap: 10 }}>
-                    {evidenciasDe(e).map((ev) => (
-                      <VerEvidencia key={ev.path} egresoId={e.id} ev={ev} />
-                    ))}
-                  </div>
-                  <Firma item={e} altaAntes={e.registradoPorNombre || e.registradoPor} />
-                </div>
-                {gestiona && (
-                  <div className="row-actions">
-                    <button className="linklike" onClick={() => setEditar(e)}>
-                      Editar
-                    </button>
-                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(e)}>
-                      Eliminar
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div style={{ marginTop: 12 }}>
+            <Tarjetas>
+              {lista.map((e) => (
+                <Tarjeta
+                  key={e.id}
+                  tono={evidenciasDe(e).length ? 'ok' : 'warn'}
+                  onClick={() => setFicha(e.id)}
+                  media={<TarjetaIcono name="file" />}
+                  titulo={e.concepto}
+                  sub={[fecha(e.fecha), e.categoria, e.proveedor, e.formaPago].filter(Boolean).join(' · ')}
+                  lado={
+                    <>
+                      <strong>{money(e.monto)}</strong>
+                      {e.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
+                    </>
+                  }
+                />
+              ))}
+            </Tarjetas>
+          </div>
         ) : (
           <Empty icon="money">Sin egresos registrados en {nombreMes(mes).toLowerCase()}.</Empty>
         )}
@@ -118,6 +107,48 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
           </p>
         )}
       </section>
+      {fichaE && (
+        <Modal title={fichaE.concepto} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <strong>{money(fichaE.monto)}</strong>
+              {fichaE.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
+            </div>
+            <Datos
+              items={[
+                ['Fecha', fecha(fichaE.fecha)],
+                ['Categoría', fichaE.categoria],
+                ['Proveedor', fichaE.proveedor],
+                ['Forma de pago', fichaE.formaPago],
+              ]}
+            />
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="acciones-titulo">Evidencia</span>
+              {evidenciasDe(fichaE).length ? (
+                <div className="row-actions" style={{ gap: 10 }}>
+                  {evidenciasDe(fichaE).map((ev) => (
+                    <VerEvidencia key={ev.path} egresoId={fichaE.id} ev={ev} />
+                  ))}
+                </div>
+              ) : (
+                <span className="small muted">Sin evidencia.</span>
+              )}
+            </div>
+            <Firma item={fichaE} altaAntes={fichaE.registradoPorNombre || fichaE.registradoPor} />
+            {gestiona && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => (setEditar(fichaE), setFicha(null))}>
+                  Editar
+                </button>
+                <button className="btn-app danger" onClick={() => (setFicha(null), borrar(fichaE))}>
+                  <Icon name="trash" />
+                  Eliminar
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {editar && (
         <EditarEgreso
           e={editar}
@@ -302,6 +333,7 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
           </div>
         </div>
       </section>
+
 
       <div className="grid-2">
         <section className="panel">

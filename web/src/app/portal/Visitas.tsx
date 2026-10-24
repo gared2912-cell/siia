@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { portal } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, etiquetaEstado, fecha, fechaHora, hoy, useAction, useLoad, usePoll } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, etiquetaEstado, fecha, fechaHora, hoy, tonoDe, useAction, useLoad, usePoll } from '../ui';
 import type { ModProps } from './PortalApp';
 
 export type Visita = {
@@ -40,6 +40,7 @@ export function Visitas({ perfil }: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<Visita[]>('visitas.lista'));
   const [nueva, setNueva] = useState(false);
   const [pase, setPase] = useState<Visita | null>(null);
+  const [ficha, setFicha] = useState<Visita | null>(null);
   const [filtro, setFiltro] = useState<'activas' | 'historial'>('activas');
   const { run, busy } = useAction();
   // Alguien en caseta esperando que el residente autorice su acceso
@@ -104,49 +105,19 @@ export function Visitas({ perfil }: ModProps) {
 
       <section className="panel">
         {lista.length ? (
-          <ul className="list">
+          <Tarjetas>
             {lista.map((v) => (
-              <li key={v.id}>
-                <div className="tile-icon">
-                  <Icon name={v.tipo === 'PAQUETERIA' ? 'package' : v.origen === 'CASETA' ? 'shield' : 'qr'} />
-                </div>
-                <div className="list-main">
-                  <strong>{v.nombre}</strong> <Badge estado={v.estado} />
-                  <div className="list-sub">
-                    {TIPOS.find((t) => t[0] === v.tipo)?.[1].split(' (')[0]} · {fecha(v.fecha)}
-                    {v.fechaFin && ` al ${fecha(v.fechaFin)}`}
-                    {v.enAuto && ' · en auto'}
-                    {v.placas && ` · ${v.placas}`}
-                    {v.origen === 'CASETA' && ' · Registrada en caseta'}
-                  </div>
-                  {v.respuestaPor && (v.estado === 'AUTORIZADA' || v.estado === 'RECHAZADA' || v.respuestaVia === 'LLAMADA') && (
-                    <div className="list-sub">
-                      {v.estado === 'RECHAZADA' ? 'Rechazado' : 'Autorizado'} por {v.respuestaPor}
-                      {v.respuestaVia === 'LLAMADA' && ' (por llamada a caseta)'}
-                    </div>
-                  )}
-                  {(v.entradaEn || v.salidaEn) && (
-                    <div className="list-sub">
-                      {v.entradaEn && `Entrada ${fechaHora(v.entradaEn)}`} {v.salidaEn && `· Salida ${fechaHora(v.salidaEn)}`}
-                    </div>
-                  )}
-                </div>
-                <div className="row-actions">
-                  {vigenteOFutura(v) && (
-                    <button className="btn-app sm" onClick={() => setPase(v)}>
-                      <Icon name="qr" />
-                      Pase
-                    </button>
-                  )}
-                  {v.origen !== 'CASETA' && vigenteOFutura(v) && (
-                    <button className="btn-app sm danger" onClick={() => cancelar(v)}>
-                      Cancelar
-                    </button>
-                  )}
-                </div>
-              </li>
+              <Tarjeta
+                key={v.id}
+                tono={tonoDe(v.estado)}
+                onClick={() => setFicha(v)}
+                media={<TarjetaIcono name={v.tipo === 'PAQUETERIA' ? 'package' : v.origen === 'CASETA' ? 'shield' : 'qr'} />}
+                titulo={v.nombre}
+                sub={`${TIPOS.find((t) => t[0] === v.tipo)?.[1].split(' (')[0]} · ${fecha(v.fecha)}${v.fechaFin ? ` al ${fecha(v.fechaFin)}` : ''}${v.placas ? ` · ${v.placas}` : ''}`}
+                lado={<Badge estado={v.estado} />}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="qr">{filtro === 'activas' ? 'No tienes pases vigentes.' : 'Sin historial todavía.'}</Empty>
         )}
@@ -161,6 +132,45 @@ export function Visitas({ perfil }: ModProps) {
             reload(true);
           }}
         />
+      )}
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Tipo', TIPOS.find((t) => t[0] === ficha.tipo)?.[1].split(' (')[0]],
+                ['Fecha', ficha.fechaFin ? `${fecha(ficha.fecha)} al ${fecha(ficha.fechaFin)}` : fecha(ficha.fecha)],
+                ['En auto', ficha.enAuto ? 'Sí' : null],
+                ['Placas', ficha.placas],
+                ['Origen', ficha.origen === 'CASETA' ? 'Registrada en caseta' : null],
+                [
+                  ficha.estado === 'RECHAZADA' ? 'Rechazado por' : 'Autorizado por',
+                  ficha.respuestaPor && (ficha.estado === 'AUTORIZADA' || ficha.estado === 'RECHAZADA' || ficha.respuestaVia === 'LLAMADA')
+                    ? `${ficha.respuestaPor}${ficha.respuestaVia === 'LLAMADA' ? ' (por llamada a caseta)' : ''}`
+                    : null,
+                ],
+                ['Entrada', ficha.entradaEn ? fechaHora(ficha.entradaEn) : null],
+                ['Salida', ficha.salidaEn ? fechaHora(ficha.salidaEn) : null],
+              ]}
+            />
+            {vigenteOFutura(ficha) && (
+              <Acciones>
+                <button className="btn-app" onClick={() => (setPase(ficha), setFicha(null))}>
+                  <Icon name="qr" />
+                  Ver pase
+                </button>
+                {ficha.origen !== 'CASETA' && (
+                  <button className="btn-app danger" onClick={() => (setFicha(null), cancelar(ficha))}>
+                    Cancelar pase
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {pase && <Pase visita={pase} condominio={perfil.condominio!.nombre} onClose={() => setPase(null)} />}
     </div>

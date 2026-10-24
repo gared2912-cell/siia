@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { TarjetaReporteFotos } from '../FotosReporte';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, VerImagen, etiquetaEstado, fecha, fechaHora, useAction, useLoad } from '../ui';
+import { Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, VerImagen, etiquetaEstado, fecha, fechaHora, tonoDe, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 type Incidente = {
@@ -60,38 +60,26 @@ function MisIncidentes({ lista, abrir }: { lista: Incidente[]; abrir: (id: strin
   return (
     <section className="panel">
       {lista.length ? (
-        <ul className="list">
+        <Tarjetas>
           {lista.map((i) => {
             const etapas = i.seguimiento?.length ?? 0;
             return (
-              <li key={i.id} style={{ display: 'block' }}>
-                <button type="button" className="fila-click" onClick={() => abrir(i.id)}>
-                  {i.fotoUrl && esImagen(i.fotoPath) ? (
-                    <img className="photo-thumb" src={i.fotoUrl} alt="" />
-                  ) : (
-                    <span className="tile-icon">
-                      <Icon name={i.fotoPath ? 'file' : 'alert'} />
-                    </span>
-                  )}
-                  <span className="list-main">
-                    <strong>{i.titulo}</strong> <Badge estado={i.estado} />
-                    <span className="list-sub" style={{ display: 'block' }}>
-                      {i.categoria} · {fecha(i.createdAt)} {i.ubicacion && `· ${i.ubicacion}`}
-                    </span>
-                    <span className="small" style={{ display: 'block', color: 'var(--teal-dark)', marginTop: 2 }}>
-                      {etapas
-                        ? `Ver seguimiento (${etapas} ${etapas === 1 ? 'actualización' : 'actualizaciones'})`
-                        : i.estado === 'ABIERTO'
-                          ? 'Ver reporte · aún sin respuesta'
-                          : 'Ver reporte'}
-                    </span>
-                  </span>
-                  <Icon name="arrow" />
-                </button>
-              </li>
+              <Tarjeta
+                key={i.id}
+                tono={i.estado === 'ABIERTO' ? 'warn' : tonoDe(i.estado)}
+                onClick={() => abrir(i.id)}
+                media={i.fotoUrl && esImagen(i.fotoPath) ? <img className="photo-thumb" src={i.fotoUrl} alt="" /> : <TarjetaIcono name={i.fotoPath ? 'file' : 'alert'} />}
+                titulo={i.titulo}
+                sub={`${i.categoria} · ${fecha(i.createdAt)}${i.ubicacion ? ` · ${i.ubicacion}` : ''}`}
+                lado={<Badge estado={i.estado} />}
+              >
+                <span className="small" style={{ color: 'var(--teal-dark)' }}>
+                  {etapas ? `${etapas} ${etapas === 1 ? 'actualización' : 'actualizaciones'}` : i.estado === 'ABIERTO' ? 'Aún sin respuesta' : ''}
+                </span>
+              </Tarjeta>
             );
           })}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="alert">No has reportado incidentes.</Empty>
       )}
@@ -227,27 +215,42 @@ function Trabajos() {
 }
 
 function ListaMantenimientos({ lista: data }: { lista: Mant[] }) {
+  const [ficha, setFicha] = useState<Mant | null>(null);
   return (
     <section className="panel">
       {data!.length ? (
-        <ul className="list">
+        <Tarjetas>
           {data!.map((m) => (
-            <li key={m.id}>
-              <div className="tile-icon">
-                <Icon name="tools" />
-              </div>
-              <div className="list-main">
-                <strong>{m.titulo}</strong> <Badge estado={m.estado} />
-                <div className="list-sub">
-                  {m.tipo === 'CORRECTIVO' ? 'Correctivo' : 'Preventivo'} · {fecha(m.fecha)} {m.area && `· ${m.area}`}
-                </div>
-                {m.notas && <div className="small pre">{m.notas}</div>}
-              </div>
-            </li>
+            <Tarjeta
+              key={m.id}
+              tono={tonoDe(m.estado)}
+              onClick={() => setFicha(m)}
+              media={<TarjetaIcono name="tools" />}
+              titulo={m.titulo}
+              sub={[m.tipo === 'CORRECTIVO' ? 'Correctivo' : 'Preventivo', fecha(m.fecha), m.area].filter(Boolean).join(' · ')}
+              lado={<Badge estado={m.estado} />}
+            />
           ))}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="tools">Sin mantenimientos programados.</Empty>
+      )}
+      {ficha && (
+        <Modal title={ficha.titulo} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Tipo', ficha.tipo === 'CORRECTIVO' ? 'Correctivo' : 'Preventivo'],
+                ['Fecha', fecha(ficha.fecha)],
+                ['Área', ficha.area],
+              ]}
+            />
+            {ficha.notas && <p className="small pre" style={{ margin: 0 }}>{ficha.notas}</p>}
+          </div>
+        </Modal>
       )}
     </section>
   );

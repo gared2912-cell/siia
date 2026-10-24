@@ -830,9 +830,6 @@ table.tbl {
   font-weight: 600;
   color: var(--slate);
 }
-.fila-click .comunicado-resumen {
-  -webkit-line-clamp: 2;
-}
 
 /* Adjuntar: «Tomar foto» y «Subir…» con el archivo elegido debajo */
 .elegir-archivo {
@@ -1011,53 +1008,6 @@ table.tbl {
   font-weight: 600;
 }
 
-/* Cargos del residente: un renglón por cargo que cabe en el celular */
-.cargos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
-}
-.cargo {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: #f7fafb;
-}
-.cargo-main {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.cargo-main strong {
-  color: var(--slate);
-  font-size: 0.95rem;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-}
-.cargo-vence {
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-.cargo-lado {
-  display: grid;
-  justify-items: end;
-  gap: 4px;
-  flex: none;
-}
-.cargo-monto {
-  font-family: var(--font-title);
-  font-weight: 700;
-  font-size: 1.05rem;
-  color: var(--slate);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .muted {
   color: var(--muted);
 }
@@ -1998,30 +1948,6 @@ table.tbl {
   background: #fafcfc;
 }
 
-/* Incidentes: fila que abre el seguimiento */
-.fila-click {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  width: 100%;
-  padding: 12px 0;
-  border: 0;
-  background: none;
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-.fila-click:hover strong {
-  color: var(--teal-dark);
-}
-.fila-click > svg {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  color: var(--muted);
-}
-
 /* Incidentes: línea de tiempo del seguimiento */
 .etapas {
   list-style: none;
@@ -2153,41 +2079,6 @@ table.tbl {
 }
 
 /* Panel › Residentes: una tarjeta por casa o departamento */
-.res-lista {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 12px;
-}
-.res-unidad {
-  border: 1px solid var(--card-line);
-  border-radius: var(--radius-app);
-  background: #fff;
-  overflow: hidden;
-  box-shadow: var(--card-shadow);
-}
-.res-cab {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  padding: 12px 14px;
-  background: var(--bg-soft);
-  border-bottom: 1px solid var(--line);
-}
-.res-titulo {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.res-titulo strong {
-  font-size: 1.05rem;
-  color: var(--slate);
-}
 .res-acciones {
   display: flex;
   flex-wrap: wrap;
@@ -2218,7 +2109,6 @@ table.tbl {
   margin-top: 0;
 }
 @media (max-width: 560px) {
-  .res-cab .res-acciones,
   .res-persona .res-acciones {
     width: 100%;
   }
@@ -2673,8 +2563,12 @@ table.tbl {
 }
 
 /* ---------- Cotizaciones del sitio web (admin/Cotizaciones.tsx) ---------- */
+/* Respondida = verde; pendiente = ámbar (mismos colores de orilla que las tarjetas) */
+.cot-tarjeta {
+  border-left-color: var(--t-ok);
+}
 .cot-tarjeta.cot-pendiente {
-  border-left: 4px solid var(--teal);
+  border-left-color: var(--t-warn);
 }
 .cot-icono {
   flex: none;
@@ -2727,78 +2621,6 @@ table.tbl {
   font-style: italic;
 }
 
-/* Mascotas (admin): fila compacta que abre el detalle */
-.mascotas-lista > li {
-  padding: 0;
-}
-.mascota-fila {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  width: 100%;
-  min-height: 64px;
-  padding: 10px 4px;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.mascota-fila:hover {
-  background: rgb(0 167 167 / 0.06);
-}
-.mascota-fila:focus-visible {
-  outline: 2px solid var(--teal);
-  outline-offset: -2px;
-}
-.mascota-fila .photo-thumb {
-  width: 48px;
-  height: 48px;
-}
-.mascota-fila .sin-foto {
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-}
-.mascota-fila .list-main {
-  display: flex;
-  flex-direction: column;
-}
-.mascota-fila-estado {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px;
-}
-.mascota-fila > .ico {
-  flex: none;
-  color: var(--muted);
-}
-.mascota-datos {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 14px;
-  margin: 0;
-}
-.mascota-datos dt {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.mascota-datos dd {
-  margin: 0;
-  color: var(--slate);
-}
-@media (max-width: 420px) {
-  .mascota-datos {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-  .mascota-datos dd {
-    margin-bottom: 8px;
-  }
-}
-
 /* Foto grande dentro de un detalle; al tocarla se abre en pantalla completa */
 .foto-grande {
   position: relative;
@@ -2843,4 +2665,432 @@ table.tbl {
   margin: 4px 0 2px;
   font-size: 1rem;
   color: var(--slate);
+}
+
+/* ==========================================================================
+   Tarjetas: toda la tarjeta se toca para abrir su detalle; la orilla izquierda
+   lleva el color del estado (verde bien · rojo adeudo/rechazo · ámbar pendiente
+   · teal en curso · gris neutro). Colores de la marca SIIA.
+   ========================================================================== */
+.app-body {
+  --t-ok: #1e9e6a;
+  --t-mal: #d0453e;
+  --t-warn: #e0a100;
+  --t-info: var(--mint);
+  --t-neutro: #c4cdd3;
+}
+.tarjetas {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tarjeta {
+  --orilla: var(--t-neutro);
+  position: relative;
+  border: 1px solid var(--card-line);
+  border-left: 5px solid var(--orilla);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(47 52 80 / 0.05);
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s,
+    border-color 0.15s;
+}
+.t-ok {
+  --orilla: var(--t-ok);
+}
+.t-mal {
+  --orilla: var(--t-mal);
+}
+.t-warn {
+  --orilla: var(--t-warn);
+}
+.t-info {
+  --orilla: var(--t-info);
+}
+.t-neutro {
+  --orilla: var(--t-neutro);
+}
+.tarjeta-in {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 0 9px 9px 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.tarjeta-in.tocable {
+  cursor: pointer;
+}
+.tarjeta:has(.tocable):hover {
+  border-color: #b9ccd2;
+  border-left-color: var(--orilla);
+  box-shadow: var(--card-shadow);
+  transform: translateY(-1px);
+}
+.tarjeta-in.tocable:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.tarjeta-in.tocable:active {
+  background: rgb(0 167 167 / 0.05);
+}
+.tarjeta-media {
+  flex: none;
+  display: grid;
+}
+.tarjeta-media .photo-thumb {
+  width: 48px;
+  height: 48px;
+}
+.tarjeta-icono {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--mint-wash);
+  color: var(--teal-dark);
+}
+.tarjeta-icono .ico {
+  width: 22px;
+  height: 22px;
+}
+.tarjeta-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tarjeta-titulo {
+  color: var(--slate);
+  overflow-wrap: anywhere;
+}
+.tarjeta-sub {
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.tarjeta-recorte {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tarjeta-lado {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+  max-width: 45%;
+}
+.tarjeta-lado strong {
+  color: var(--slate);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tarjeta .bar {
+  display: block;
+  max-width: 260px;
+}
+@media (max-width: 420px) {
+  .tarjeta-in {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+}
+
+/* Detalle de una tarjeta: datos generales y acciones */
+.datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+.datos > div {
+  min-width: 0;
+}
+.datos dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.datos dd {
+  margin: 2px 0 0;
+  color: var(--slate);
+  overflow-wrap: anywhere;
+}
+.acciones-ficha {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.acciones-titulo {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.acciones-botones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 480px) {
+  .acciones-botones > .btn-app {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}
+
+/* Tarjetas grandes que se tocan completas (comunicados, reportes con foto, cotizaciones, indicadores):
+   misma orilla de color y la misma respuesta al pasar */
+.panel.comunicado {
+  border-left: 5px solid var(--mint);
+}
+.panel.comunicado.importante {
+  border-left-color: var(--t-mal);
+}
+.panel.reporte-tarjeta {
+  border-left: 5px solid var(--mint);
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.panel.reporte-tarjeta:hover,
+.panel.comunicado:has(.comunicado-abrir:hover) {
+  box-shadow: var(--card-shadow);
+  transform: translateY(-1px);
+}
+/* Panel de administración y vigilancia: indicadores y turnos con orilla de estado */
+.tile.tile-estado,
+.turno {
+  border-left: 5px solid var(--orilla, var(--mint));
+}
+
+/* Indicadores que se tocan completos (Inicio del portal): orilla de color y texto de acción abajo */
+.stat.stat-tocable {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  border-left: 5px solid var(--orilla, var(--mint));
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.stat.stat-tocable:hover {
+  box-shadow: var(--card-shadow);
+  transform: translateY(-1px);
+}
+.stat.stat-tocable:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.stat-ver {
+  margin-top: 4px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+}
+
+/* Panel › Recaudación del mes: anillo (100 % = total a recaudar), leyenda con montos y cartera vencida */
+.recaudo-cuerpo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(200px, 240px);
+  gap: 20px 28px;
+  align-items: center;
+}
+.recaudo-grafica {
+  position: relative;
+  width: 210px;
+  aspect-ratio: 1;
+}
+.recaudo-grafica svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.recaudo-fondo,
+.recaudo-arco {
+  fill: none;
+  stroke-width: 24;
+}
+.recaudo-fondo {
+  stroke: #edf2f4;
+}
+.recaudo-arco {
+  transition:
+    stroke-dasharray 0.6s ease,
+    stroke-width 0.15s;
+}
+.recaudo-arco:hover {
+  stroke-width: 28;
+}
+.recaudo-arco.cobrado,
+.recaudo-leyenda .cobrado .recaudo-punto {
+  stroke: var(--t-ok);
+  background: var(--t-ok);
+}
+.recaudo-arco.revision,
+.recaudo-leyenda .revision .recaudo-punto {
+  stroke: var(--t-warn);
+  background: var(--t-warn);
+}
+.recaudo-arco.pendiente,
+.recaudo-leyenda .pendiente .recaudo-punto {
+  stroke: var(--t-mal);
+  background: var(--t-mal);
+}
+.recaudo-centro {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+.recaudo-centro strong {
+  font-family: var(--font-title);
+  font-size: 2.4rem;
+  line-height: 1;
+  color: var(--slate-dark);
+}
+.recaudo-centro span {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.recaudo-centro small {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.recaudo-leyenda {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.recaudo-leyenda li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.recaudo-leyenda li.total {
+  border-bottom: 0;
+  padding-top: 10px;
+}
+.recaudo-leyenda li.total .recaudo-txt span {
+  font-weight: 700;
+  color: var(--slate);
+}
+.recaudo-punto {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+}
+.recaudo-txt {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.recaudo-txt span {
+  color: var(--slate);
+  font-weight: 600;
+}
+.recaudo-txt small {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.recaudo-leyenda strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--slate-dark);
+  white-space: nowrap;
+}
+.recaudo-vencida {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--card-line);
+  border-left: 5px solid var(--orilla);
+  border-radius: 12px;
+  background: var(--bg-soft);
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+.recaudo-vencida:hover {
+  box-shadow: var(--card-shadow);
+  transform: translateY(-1px);
+}
+.recaudo-vencida:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.recaudo-vencida > strong {
+  font-family: var(--font-title);
+  font-size: 1.7rem;
+  line-height: 1.1;
+  color: var(--slate-dark);
+  font-variant-numeric: tabular-nums;
+}
+.recaudo-vencida.t-mal > strong {
+  color: var(--t-mal);
+}
+.recaudo-vencida small {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+@media (max-width: 900px) {
+  .recaudo-cuerpo {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .recaudo-vencida {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 560px) {
+  .recaudo-cuerpo {
+    grid-template-columns: 1fr;
+  }
+  .recaudo-grafica {
+    width: min(220px, 70vw);
+    justify-self: center;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recaudo-arco {
+    transition: none;
+  }
 }

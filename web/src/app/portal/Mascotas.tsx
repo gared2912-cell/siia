@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ElegirArchivo } from '../ElegirArchivo';
-import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, useAction, useLoad } from '../ui';
+import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, tonoDe, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 export type Mascota = {
@@ -22,6 +22,7 @@ export type Mascota = {
 export function Mascotas(_: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<{ mias: Mascota[]; extraviadas: Mascota[] }>('mascotas.lista'));
   const [nueva, setNueva] = useState(false);
+  const [ficha, setFicha] = useState<Mascota | null>(null);
   const { run } = useAction();
 
   if (loading && !data) return <Loading />;
@@ -30,7 +31,7 @@ export function Mascotas(_: ModProps) {
 
   const extraviada = (m: Mascota, v: boolean) =>
     run(
-      () => portal('mascotas.extraviada', { mascotaId: m.id, extraviada: v }).then(() => reload(true)),
+      () => portal('mascotas.extraviada', { mascotaId: m.id, extraviada: v }).then(() => (setFicha(null), reload(true))),
       v ? 'Reporte publicado para vecinos y caseta' : '¡Qué bueno que apareció!',
     );
 
@@ -46,52 +47,81 @@ export function Mascotas(_: ModProps) {
       {extraviadas.length > 0 && (
         <section className="panel" style={{ borderColor: '#f4d2cf' }}>
           <h2>Mascotas extraviadas en el condominio</h2>
-          <ul className="list">
+          <Tarjetas>
             {extraviadas.map((m) => (
-              <li key={m.id}>
-                {m.fotoUrl ? <img className="photo-thumb" src={m.fotoUrl} alt={m.nombre} /> : <span className="photo-thumb" />}
-                <div className="list-main">
-                  <strong>{m.nombre}</strong> <Badge estado="RECHAZADO">Extraviada</Badge>
-                  <div className="list-sub">
-                    {[m.especie, m.raza, m.color].filter(Boolean).join(' · ')} · {m.unidad}
-                  </div>
-                </div>
-              </li>
+              <Tarjeta
+                key={m.id}
+                tono="mal"
+                media={m.fotoUrl ? <img className="photo-thumb" src={m.fotoUrl} alt={m.nombre} /> : <TarjetaIcono name="paw" />}
+                titulo={m.nombre}
+                sub={`${[m.especie, m.raza, m.color].filter(Boolean).join(' · ')} · ${m.unidad}`}
+                lado={<Badge estado="RECHAZADO">Extraviada</Badge>}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         </section>
       )}
 
       <section className="panel">
         <h2>Mis mascotas</h2>
         {mias.length ? (
-          <ul className="list">
+          <Tarjetas>
             {mias.map((m) => (
-              <li key={m.id}>
-                <Archivo path={m.fotoPath} thumb />
-                <div className="list-main">
-                  <strong>{m.nombre}</strong> <Badge estado={m.estado} /> {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
-                  <div className="list-sub">{[m.especie, m.raza, m.color].filter(Boolean).join(' · ')}</div>
-                  {m.vacunaAntirrabica && <div className="list-sub">Vacuna antirrábica: {fecha(m.vacunaAntirrabica)}</div>}
-                </div>
-                {m.estado === 'APROBADA' &&
-                  (m.extraviada ? (
-                    <button className="btn-app sm secondary" onClick={() => extraviada(m, false)}>
-                      Ya apareció
-                    </button>
-                  ) : (
-                    <button className="btn-app sm danger" onClick={() => confirm(`¿Reportar a ${m.nombre} como extraviada?`) && extraviada(m, true)}>
-                      Reportar extravío
-                    </button>
-                  ))}
-              </li>
+              <Tarjeta
+                key={m.id}
+                tono={m.extraviada ? 'mal' : tonoDe(m.estado)}
+                onClick={() => setFicha(m)}
+                media={m.fotoPath ? <Archivo path={m.fotoPath} thumb /> : <TarjetaIcono name="paw" />}
+                titulo={m.nombre}
+                sub={[m.especie, m.raza, m.color].filter(Boolean).join(' · ')}
+                lado={
+                  <>
+                    <Badge estado={m.estado} />
+                    {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
+                  </>
+                }
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="paw">Aún no registras mascotas. La administración valida cada registro.</Empty>
         )}
       </section>
 
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFicha(null)}>
+          <div className="stack">
+            {ficha.fotoPath && <Archivo path={ficha.fotoPath} grande />}
+            <div className="row-actions">
+              <Badge estado={ficha.estado} />
+              {ficha.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
+            </div>
+            <Datos
+              items={[
+                ['Especie y raza', [ficha.especie, ficha.raza].filter(Boolean).join(' · ')],
+                ['Color', ficha.color],
+                ['Vacuna antirrábica', ficha.vacunaAntirrabica ? fecha(ficha.vacunaAntirrabica) : null],
+                ['Notas', ficha.notas],
+              ]}
+            />
+            {ficha.estado === 'PENDIENTE' && <p className="small muted" style={{ margin: 0 }}>La administración está validando el registro.</p>}
+            {ficha.estado === 'APROBADA' && (
+              <Acciones>
+                {ficha.extraviada ? (
+                  <button className="btn-app" onClick={() => extraviada(ficha, false)}>
+                    <Icon name="check" />
+                    Ya apareció
+                  </button>
+                ) : (
+                  <button className="btn-app danger" onClick={() => confirm(`¿Reportar a ${ficha.nombre} como extraviada?`) && extraviada(ficha, true)}>
+                    Reportar extravío
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {nueva && (
         <NuevaMascota
           onClose={() => setNueva(false)}

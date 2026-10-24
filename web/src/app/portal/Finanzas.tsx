@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { portal, subirArchivo } from '../api';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { Recibo, type ReciboData } from '../Recibo';
-import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, hoy, money, useAction, useLoad } from '../ui';
+import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, hoy, money, tonoDe, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 import { useAvisos } from './Notificaciones';
 
@@ -21,6 +21,7 @@ export function Finanzas(_: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<Estado>('finanzas.estadoCuenta'));
   const [pagar, setPagar] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
+  const [fichaPago, setFichaPago] = useState<Pago | null>(null);
   const { run } = useAction();
 
   if (loading && !data) return <Loading />;
@@ -91,22 +92,27 @@ export function Finanzas(_: ModProps) {
       <section className="panel">
         <h2>Cargos</h2>
         {r.cargos.length ? (
-          <ul className="cargos">
-            {r.cargos.map((c) => (
-              <li key={c.id} className="cargo">
-                <div className="cargo-main">
-                  <strong>{c.concepto}</strong>
-                  {c.vence && <span className="cargo-vence">Vence {fecha(c.vence)}</span>}
-                </div>
-                <div className="cargo-lado">
-                  <span className="cargo-monto">{money(c.monto)}</span>
-                  <Badge estado={c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'VENCIDO' : c.estado}>
-                    {c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr ? 'Vencido' : undefined}
-                  </Badge>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <Tarjetas>
+            {r.cargos.map((c) => {
+              const vencido = c.estado === 'PENDIENTE' && !!c.vence && c.vence < hoyStr;
+              return (
+                <Tarjeta
+                  key={c.id}
+                  tono={vencido ? 'mal' : tonoDe(c.estado)}
+                  onClick={c.estado === 'PENDIENTE' ? () => setPagar(true) : undefined}
+                  label={c.estado === 'PENDIENTE' ? `Subir comprobante de ${c.concepto}` : undefined}
+                  titulo={c.concepto}
+                  sub={c.vence ? `Vence ${fecha(c.vence)}` : undefined}
+                  lado={
+                    <>
+                      <strong>{money(c.monto)}</strong>
+                      <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
+                    </>
+                  }
+                />
+              );
+            })}
+          </Tarjetas>
         ) : (
           <Empty icon="money">Aún no hay cargos registrados.</Empty>
         )}
@@ -115,26 +121,24 @@ export function Finanzas(_: ModProps) {
       <section className="panel">
         <h2>Mis pagos y recibos</h2>
         {r.pagos.length ? (
-          <ul className="list">
+          <Tarjetas>
             {r.pagos.map((p) => (
-              <li key={p.id}>
-                <div className="list-main">
-                  <strong>{money(p.monto)}</strong> <Badge estado={p.estado} />
-                  <div className="list-sub">
-                    {fecha(p.fecha)} {p.referencia && `· Ref. ${p.referencia}`} {p.folio && `· Folio ${p.folio}`}
-                  </div>
-                  {p.nota && <div className="small">{p.nota}</div>}
-                  <Archivo path={p.comprobantePath} label="Ver comprobante" />
-                </div>
-                {p.estado === 'VALIDADO' && (
-                  <button className="btn-app sm secondary" onClick={() => verRecibo(p.id)}>
-                    <Icon name="file" />
-                    Recibo
-                  </button>
-                )}
-              </li>
+              <Tarjeta
+                key={p.id}
+                tono={tonoDe(p.estado)}
+                onClick={() => (p.estado === 'VALIDADO' ? verRecibo(p.id) : setFichaPago(p))}
+                media={<TarjetaIcono name="file" />}
+                titulo={p.folio ? `Recibo ${p.folio}` : 'Comprobante enviado'}
+                sub={`Pagado el ${fecha(p.fecha)}${p.referencia ? ` · Ref. ${p.referencia}` : ''}`}
+                lado={
+                  <>
+                    <strong>{money(p.monto)}</strong>
+                    <Badge estado={p.estado} />
+                  </>
+                }
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="file">Cuando registres un pago aparecerá aquí.</Empty>
         )}
@@ -149,6 +153,34 @@ export function Finanzas(_: ModProps) {
             reload(true);
           }}
         />
+      )}
+      {fichaPago && (
+        <Modal title="Comprobante de pago" onClose={() => setFichaPago(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <Badge estado={fichaPago.estado} />
+              <strong>{money(fichaPago.monto)}</strong>
+            </div>
+            <Datos
+              items={[
+                ['Fecha de pago', fecha(fichaPago.fecha)],
+                ['Referencia', fichaPago.referencia],
+                ['Enviado', fecha(fichaPago.createdAt)],
+                [fichaPago.estado === 'RECHAZADO' ? 'Motivo del rechazo' : 'Nota', fichaPago.nota],
+              ]}
+            />
+            {fichaPago.estado === 'EN_REVISION' && <p className="small muted" style={{ margin: 0 }}>La administración está revisando tu comprobante. Te avisaremos cuando lo apruebe.</p>}
+            <Acciones>
+              <Archivo path={fichaPago.comprobantePath} label="Ver comprobante" />
+              {fichaPago.estado === 'RECHAZADO' && (
+                <button className="btn-app" onClick={() => (setFichaPago(null), setPagar(true))}>
+                  <Icon name="plus" />
+                  Subir otro comprobante
+                </button>
+              )}
+            </Acciones>
+          </div>
+        </Modal>
       )}
       {recibo && (
         <Modal title={`Recibo ${recibo.pago.folio}`} onClose={() => setRecibo(null)} wide>

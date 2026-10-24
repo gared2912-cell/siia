@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { adminCall, all, db, ok, urlArchivoAdmin, type Schema } from '../api';
 import { Firma } from './Firma';
 import {
+  Acciones,
   Archivo,
   Badge,
+  Datos,
   Empty,
   ErrorBox,
   Field,
@@ -12,11 +14,15 @@ import {
   Modal,
   PageHead,
   Seg,
+  Tarjeta,
+  TarjetaIcono,
+  Tarjetas,
   etiquetaEstado,
   fecha,
   fechaHora,
   hoy,
   money,
+  tonoDe,
   useAction,
   useLoad,
 } from '../ui';
@@ -108,27 +114,21 @@ export function IncidentesAdmin() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <ul className="list">
+            <Tarjetas>
               {lista.map((i) => (
-                <li key={i.id} style={{ padding: 0 }}>
-                  <button type="button" className="fila-click" onClick={() => setAbierto(i.id)}>
-                    <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} thumb />
-                    <span className="list-main">
-                      <strong>{i.titulo}</strong> <Badge estado={i.estado} />
-                      <span className="list-sub" style={{ display: 'block' }}>
-                        {etiqueta(i.unidadId)} · {i.categoria} · {fechaHora(i.createdAt)}
-                      </span>
-                      {i.descripcion && (
-                        <span className="small muted" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {i.descripcion}
-                        </span>
-                      )}
-                    </span>
-                    <Icon name="arrow" />
-                  </button>
-                </li>
+                <Tarjeta
+                  key={i.id}
+                  tono={i.estado === 'ABIERTO' ? 'mal' : tonoDe(i.estado)}
+                  onClick={() => setAbierto(i.id)}
+                  media={i.fotoPath ? <Archivo path={i.fotoPath} origen={{ model: 'Incidente', id: i.id }} thumb /> : <TarjetaIcono name="alert" />}
+                  titulo={i.titulo}
+                  sub={`${etiqueta(i.unidadId)} · ${i.categoria} · ${fechaHora(i.createdAt)}`}
+                  lado={<Badge estado={i.estado} />}
+                >
+                  {i.descripcion && <span className="tarjeta-sub tarjeta-recorte">{i.descripcion}</span>}
+                </Tarjeta>
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="alert">Sin incidentes {filtro === 'abiertos' ? 'por cerrar' : ''}.</Empty>
           )}
@@ -308,11 +308,13 @@ export function MantenimientosAdmin() {
     [condo!.id],
   );
   const [editar, setEditar] = useState<Partial<Mantenimiento> | null>(null);
+  const [ficha, setFicha] = useState<Mantenimiento | null>(null);
   const { run } = useAction();
   const borrar = (m: Mantenimiento) =>
     confirm(`¿Eliminar "${m.titulo}"?`) &&
     run(async () => {
       ok(await db.models.Mantenimiento.delete({ id: m.id }));
+      setFicha(null);
       reload(true);
     }, 'Eliminado');
   const lista = [...(data ?? [])].sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
@@ -335,53 +337,53 @@ export function MantenimientosAdmin() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <div className="table-wrap">
-              <table className="tbl tbl-tarjetas">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Mantenimiento</th>
-                    <th>Tipo</th>
-                    <th>Proveedor</th>
-                    <th>Estado</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {lista.map((m) => (
-                    <tr key={m.id}>
-                      <td data-label="Fecha">{fecha(m.fecha)}</td>
-                      <td className="tt-titulo">
-                        <strong>{m.titulo}</strong>
-                        {m.area && <div className="small muted">{m.area}</div>}
-                      </td>
-                      <td data-label="Tipo">{etiquetaEstado(m.tipo)}</td>
-                      <td data-label="Proveedor">{m.proveedor ?? '—'}</td>
-                      <td data-label="Estado">
-                        <Badge estado={m.estado} />
-                        <Firma item={{ ...m, estado: undefined }} />
-                      </td>
-                      <td className="tt-acciones">
-                        {gestiona && (
-                          <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                            <button className="linklike" onClick={() => setEditar(m)}>
-                              Editar
-                            </button>
-                            <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrar(m)}>
-                              Eliminar
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Tarjetas>
+              {lista.map((m) => (
+                <Tarjeta
+                  key={m.id}
+                  tono={m.estado === 'PROGRAMADO' && !!m.fecha && m.fecha < hoy() ? 'mal' : tonoDe(m.estado)}
+                  onClick={() => setFicha(m)}
+                  media={<TarjetaIcono name="tools" />}
+                  titulo={m.titulo}
+                  sub={[fecha(m.fecha), etiquetaEstado(m.tipo), m.area, m.proveedor].filter(Boolean).join(' · ')}
+                  lado={<Badge estado={m.estado} />}
+                />
+              ))}
+            </Tarjetas>
           ) : (
             <Empty icon="tools">Sin mantenimientos programados.</Empty>
           )}
         </section>
+      )}
+      {ficha && (
+        <Modal title={ficha.titulo} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Fecha', fecha(ficha.fecha)],
+                ['Tipo', etiquetaEstado(ficha.tipo)],
+                ['Área', ficha.area],
+                ['Proveedor', ficha.proveedor],
+                ['Notas', ficha.notas],
+              ]}
+            />
+            <Firma item={{ ...ficha, estado: undefined }} />
+            {gestiona && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => (setEditar(ficha), setFicha(null))}>
+                  Editar
+                </button>
+                <button className="btn-app danger" onClick={() => borrar(ficha)}>
+                  <Icon name="trash" />
+                  Eliminar
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {editar && <EditarMant m={editar} onClose={() => setEditar(null)} onDone={() => (setEditar(null), reload(true))} />}
     </div>
@@ -471,6 +473,7 @@ export function AmenidadesAdmin() {
     return { amenidades, reservas };
   }, [cid]);
   const { run, busy } = useAction();
+  const [ficha, setFicha] = useState<Reserva | null>(null);
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
@@ -498,6 +501,7 @@ export function AmenidadesAdmin() {
           nota,
           'RESERVA',
         );
+        setFicha(null);
         reload(true);
       },
       estado === 'APROBADA' ? 'Reserva aprobada' : 'Reserva rechazada',
@@ -514,48 +518,56 @@ export function AmenidadesAdmin() {
       />
       <section className="panel">
         {proximas.length ? (
-          <ul className="list">
+          <Tarjetas>
             {proximas.map((r) => (
-              <li key={r.id}>
-                <div className="list-main">
-                  <strong>{nombre(r.amenidadId)}</strong> <Badge estado={r.estado} />
-                  <div className="list-sub">
-                    {etiqueta(r.unidadId)} · {fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short' })} · {r.horaInicio}–{r.horaFin}
-                    {r.invitados ? ` · ${r.invitados} invitados` : ''}
-                  </div>
-                  {r.nota && <div className="small">{r.nota}</div>}
-                  <Firma item={r} alta={false} />
-                </div>
-                {gestiona && r.estado === 'SOLICITADA' && (
-                  <div className="row-actions">
-                    <button className="btn-app sm" disabled={busy} onClick={() => resolver(r, 'APROBADA')}>
-                      Aprobar
-                    </button>
-                    <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                      Rechazar
-                    </button>
-                  </div>
-                )}
-                {gestiona && r.estado === 'PENDIENTE_PAGO' && (
-                  <div className="row-actions">
-                    <span className="small muted">Se confirma al validar su pago en Finanzas</span>
-                    <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                      Rechazar
-                    </button>
-                  </div>
-                )}
-                {gestiona && r.estado === 'APROBADA' && (
-                  <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                    Cancelar
-                  </button>
-                )}
-              </li>
+              <Tarjeta
+                key={r.id}
+                tono={tonoDe(r.estado)}
+                onClick={() => setFicha(r)}
+                media={<TarjetaIcono name="calendar" />}
+                titulo={nombre(r.amenidadId)}
+                sub={`${etiqueta(r.unidadId)} · ${fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short' })} · ${r.horaInicio}–${r.horaFin}${r.invitados ? ` · ${r.invitados} invitados` : ''}`}
+                lado={<Badge estado={r.estado} />}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="calendar">Sin reservas próximas.</Empty>
         )}
       </section>
+      {ficha && (
+        <Modal title={nombre(ficha.amenidadId)} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Casa o departamento', etiqueta(ficha.unidadId)],
+                ['Fecha', fecha(ficha.fecha, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })],
+                ['Horario', `${ficha.horaInicio}–${ficha.horaFin}`],
+                ['Invitados', ficha.invitados || null],
+                ['Nota', ficha.nota],
+              ]}
+            />
+            <Firma item={ficha} alta={false} />
+            {ficha.estado === 'PENDIENTE_PAGO' && <p className="small muted" style={{ margin: 0 }}>Se confirma al validar su pago en Finanzas.</p>}
+            {gestiona && ['SOLICITADA', 'PENDIENTE_PAGO', 'APROBADA'].includes(ficha.estado ?? '') && (
+              <Acciones>
+                {ficha.estado === 'SOLICITADA' && (
+                  <button className="btn-app" disabled={busy} onClick={() => resolver(ficha, 'APROBADA')}>
+                    <Icon name="check" />
+                    Aprobar
+                  </button>
+                )}
+                <button className="btn-app danger" disabled={busy} onClick={() => resolver(ficha, 'RECHAZADA')}>
+                  {ficha.estado === 'APROBADA' ? 'Cancelar reserva' : 'Rechazar'}
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -571,12 +583,14 @@ export function CatalogoAmenidades() {
   const cid = condo!.id;
   const { data, error, loading, reload } = useLoad(() => all<Amenidad>((o) => db.models.Amenidad.amenidadesPorCondominio({ condominioId: cid }, o)), [cid]);
   const [editar, setEditar] = useState<Partial<Amenidad> | null>(null);
+  const [fichaId, setFichaId] = useState<string | null>(null);
 
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
   const amenidades = [...(data ?? [])].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const principales = amenidades.filter((a) => !a.parteDeId || !amenidades.some((x) => x.id === a.parteDeId));
   const secciones = (id: string) => amenidades.filter((a) => a.parteDeId === id);
+  const ficha = amenidades.find((a) => a.id === fichaId);
   const datos = (a: Amenidad) => (
     <>
       <strong>{a.costo ? money(a.costo) : 'Sin costo'}</strong>
@@ -606,56 +620,79 @@ export function CatalogoAmenidades() {
           </button>
         )}
       </div>
-      <div className="grid-cards">
-        {principales.map((a) => (
-          <article key={a.id} className="panel" style={{ marginTop: 0 }}>
-            <div className="panel-head">
-              <h3>{a.nombre}</h3>
-              <Badge estado={a.activa === false ? 'CANCELADA' : 'APROBADA'}>{a.activa === false ? 'Inactiva' : 'Activa'}</Badge>
+      {amenidades.length ? (
+        <Tarjetas>
+          {principales.map((a) => (
+            <Tarjeta
+              key={a.id}
+              tono={a.activa === false ? 'neutro' : 'ok'}
+              onClick={() => setFichaId(a.id)}
+              media={<TarjetaIcono name="calendar" />}
+              titulo={a.nombre}
+              sub={datos(a)}
+              lado={
+                <>
+                  <Badge estado={a.activa === false ? 'CANCELADA' : 'APROBADA'}>{a.activa === false ? 'Inactiva' : 'Activa'}</Badge>
+                  {secciones(a.id).length > 0 && <span className="small muted">{secciones(a.id).length === 1 ? '1 sección' : `${secciones(a.id).length} secciones`}</span>}
+                </>
+              }
+            />
+          ))}
+        </Tarjetas>
+      ) : (
+        <section className="panel">
+          <Empty icon="calendar">Da de alta salón de fiestas, asadores, alberca, gimnasio, casa club, etc.</Empty>
+        </section>
+      )}
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFichaId(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.activa === false ? 'CANCELADA' : 'APROBADA'}>{ficha.activa === false ? 'Inactiva' : 'Activa'}</Badge>
             </div>
-            <p className="small muted" style={{ margin: '0 0 8px' }}>
-              {secciones(a.id).length ? 'Completa: ' : ''}
-              {datos(a)}
-            </p>
-            <Firma item={a} alta="Creada por" />
-            {secciones(a.id).length > 0 && (
-              <ul className="list" style={{ marginBottom: 8 }}>
-                {secciones(a.id).map((x) => (
-                  <li key={x.id} style={{ padding: '8px 0' }}>
-                    <div className="list-main">
-                      <span style={{ fontWeight: 700 }}>{x.nombre}</span> {x.activa === false && <Badge estado="CANCELADA">Inactiva</Badge>}
-                      <div className="list-sub">{datos(x)}</div>
-                    </div>
-                    {gestiona && (
-                      <button className="linklike" onClick={() => setEditar(x)}>
-                        Editar
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {gestiona && (
-              <div className="row-actions">
-                <button className="btn-app sm secondary" onClick={() => setEditar(a)}>
-                  Editar
-                </button>
-                {!a.parteDeId && (
-                  <button className="btn-app sm secondary" onClick={() => setEditar({ activa: true, requiereAprobacion: true, parteDeId: a.id })}>
-                    <Icon name="plus" />
-                    Sección
-                  </button>
-                )}
+            <Datos
+              items={[
+                ['Costo', ficha.costo ? `${money(ficha.costo)} por reserva` : 'Sin costo'],
+                ['Horario', `${ficha.horaApertura ?? '—'}–${ficha.horaCierre ?? '—'}`],
+                ['Máximo por reserva', ficha.maxHoras ? `${ficha.maxHoras} h` : null],
+                ['Capacidad', ficha.capacidad ? `${ficha.capacidad} personas` : null],
+                ['Confirmación', ficha.requiereAprobacion ? 'Requiere aprobación' : 'Automática'],
+              ]}
+            />
+            <Firma item={ficha} alta="Creada por" />
+            {secciones(ficha.id).length > 0 && (
+              <div className="stack" style={{ gap: 8 }}>
+                <span className="acciones-titulo">Secciones</span>
+                <Tarjetas>
+                  {secciones(ficha.id).map((x) => (
+                    <Tarjeta
+                      key={x.id}
+                      tono={x.activa === false ? 'neutro' : 'ok'}
+                      onClick={gestiona ? () => (setEditar(x), setFichaId(null)) : undefined}
+                      titulo={x.nombre}
+                      sub={datos(x)}
+                      lado={x.activa === false ? <Badge estado="CANCELADA">Inactiva</Badge> : undefined}
+                    />
+                  ))}
+                </Tarjetas>
               </div>
             )}
-          </article>
-        ))}
-        {!amenidades.length && (
-          <section className="panel">
-            <Empty icon="calendar">Da de alta salón de fiestas, asadores, alberca, gimnasio, casa club, etc.</Empty>
-          </section>
-        )}
-      </div>
+            {gestiona && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => (setEditar(ficha), setFichaId(null))}>
+                  Editar
+                </button>
+                {!ficha.parteDeId && (
+                  <button className="btn-app secondary" onClick={() => (setEditar({ activa: true, requiereAprobacion: true, parteDeId: ficha.id }), setFichaId(null))}>
+                    <Icon name="plus" />
+                    Agregar sección
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {editar && <EditarAmenidad a={editar} amenidades={amenidades} onClose={() => setEditar(null)} onDone={() => (setEditar(null), reload(true))} />}
     </div>
   );
@@ -804,6 +841,7 @@ function BitacoraVisitas() {
     [condo!.id],
   );
   const [dia, setDia] = useState(hoy());
+  const [ficha, setFicha] = useState<Visita | null>(null);
   const lista = (data ?? [])
     .filter((v) => v.fecha === dia || (v.fecha <= dia && (v.fechaFin ?? v.fecha) >= dia) || (v.entradaEn ?? '').slice(0, 10) === dia)
     .sort((a, b) => String(b.entradaEn ?? b.createdAt).localeCompare(String(a.entradaEn ?? a.createdAt)));
@@ -820,43 +858,45 @@ function BitacoraVisitas() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <div className="table-wrap">
-              <table className="tbl tbl-tarjetas">
-                <thead>
-                  <tr>
-                    <th>Nombre</th>
-                    <th>Unidad</th>
-                    <th>Tipo</th>
-                    <th>Entrada</th>
-                    <th>Salida</th>
-                    <th>Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lista.map((v) => (
-                    <tr key={v.id}>
-                      <td className="tt-titulo">
-                        <strong>{v.nombre}</strong>
-                        <div className="small muted">
-                          {v.origen === 'CASETA' ? 'Registrada en caseta' : `Pase ${v.codigo ?? ''}`} {v.placas && `· ${v.placas}`}
-                        </div>
-                      </td>
-                      <td data-label="Unidad">{etiqueta(v.unidadId)}</td>
-                      <td data-label="Tipo">{etiquetaEstado(v.tipo)}</td>
-                      <td data-label="Entrada">{v.entradaEn ? fechaHora(v.entradaEn) : '—'}</td>
-                      <td data-label="Salida">{v.salidaEn ? fechaHora(v.salidaEn) : '—'}</td>
-                      <td data-label="Estado">
-                        <Badge estado={v.estado} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Tarjetas>
+              {lista.map((v) => (
+                <Tarjeta
+                  key={v.id}
+                  tono={tonoDe(v.estado)}
+                  onClick={() => setFicha(v)}
+                  media={<TarjetaIcono name={v.enAuto || v.placas ? 'car' : 'users'} />}
+                  titulo={v.nombre}
+                  sub={`${etiqueta(v.unidadId)} · ${etiquetaEstado(v.tipo)} · ${v.entradaEn ? `Entró ${fechaHora(v.entradaEn)}` : v.origen === 'CASETA' ? 'Registrada en caseta' : `Pase ${v.codigo ?? ''}`}`}
+                  lado={<Badge estado={v.estado} />}
+                />
+              ))}
+            </Tarjetas>
           ) : (
             <Empty icon="qr">Sin movimientos ese día.</Empty>
           )}
         </section>
+      )}
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div>
+              <Badge estado={ficha.estado} />
+            </div>
+            <Datos
+              items={[
+                ['Casa o departamento', etiqueta(ficha.unidadId)],
+                ['Tipo', etiquetaEstado(ficha.tipo)],
+                ['Origen', ficha.origen === 'CASETA' ? 'Registrada en caseta' : `Pase ${ficha.codigo ?? ''}`],
+                ['Fecha', ficha.fechaFin && ficha.fechaFin !== ficha.fecha ? `${fecha(ficha.fecha)} al ${fecha(ficha.fechaFin)}` : fecha(ficha.fecha)],
+                ['Placas', ficha.placas],
+                ['Entrada', ficha.entradaEn ? fechaHora(ficha.entradaEn) : null],
+                ['Salida', ficha.salidaEn ? fechaHora(ficha.salidaEn) : null],
+                ['Registró', ficha.registradoPor],
+                ['Notas', ficha.notas],
+              ]}
+            />
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -902,30 +942,24 @@ export function MascotasAdmin() {
       ) : (
         <section className="panel">
           {lista.length ? (
-            <ul className="list mascotas-lista">
+            <Tarjetas>
               {lista.map((m) => (
-                <li key={m.id}>
-                  <button type="button" className="mascota-fila" onClick={() => setAbierta(m)}>
-                    {m.fotoPath ? (
-                      <Archivo path={m.fotoPath} origen={{ model: 'Mascota', id: m.id }} thumb />
-                    ) : (
-                      <span className="photo-thumb sin-foto">
-                        <Icon name="paw" />
-                      </span>
-                    )}
-                    <span className="list-main">
-                      <strong>{m.nombre}</strong>
-                      <span className="list-sub">{etiqueta(m.unidadId)}</span>
-                    </span>
-                    <span className="mascota-fila-estado">
+                <Tarjeta
+                  key={m.id}
+                  tono={m.extraviada ? 'mal' : tonoDe(m.estado)}
+                  onClick={() => setAbierta(m)}
+                  media={m.fotoPath ? <Archivo path={m.fotoPath} origen={{ model: 'Mascota', id: m.id }} thumb /> : <TarjetaIcono name="paw" />}
+                  titulo={m.nombre}
+                  sub={etiqueta(m.unidadId)}
+                  lado={
+                    <>
                       <Badge estado={m.estado} />
                       {m.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
-                    </span>
-                    <Icon name="chevron-right" />
-                  </button>
-                </li>
+                    </>
+                  }
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="paw">Sin mascotas registradas.</Empty>
           )}
@@ -939,32 +973,26 @@ export function MascotasAdmin() {
             <div>
               <Badge estado={abierta.estado} /> {abierta.extraviada && <Badge estado="RECHAZADO">Extraviada</Badge>}
             </div>
-            <dl className="mascota-datos">
-              <dt>Departamento</dt>
-              <dd>{etiqueta(abierta.unidadId)}</dd>
-              <dt>Especie y raza</dt>
-              <dd>{[abierta.especie, abierta.raza].filter(Boolean).join(' · ') || '—'}</dd>
-              <dt>Color</dt>
-              <dd>{abierta.color || '—'}</dd>
-              <dt>Vacuna antirrábica</dt>
-              <dd>{fecha(abierta.vacunaAntirrabica)}</dd>
-              {abierta.notas && (
-                <>
-                  <dt>Notas</dt>
-                  <dd>{abierta.notas}</dd>
-                </>
-              )}
-            </dl>
+            <Datos
+              items={[
+                ['Casa o departamento', etiqueta(abierta.unidadId)],
+                ['Especie y raza', [abierta.especie, abierta.raza].filter(Boolean).join(' · ') || '—'],
+                ['Color', abierta.color || '—'],
+                ['Vacuna antirrábica', fecha(abierta.vacunaAntirrabica)],
+                ['Notas', abierta.notas],
+              ]}
+            />
             <Firma item={abierta} alta={false} />
             {puede('mascotas', 'editar') && abierta.estado === 'PENDIENTE' && (
-              <div className="row-actions">
+              <Acciones>
                 <button className="btn-app" disabled={busy} onClick={() => resolver(abierta, 'APROBADA')}>
+                  <Icon name="check" />
                   Aprobar
                 </button>
                 <button className="btn-app danger" disabled={busy} onClick={() => resolver(abierta, 'RECHAZADA')}>
                   Rechazar
                 </button>
-              </div>
+              </Acciones>
             )}
           </div>
         </Modal>

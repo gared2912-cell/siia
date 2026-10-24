@@ -131,6 +131,11 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
       return desdeAviso ?? '';
     }
   });
+  // Al entrar (o recargar) siempre se abre el Panel; una notificación push (?c=…) sí abre su sección.
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).get('c')) go('panel');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (location.search) history.replaceState(null, '', location.pathname + location.hash);
   }, []);

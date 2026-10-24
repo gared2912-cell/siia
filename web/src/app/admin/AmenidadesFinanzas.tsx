@@ -3,7 +3,7 @@
 // Los residentes ven el ahorro y sus gastos en su portal (Amenidades).
 import { useState } from 'react';
 import { adminCall, db, ok, type Schema } from '../api';
-import { Archivo, Badge, Empty, Icon, Seg, fecha, fechaHora, hoy, money, periodoActual, useAction } from '../ui';
+import { Acciones, Archivo, Badge, Datos, Empty, Icon, Modal, Seg, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, hoy, money, periodoActual, useAction, type Tono } from '../ui';
 import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
 import { EditarEgreso, Mes, VerEvidencia } from './Egresos';
@@ -29,6 +29,8 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
   const [mes, setMes] = useState(periodoActual());
   const [filtro, setFiltro] = useState<'pendientes' | 'todas'>('pendientes');
   const [gasto, setGasto] = useState<Partial<Egreso> | null>(null);
+  const [fichaR, setFichaR] = useState<string | null>(null);
+  const [fichaG, setFichaG] = useState<string | null>(null);
   const { run, busy } = useAction();
 
   const fondo = calcularFondoAmenidades(datos, periodoActual() > mes ? periodoActual() : mes);
@@ -49,7 +51,7 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
     const nota = aprobar ? '' : prompt('Motivo del rechazo (lo verá el residente):');
     if (!aprobar && nota === null) return;
     run(
-      () => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(reload),
+      () => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => (setFichaR(null), reload())),
       aprobar ? 'Pago aprobado: la reserva quedó confirmada y se emitió el recibo' : 'Pago rechazado; se notificó al residente',
     );
   };
@@ -66,6 +68,7 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
           texto: nota,
           tipo: 'RESERVA',
         }).catch(() => undefined);
+        setFichaR(null);
         reload();
       },
       estado === 'APROBADA' ? 'Reserva aprobada' : 'Reserva rechazada',
@@ -73,7 +76,16 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
   };
   const borrarGasto = (e: Egreso) =>
     confirm(`¿Eliminar el gasto "${e.concepto}" por ${money(e.monto)}? Se regresa al fondo de amenidades.`) &&
-    run(() => adminCall('egresos.borrar', { id: e.id }).then(reload), 'Gasto eliminado');
+    run(() => adminCall('egresos.borrar', { id: e.id }).then(() => (setFichaG(null), reload())), 'Gasto eliminado');
+  /** Estado de una reserva para su insignia y el color de su tarjeta. */
+  const estadoReserva = (r: ReservaFin): { insignia: React.ReactNode; tono: Tono } => {
+    if (comprobanteDe(r, datos.pagos)) return { insignia: <Badge estado="EN_REVISION">Comprobante por aprobar</Badge>, tono: 'warn' };
+    if (r.estado === 'PENDIENTE_PAGO') return { insignia: <Badge estado="PENDIENTE">Esperando pago</Badge>, tono: 'warn' };
+    if (r.estado === 'SOLICITADA') return { insignia: <Badge estado="EN_REVISION">Por aprobar</Badge>, tono: 'warn' };
+    return { insignia: <Badge estado={r.estado} />, tono: r.estado === 'APROBADA' ? 'ok' : r.estado === 'RECHAZADA' ? 'mal' : 'neutro' };
+  };
+  const reservaF = reservas.find((r) => r.id === fichaR);
+  const gastoF = datos.egresos.find((e) => e.id === fichaG);
 
   return (
     <>
@@ -146,61 +158,28 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
           ]}
         />
         {lista.length ? (
-          <ul className="list">
+          <Tarjetas>
             {lista.map((r) => {
               const cargo = montoDe(r);
-              const comp = comprobanteDe(r, datos.pagos);
+              const e = estadoReserva(r);
               return (
-                <li key={r.id} style={pendientes.includes(r) ? { background: 'var(--teal-light, #e8f8f6)', borderRadius: 10, padding: '10px 12px' } : undefined}>
-                  <div className="list-main">
-                    <strong>
-                      {r.amenidad} · {cargo ? money(cargo.monto) : 'Sin costo'}
-                    </strong>{' '}
-                    {comp ? (
-                      <Badge estado="EN_REVISION">Comprobante por aprobar</Badge>
-                    ) : r.estado === 'PENDIENTE_PAGO' ? (
-                      <Badge estado="PENDIENTE">Esperando pago</Badge>
-                    ) : r.estado === 'SOLICITADA' ? (
-                      <Badge estado="EN_REVISION">Por aprobar</Badge>
-                    ) : (
-                      <Badge estado={r.estado} />
-                    )}
-                    <div className="list-sub">
-                      {etiqueta(r.unidadId)} · {fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} · {r.horaInicio}–{r.horaFin}
-                      {r.invitados ? ` · ${r.invitados} invitados` : ''}
-                    </div>
-                    <div className="small muted">
-                      Solicitada el {fechaHora(r.createdAt)}
-                      {cargo?.estado === 'PAGADO' && ' · pagada'}
-                    </div>
-                    {comp && <Archivo path={comp.comprobantePath} origen={{ model: 'Pago', id: comp.id }} label={`Ver comprobante (${money(comp.monto)})`} />}
-                  </div>
-                  {comp && apruebaPagos && (
-                    <div className="row-actions">
-                      <button className="btn-app sm" disabled={busy} onClick={() => aprobarPago(comp, true)}>
-                        <Icon name="check" />
-                        Aprobar
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => aprobarPago(comp, false)}>
-                        Rechazar
-                      </button>
-                    </div>
-                  )}
-                  {r.estado === 'SOLICITADA' && apruebaReservas && (
-                    <div className="row-actions">
-                      <button className="btn-app sm" disabled={busy} onClick={() => resolver(r, 'APROBADA')}>
-                        <Icon name="check" />
-                        Aprobar
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => resolver(r, 'RECHAZADA')}>
-                        Rechazar
-                      </button>
-                    </div>
-                  )}
-                </li>
+                <Tarjeta
+                  key={r.id}
+                  tono={e.tono}
+                  onClick={() => setFichaR(r.id)}
+                  media={<TarjetaIcono name="calendar" />}
+                  titulo={r.amenidad}
+                  sub={`${etiqueta(r.unidadId)} · ${fecha(r.fecha, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })} · ${r.horaInicio}–${r.horaFin}`}
+                  lado={
+                    <>
+                      <strong>{cargo ? money(cargo.monto) : 'Sin costo'}</strong>
+                      {e.insignia}
+                    </>
+                  }
+                />
               );
             })}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="calendar">{filtro === 'pendientes' ? 'No hay solicitudes pendientes.' : 'Sin reservaciones.'}</Empty>
         )}
@@ -209,37 +188,19 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
       <section className="panel">
         <h2>En qué se usó el fondo · {nombreMes(mes)}</h2>
         {gastosMes.length ? (
-          <ul className="list">
+          <Tarjetas>
             {gastosMes.map((e) => (
-              <li key={e.id} style={{ alignItems: 'flex-start' }}>
-                <div className="list-main">
-                  <strong>
-                    {e.concepto} · {money(e.monto)}
-                  </strong>
-                  <div className="list-sub">
-                    {fecha(e.fecha)} · {e.categoria}
-                    {e.proveedor && ` · ${e.proveedor}`}
-                  </div>
-                  <div className="row-actions" style={{ marginTop: 4, gap: 10 }}>
-                    {evidenciasDe(e).map((ev) => (
-                      <VerEvidencia key={ev.path} egresoId={e.id} ev={ev} />
-                    ))}
-                  </div>
-                  <Firma item={e} altaAntes={e.registradoPorNombre || e.registradoPor} />
-                </div>
-                {gestiona && (
-                  <div className="row-actions">
-                    <button className="linklike" onClick={() => setGasto(e)}>
-                      Editar
-                    </button>
-                    <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrarGasto(e)}>
-                      Eliminar
-                    </button>
-                  </div>
-                )}
-              </li>
+              <Tarjeta
+                key={e.id}
+                tono={evidenciasDe(e).length ? 'ok' : 'warn'}
+                onClick={() => setFichaG(e.id)}
+                media={<TarjetaIcono name="file" />}
+                titulo={e.concepto}
+                sub={[fecha(e.fecha), e.categoria, e.proveedor].filter(Boolean).join(' · ')}
+                lado={<strong>{money(e.monto)}</strong>}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="money">Sin gastos del fondo en {nombreMes(mes).toLowerCase()}.</Empty>
         )}
@@ -248,40 +209,105 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
       {fondo.meses.length > 0 && (
         <section className="panel">
           <h2>Historial del fondo</h2>
-          <div className="table-wrap">
-            <table className="tbl tbl-tarjetas">
-              <thead>
-                <tr>
-                  <th>Mes</th>
-                  <th className="num">Saldo anterior</th>
-                  <th className="num">Ingresos</th>
-                  <th className="num">Gastos</th>
-                  <th className="num">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...fondo.meses]
-                  .reverse()
-                  .slice(0, 12)
-                  .map((x) => (
-                    <tr key={x.periodo} style={x.periodo === mes ? { fontWeight: 700 } : undefined}>
-                      <td className="tt-titulo">{mesCorto(x.periodo)}</td>
-                      <td className="num" data-label="Saldo anterior">{money(x.inicial)}</td>
-                      <td className="num" data-label="Ingresos" style={{ color: 'var(--teal-dark)' }}>
-                        {money(x.ingresos)}
-                      </td>
-                      <td className="num" data-label="Gastos" style={{ color: x.gastos ? 'var(--danger)' : undefined }}>
-                        {money(x.gastos)}
-                      </td>
-                      <td className="num" data-label="Saldo">{money(x.final)}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+          <Tarjetas>
+            {[...fondo.meses]
+              .reverse()
+              .slice(0, 12)
+              .map((x) => (
+                <Tarjeta
+                  key={x.periodo}
+                  tono={x.periodo === mes ? 'info' : x.final < 0 ? 'mal' : 'neutro'}
+                  onClick={() => setMes(x.periodo)}
+                  label={`Ver ${nombreMes(x.periodo)}`}
+                  titulo={mesCorto(x.periodo)}
+                  sub={`Anterior ${money(x.inicial)} · Ingresos ${money(x.ingresos)} · Gastos ${money(x.gastos)}`}
+                  lado={<strong>{money(x.final)}</strong>}
+                />
+              ))}
+          </Tarjetas>
         </section>
       )}
 
+      {reservaF && (
+        <Modal title={`${reservaF.amenidad} · ${etiqueta(reservaF.unidadId)}`} onClose={() => setFichaR(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              {estadoReserva(reservaF).insignia}
+              <strong>{montoDe(reservaF) ? money(montoDe(reservaF)!.monto) : 'Sin costo'}</strong>
+            </div>
+            <Datos
+              items={[
+                ['Fecha', fecha(reservaF.fecha, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })],
+                ['Horario', `${reservaF.horaInicio}–${reservaF.horaFin}`],
+                ['Invitados', reservaF.invitados || null],
+                ['Solicitada', fechaHora(reservaF.createdAt)],
+                ['Pago', montoDe(reservaF)?.estado === 'PAGADO' ? 'Pagada' : null],
+                ['Nota', reservaF.nota],
+              ]}
+            />
+            {(() => {
+              const comp = comprobanteDe(reservaF, datos.pagos);
+              const botones = [];
+              if (comp) botones.push(<Archivo key="c" path={comp.comprobantePath} origen={{ model: 'Pago', id: comp.id }} label={`Ver comprobante (${money(comp.monto)})`} />);
+              if (comp && apruebaPagos)
+                botones.push(
+                  <button key="a" className="btn-app" disabled={busy} onClick={() => aprobarPago(comp, true)}>
+                    <Icon name="check" />
+                    Aprobar pago
+                  </button>,
+                  <button key="r" className="btn-app danger" disabled={busy} onClick={() => aprobarPago(comp, false)}>
+                    Rechazar pago
+                  </button>,
+                );
+              if (reservaF.estado === 'SOLICITADA' && apruebaReservas)
+                botones.push(
+                  <button key="ar" className="btn-app" disabled={busy} onClick={() => resolver(reservaF, 'APROBADA')}>
+                    <Icon name="check" />
+                    Aprobar reserva
+                  </button>,
+                  <button key="rr" className="btn-app danger" disabled={busy} onClick={() => resolver(reservaF, 'RECHAZADA')}>
+                    Rechazar reserva
+                  </button>,
+                );
+              return botones.length ? <Acciones>{botones}</Acciones> : null;
+            })()}
+          </div>
+        </Modal>
+      )}
+      {gastoF && (
+        <Modal title={gastoF.concepto} onClose={() => setFichaG(null)}>
+          <div className="stack">
+            <strong>{money(gastoF.monto)}</strong>
+            <Datos
+              items={[
+                ['Fecha', fecha(gastoF.fecha)],
+                ['Categoría', gastoF.categoria],
+                ['Proveedor', gastoF.proveedor],
+              ]}
+            />
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="acciones-titulo">Evidencia</span>
+              <div className="row-actions" style={{ gap: 10 }}>
+                {evidenciasDe(gastoF).map((ev) => (
+                  <VerEvidencia key={ev.path} egresoId={gastoF.id} ev={ev} />
+                ))}
+              </div>
+            </div>
+            <Firma item={gastoF} altaAntes={gastoF.registradoPorNombre || gastoF.registradoPor} />
+            {gestiona && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => (setGasto(gastoF), setFichaG(null))}>
+                  Editar
+                </button>
+                <button className="btn-app danger" onClick={() => borrarGasto(gastoF)}>
+                  <Icon name="trash" />
+                  Eliminar
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {gasto && (
         <EditarEgreso
           e={gasto}

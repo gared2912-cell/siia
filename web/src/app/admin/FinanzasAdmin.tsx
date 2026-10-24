@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { Recibo, type ReciboData } from '../Recibo';
-import { Archivo, Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, hoy, money, periodoActual, useAction, useLoad } from '../ui';
+import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, Tarjetas, fecha, hoy, money, periodoActual, tonoDe, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { HistorialVista } from '../HistorialVista';
 import type { DatosHistorial } from '../historialPdf';
@@ -21,7 +21,7 @@ type SaldoMensual = Schema['SaldoMensual']['type'];
 
 /** `inicio`: subpestaña de Ingresos con la que abre (notificación de comprobante → «Por aprobar»). */
 export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
-  const { condo, etiqueta, unidades, puede, tiene } = useAdmin();
+  const { condo, etiqueta, unidades, puede, tiene, firmaReporte } = useAdmin();
   const id = condo!.id;
   const gestiona = puede('finanzas', 'editar');
   const valida = tiene('finanzas.validarPagos');
@@ -42,6 +42,9 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const [excelPagos, setExcelPagos] = useState(false);
   const [cargo, setCargo] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
+  const [fichaPago, setFichaPago] = useState<Pago | null>(null);
+  const [fichaCargo, setFichaCargo] = useState<Cargo | null>(null);
+  const [historialDe, setHistorialDe] = useState<string | null>(null);
   const [filtroUnidad, setFiltroUnidad] = useState('');
   const { run, busy } = useAction();
 
@@ -59,12 +62,13 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const validar = (p: Pago, aprobar: boolean) => {
     const nota = aprobar ? '' : prompt('Motivo del rechazo (lo verá el residente):');
     if (!aprobar && nota === null) return;
-    run(() => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => reload(true)), aprobar ? 'Pago aprobado y recibo emitido; se notificó al residente' : 'Pago rechazado; se notificó al residente');
+    run(() => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => (setFichaPago(null), reload(true))), aprobar ? 'Pago aprobado y recibo emitido; se notificó al residente' : 'Pago rechazado; se notificó al residente');
   };
   const cancelarCargo = (c: Cargo) =>
     confirm(`¿Cancelar el cargo "${c.concepto}" de ${etiqueta(c.unidadId)}?`) &&
     run(async () => {
       ok(await db.models.Cargo.update({ id: c.id, estado: 'CANCELADO' }));
+      setFichaCargo(null);
       reload(true);
     }, 'Cargo cancelado');
   const verRecibo = (p: Pago) => {
@@ -77,6 +81,10 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
     });
   };
 
+  const cubre = (p: Pago) =>
+    (p.cargoIds ?? []).length
+      ? cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => `${c.concepto} (${money(c.monto)})`).join(', ')
+      : 'Pago a cuenta';
   const saldos = unidades
     .map((u) => {
       const pend = cargos.filter((c) => c.unidadId === u.id && c.estado === 'PENDIENTE');
@@ -159,38 +167,23 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       {vista === 'ingresos' && tab === 'revision' && (
         <section className="panel">
           {revision.length ? (
-            <ul className="list">
+            <Tarjetas>
               {revision.map((p) => (
-                <li key={p.id}>
-                  <div className="list-main">
-                    <strong>
-                      {etiqueta(p.unidadId)} · {money(p.monto)}
-                    </strong>
-                    <div className="list-sub">
-                      Pagado el {fecha(p.fecha)} {p.referencia && `· Ref. ${p.referencia}`} · Enviado {fecha(p.createdAt)}
-                    </div>
-                    <div className="list-sub">
-                      Cubre:{' '}
-                      {(p.cargoIds ?? []).length
-                        ? cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => `${c.concepto} (${money(c.monto)})`).join(', ')
-                        : 'pago a cuenta'}
-                    </div>
-                    <Archivo path={p.comprobantePath} origen={{ model: 'Pago', id: p.id }} label="Ver comprobante" />
-                  </div>
-                  {valida && (
-                    <div className="row-actions">
-                      <button className="btn-app sm" disabled={busy} onClick={() => validar(p, true)}>
-                        <Icon name="check" />
-                        Aprobar
-                      </button>
-                      <button className="btn-app sm danger" disabled={busy} onClick={() => validar(p, false)}>
-                        Rechazar
-                      </button>
-                    </div>
-                  )}
-                </li>
+                <Tarjeta
+                  key={p.id}
+                  tono="warn"
+                  onClick={() => setFichaPago(p)}
+                  titulo={etiqueta(p.unidadId)}
+                  sub={`Pagado el ${fecha(p.fecha)} · Enviado ${fecha(p.createdAt)} · ${cubre(p)}`}
+                  lado={
+                    <>
+                      <strong>{money(p.monto)}</strong>
+                      <Badge estado="EN_REVISION">Por aprobar</Badge>
+                    </>
+                  }
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <Empty icon="check">No hay comprobantes pendientes de aprobar.</Empty>
           )}
@@ -207,48 +200,23 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             </button>
           </div>
           {procesados.length ? (
-            <div className="table-wrap">
-              <table className="tbl tbl-tarjetas">
-                <thead>
-                  <tr>
-                    <th>Folio</th>
-                    <th>Unidad</th>
-                    <th>Fecha</th>
-                    <th className="num">Monto</th>
-                    <th>Estado</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {procesados.map((p) => (
-                    <tr key={p.id}>
-                      <td data-label="Folio">{p.folio ?? '—'}</td>
-                      <td className="tt-titulo">{etiqueta(p.unidadId)}</td>
-                      <td data-label="Fecha">{fecha(p.fecha)}</td>
-                      <td className="num" data-label="Monto">{money(p.monto)}</td>
-                      <td data-label="Estado">
-                        <Badge estado={p.estado} />
-                        <Firma
-                          item={p}
-                          alta={false}
-                          antes={{ verbo: p.estado === 'RECHAZADO' ? 'Rechazado por' : 'Aprobado por', por: p.validadoPor, en: p.validadoEn }}
-                        />
-                      </td>
-                      <td className="tt-acciones">
-                        <div className="row-actions" style={{ justifyContent: 'flex-end' }}>
-                          <Archivo path={p.comprobantePath} origen={{ model: 'Pago', id: p.id }} label="Comprobante" />
-                          {p.estado === 'VALIDADO' && (
-                            <button className="linklike" onClick={() => verRecibo(p)}>
-                              Recibo
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Tarjetas>
+              {procesados.map((p) => (
+                <Tarjeta
+                  key={p.id}
+                  tono={tonoDe(p.estado)}
+                  onClick={() => setFichaPago(p)}
+                  titulo={etiqueta(p.unidadId)}
+                  sub={`${p.folio ? `${p.folio} · ` : ''}Pagado el ${fecha(p.fecha)}`}
+                  lado={
+                    <>
+                      <strong>{money(p.monto)}</strong>
+                      <Badge estado={p.estado} />
+                    </>
+                  }
+                />
+              ))}
+            </Tarjetas>
           ) : (
             <Empty icon="money">Sin pagos procesados.</Empty>
           )}
@@ -269,48 +237,26 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             </select>
           </div>
           {cargosVista.length ? (
-            <div className="table-wrap">
-              <table className="tbl tbl-tarjetas">
-                <thead>
-                  <tr>
-                    <th>Unidad</th>
-                    <th>Concepto</th>
-                    <th>Tipo</th>
-                    <th>Vence</th>
-                    <th className="num">Monto</th>
-                    <th>Estado</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {cargosVista.map((c) => {
-                    const vencido = c.estado === 'PENDIENTE' && c.vence && c.vence < hoyStr;
-                    return (
-                      <tr key={c.id}>
-                        <td className="tt-titulo">{etiqueta(c.unidadId)}</td>
-                        <td data-label="Concepto">
-                          {c.concepto}
-                          <Firma item={c} alta="Generado por" />
-                        </td>
-                        <td className="small" data-label="Tipo">{etiquetaIngreso(tipoDeCargo(c))}</td>
-                        <td data-label="Vence">{fecha(c.vence)}</td>
-                        <td className="num" data-label="Monto">{money(c.monto)}</td>
-                        <td data-label="Estado">
-                          <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
-                        </td>
-                        <td className="tt-acciones">
-                          {gestiona && c.estado === 'PENDIENTE' && (
-                            <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => cancelarCargo(c)}>
-                              Cancelar
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <Tarjetas>
+              {cargosVista.map((c) => {
+                const vencido = c.estado === 'PENDIENTE' && !!c.vence && c.vence < hoyStr;
+                return (
+                  <Tarjeta
+                    key={c.id}
+                    tono={vencido ? 'mal' : tonoDe(c.estado)}
+                    onClick={() => setFichaCargo(c)}
+                    titulo={`${etiqueta(c.unidadId)} · ${c.concepto}`}
+                    sub={`${etiquetaIngreso(tipoDeCargo(c))} · Vence ${fecha(c.vence)}`}
+                    lado={
+                      <>
+                        <strong>{money(c.monto)}</strong>
+                        <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
+                      </>
+                    }
+                  />
+                );
+              })}
+            </Tarjetas>
           ) : (
             <Empty icon="money">Sin cargos. Genera las cuotas del mes.</Empty>
           )}
@@ -319,33 +265,116 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
 
       {vista === 'ingresos' && tab === 'saldos' && (
         <section className="panel">
-          <div className="table-wrap">
-            <table className="tbl tbl-tarjetas">
-              <thead>
-                <tr>
-                  <th>Unidad</th>
-                  <th>Propietario</th>
-                  <th className="num">Saldo</th>
-                  <th className="num">Vencido</th>
-                </tr>
-              </thead>
-              <tbody>
-                {saldos.map(({ u, saldo, vencido }) => (
-                  <tr key={u.id}>
-                    <td className="tt-titulo">{u.etiqueta}</td>
-                    <td data-label="Propietario">{u.propietario ?? '—'}</td>
-                    <td className="num" data-label="Saldo">{money(saldo)}</td>
-                    <td className="num" data-label="Vencido" style={{ color: vencido ? 'var(--danger)' : undefined }}>
-                      {money(vencido)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Tarjetas>
+            {saldos.map(({ u, saldo, vencido }) => (
+              <Tarjeta
+                key={u.id}
+                tono={vencido > 0 ? 'mal' : saldo > 0 ? 'warn' : 'ok'}
+                onClick={() => setHistorialDe(u.id)}
+                label={`Ver historial de pagos de ${u.etiqueta}`}
+                titulo={u.etiqueta}
+                sub={u.propietario ?? undefined}
+                lado={
+                  <>
+                    <strong>{money(saldo)}</strong>
+                    {vencido > 0 ? (
+                      <Badge estado="VENCIDO">{`Vencido ${money(vencido)}`}</Badge>
+                    ) : (
+                      <Badge estado={saldo > 0 ? 'PENDIENTE' : 'PAGADO'}>{saldo > 0 ? 'Por vencer' : 'Al corriente'}</Badge>
+                    )}
+                  </>
+                }
+              />
+            ))}
+          </Tarjetas>
         </section>
       )}
 
+      {historialDe && (
+        <HistorialVista
+          datos={{
+            condominio: condo!.nombre,
+            direccion: condo!.direccion,
+            unidad: etiqueta(historialDe),
+            residente: unidades.find((u) => u.id === historialDe)?.propietario,
+            cargos: cargos.filter((c) => c.unidadId === historialDe),
+            pagos: pagos.filter((p) => p.unidadId === historialDe),
+            hoy: hoyStr,
+            generadoPor: firmaReporte,
+          }}
+          onClose={() => setHistorialDe(null)}
+        />
+      )}
+      {fichaPago && (
+        <Modal title={`${fichaPago.estado === 'EN_REVISION' ? 'Comprobante' : 'Pago'} · ${etiqueta(fichaPago.unidadId)}`} onClose={() => setFichaPago(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <Badge estado={fichaPago.estado} />
+              <strong>{money(fichaPago.monto)}</strong>
+            </div>
+            <Datos
+              items={[
+                ['Folio de recibo', fichaPago.folio],
+                ['Fecha de pago', fecha(fichaPago.fecha)],
+                ['Enviado', fecha(fichaPago.createdAt)],
+                ['Referencia', fichaPago.referencia],
+                ['Cubre', cubre(fichaPago)],
+                ['Motivo del rechazo', fichaPago.estado === 'RECHAZADO' ? fichaPago.nota : null],
+              ]}
+            />
+            <Firma
+              item={fichaPago}
+              alta={false}
+              antes={{ verbo: fichaPago.estado === 'RECHAZADO' ? 'Rechazado por' : 'Aprobado por', por: fichaPago.validadoPor, en: fichaPago.validadoEn }}
+            />
+            <Acciones>
+              <Archivo path={fichaPago.comprobantePath} origen={{ model: 'Pago', id: fichaPago.id }} label="Ver comprobante" />
+              {fichaPago.estado === 'VALIDADO' && (
+                <button className="btn-app secondary" onClick={() => (verRecibo(fichaPago), setFichaPago(null))}>
+                  <Icon name="file" />
+                  Ver recibo
+                </button>
+              )}
+              {fichaPago.estado === 'EN_REVISION' && valida && (
+                <>
+                  <button className="btn-app" disabled={busy} onClick={() => validar(fichaPago, true)}>
+                    <Icon name="check" />
+                    Aprobar
+                  </button>
+                  <button className="btn-app danger" disabled={busy} onClick={() => validar(fichaPago, false)}>
+                    Rechazar
+                  </button>
+                </>
+              )}
+            </Acciones>
+          </div>
+        </Modal>
+      )}
+      {fichaCargo && (
+        <Modal title={`${etiqueta(fichaCargo.unidadId)} · ${fichaCargo.concepto}`} onClose={() => setFichaCargo(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <Badge estado={fichaCargo.estado === 'PENDIENTE' && fichaCargo.vence && fichaCargo.vence < hoyStr ? 'VENCIDO' : fichaCargo.estado} />
+              <strong>{money(fichaCargo.monto)}</strong>
+            </div>
+            <Datos
+              items={[
+                ['Tipo', etiquetaIngreso(tipoDeCargo(fichaCargo))],
+                ['Periodo', fichaCargo.periodo],
+                ['Vence', fecha(fichaCargo.vence)],
+              ]}
+            />
+            <Firma item={fichaCargo} alta="Generado por" />
+            {gestiona && fichaCargo.estado === 'PENDIENTE' && (
+              <Acciones>
+                <button className="btn-app danger" disabled={busy} onClick={() => cancelarCargo(fichaCargo)}>
+                  Cancelar cargo
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {excelPagos && <ExcelPagos pagos={procesados} cargos={cargos} onClose={() => setExcelPagos(false)} />}
       {cobranza && <ReporteCobranza pagos={pagos} cargos={cargos} onClose={() => setCobranza(false)} />}
       {generar && <GenerarCuotas onClose={() => setGenerar(false)} onDone={() => (setGenerar(false), setTab('cargos'), reload(true))} />}
@@ -618,25 +647,22 @@ function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] 
       {contactos.loading && !contactos.data ? (
         <Loading />
       ) : lista.length ? (
-        <ul className="list mascotas-lista">
+        <Tarjetas>
           {lista.map((u) => {
             const vencido = vencidoDe(u.id);
             return (
-              <li key={u.id}>
-                <button type="button" className="mascota-fila" onClick={() => abrir(u)} aria-label={`Ver historial de pagos de ${u.etiqueta}`}>
-                  <span className="list-main">
-                    <strong>{u.etiqueta}</strong>
-                    <span className="list-sub">{nombre(u) || 'Sin residente registrado'}</span>
-                  </span>
-                  <span className="mascota-fila-estado">
-                    <span className={`pill ${vencido > 0 ? 'mal' : 'ok'}`}>{vencido > 0 ? `Debe ${money(vencido)}` : 'Al corriente'}</span>
-                  </span>
-                  <Icon name="chevron-right" />
-                </button>
-              </li>
+              <Tarjeta
+                key={u.id}
+                tono={vencido > 0 ? 'mal' : 'ok'}
+                onClick={() => abrir(u)}
+                label={`Ver historial de pagos de ${u.etiqueta}`}
+                titulo={u.etiqueta}
+                sub={nombre(u) || 'Sin residente registrado'}
+                lado={<span className={`pill ${vencido > 0 ? 'mal' : 'ok'}`}>{vencido > 0 ? `Debe ${money(vencido)}` : 'Al corriente'}</span>}
+              />
             );
           })}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="building">{q ? 'Sin resultados.' : 'El condominio no tiene casas o departamentos.'}</Empty>
       )}

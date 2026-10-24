@@ -2,7 +2,7 @@
 // y cuentas de administración (rol + condominios asignados).
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, type Schema } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, fecha, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, fecha, tonoDe, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
 import { BotonesAlta, Contrasena, avisoAlta, conCorreo } from './Residentes';
@@ -50,7 +50,8 @@ function Roles({ roles, loading, reload }: { roles?: RolAdmin[]; loading: boolea
   const { run, busy } = useAction();
   if (loading && !roles) return <Loading />;
   const borrar = (r: RolAdmin) =>
-    confirm(`¿Eliminar el rol «${r.nombre}»?`) && run(() => adminCall('roles.eliminar', { id: r.id }).then(reload), 'Rol eliminado');
+    confirm(`¿Eliminar el rol «${r.nombre}»?`) &&
+    run(() => adminCall('roles.eliminar', { id: r.id }).then(() => (setEditar(null), reload())), 'Rol eliminado');
   return (
     <>
       <div className="row-actions">
@@ -67,42 +68,19 @@ function Roles({ roles, loading, reload }: { roles?: RolAdmin[]; loading: boolea
         </button>
       </div>
       {roles?.length ? (
-        <div className="grid-cards">
+        <Tarjetas>
           {roles.map((r) => (
-            <article key={r.id} className="panel" style={{ marginTop: 0 }}>
-              <div className="panel-head">
-                <h3>{r.nombre}</h3>
-                <Badge>{r.asignados === 1 ? '1 administrador' : `${r.asignados} administradores`}</Badge>
-              </div>
-              {r.descripcion && (
-                <p className="small muted" style={{ margin: '0 0 8px' }}>
-                  {r.descripcion}
-                </p>
-              )}
-              <p className="small" style={{ margin: '0 0 8px' }}>
-                {resumen(r.permisos)}
-              </p>
-              {r.permisos.extras.length > 0 && (
-                <p className="small muted" style={{ margin: '0 0 12px' }}>
-                  Además: {r.permisos.extras.map((e) => EXTRAS.find((x) => x.key === e)?.label.toLowerCase()).join('; ')}.
-                </p>
-              )}
-              <div className="row-actions">
-                <button className="btn-app sm secondary" onClick={() => setEditar(r)}>
-                  Editar permisos
-                </button>
-                <button
-                  className="btn-app sm danger"
-                  disabled={busy || r.asignados > 0}
-                  title={r.asignados ? 'Está asignado a administradores' : undefined}
-                  onClick={() => borrar(r)}
-                >
-                  Eliminar
-                </button>
-              </div>
-            </article>
+            <Tarjeta
+              key={r.id}
+              tono={r.asignados ? 'ok' : 'neutro'}
+              onClick={() => setEditar(r)}
+              media={<TarjetaIcono name="shield" />}
+              titulo={r.nombre}
+              sub={r.descripcion || resumen(r.permisos)}
+              lado={<Badge estado={r.asignados ? 'APROBADO' : undefined}>{r.asignados === 1 ? '1 administrador' : `${r.asignados} administradores`}</Badge>}
+            />
           ))}
-        </div>
+        </Tarjetas>
       ) : (
         <section className="panel">
           <Empty icon="shield">
@@ -110,12 +88,32 @@ function Roles({ roles, loading, reload }: { roles?: RolAdmin[]; loading: boolea
           </Empty>
         </section>
       )}
-      {editar && <EditarRol r={editar} onClose={() => setEditar(null)} onDone={() => (setEditar(null), reload())} />}
+      {editar && (
+        <EditarRol
+          r={editar}
+          onClose={() => setEditar(null)}
+          onDone={() => (setEditar(null), reload())}
+          onBorrar={editar.id ? () => borrar(editar as RolAdmin) : undefined}
+          borrando={busy}
+        />
+      )}
     </>
   );
 }
 
-function EditarRol({ r, onClose, onDone }: { r: Partial<RolAdmin>; onClose: () => void; onDone: () => void }) {
+function EditarRol({
+  r,
+  onClose,
+  onDone,
+  onBorrar,
+  borrando,
+}: {
+  r: Partial<RolAdmin>;
+  onClose: () => void;
+  onDone: () => void;
+  onBorrar?: () => void;
+  borrando?: boolean;
+}) {
   const [nombre, setNombre] = useState(r.nombre ?? '');
   const [descripcion, setDescripcion] = useState(r.descripcion ?? '');
   const [secciones, setSecciones] = useState<Record<string, Nivel>>(() =>
@@ -197,9 +195,24 @@ function EditarRol({ r, onClose, onDone }: { r: Partial<RolAdmin>; onClose: () =
             );
           })}
         </ul>
-        <button className="btn-app" disabled={busy}>
-          {busy ? 'Guardando…' : 'Guardar rol'}
-        </button>
+        <div className="row-actions">
+          <button className="btn-app" disabled={busy}>
+            {busy ? 'Guardando…' : 'Guardar rol'}
+          </button>
+          {onBorrar && (
+            <button
+              type="button"
+              className="btn-app danger"
+              disabled={borrando || !!r.asignados}
+              title={r.asignados ? 'Está asignado a administradores' : undefined}
+              onClick={onBorrar}
+            >
+              <Icon name="trash" />
+              Eliminar rol
+            </button>
+          )}
+        </div>
+        {!!r.asignados && onBorrar && <p className="small muted" style={{ margin: 0 }}>Para eliminar el rol, primero cambia de rol a sus administradores.</p>}
       </form>
     </Modal>
   );
@@ -212,6 +225,7 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
   const cuentas = useLoad(() => adminCall<Record<string, { status?: string }>>('estadoCuentas'));
   const [editar, setEditar] = useState<Perfil | 'nuevo' | null>(null);
   const [contrasena, setContrasena] = useState<Perfil | null>(null);
+  const [ficha, setFicha] = useState<Perfil | null>(null);
   const sinPrimerIngreso = (p: Perfil) => cuentas.data?.[p.userId]?.status === 'FORCE_CHANGE_PASSWORD';
   const admins = useMemo(
     () =>
@@ -227,6 +241,7 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
     if (!ids.length) return 'Sin condominios asignados';
     return ids.map((id) => condos.find((c) => c.id === id)?.nombre ?? 'Condominio eliminado').join(', ');
   };
+  const rolDe = (p: Perfil) => (p.rol === 'SUPERADMIN' ? 'Superadministrador' : (roles.find((r) => r.id === p.rolAdminId)?.nombre ?? 'Sin rol'));
 
   if (perfiles.loading && !perfiles.data) return <Loading />;
   if (perfiles.error) return <ErrorBox error={perfiles.error} retry={perfiles.reload} />;
@@ -245,41 +260,65 @@ function Cuentas({ roles, onRoles }: { roles: RolAdmin[]; onRoles: () => void })
       </div>
       <section className="panel">
         {admins.length ? (
-          <ul className="list">
+          <Tarjetas>
             {admins.map((p) => (
-              <li key={p.userId}>
-                <div className="list-main">
-                  <strong>{p.nombre || p.email}</strong> <Badge estado={p.estado} />{' '}
-                  <Badge>{p.rol === 'SUPERADMIN' ? 'Superadministrador' : (roles.find((r) => r.id === p.rolAdminId)?.nombre ?? 'Sin rol')}</Badge>
-                  {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
-                  <div className="list-sub">
-                    {p.email} · alta {fecha(p.createdAt)}
-                  </div>
-                  <div className="list-sub">{condosDe(p)}</div>
-                  <Firma item={p} alta="Alta por" />
-                </div>
-                <div className="row-actions">
-                  <button className="btn-app sm secondary" onClick={() => setEditar(p)}>
-                    Cambiar rol y condominios
-                  </button>
-                  {/* La propia contraseña se cambia con «¿Olvidaste tu contraseña?»: asignarla aquí cerraría tu sesión. */}
-                  {p.email !== yo && p.estado === 'APROBADO' && (
-                    <button className="btn-app sm secondary" onClick={() => setContrasena(p)}>
-                      <Icon name="shield" />
-                      Contraseña
-                    </button>
-                  )}
-                </div>
-              </li>
+              <Tarjeta
+                key={p.userId}
+                tono={p.estado === 'APROBADO' ? (sinPrimerIngreso(p) ? 'warn' : 'ok') : tonoDe(p.estado)}
+                onClick={() => setFicha(p)}
+                media={<TarjetaIcono name={p.rol === 'SUPERADMIN' ? 'shield' : 'users'} />}
+                titulo={p.nombre || p.email}
+                sub={`${rolDe(p)} · ${condosDe(p)}`}
+                lado={
+                  <>
+                    <Badge estado={p.estado} />
+                    {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
+                  </>
+                }
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="shield">Sin cuentas de administración.</Empty>
         )}
         <p className="small muted" style={{ margin: '12px 0 0' }}>
-          Con «Contraseña» reenvías el acceso a su correo con una contraseña temporal, o le asignas la contraseña que tú elijas.
+          Toca un administrador para ver sus datos, cambiar su rol y condominios o su contraseña. Con «Contraseña» reenvías el acceso a su correo con una contraseña temporal, o le asignas la contraseña que tú elijas.
         </p>
       </section>
+      {ficha && (
+        <Modal title={ficha.nombre || ficha.email || 'Administrador'} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <div className="row-actions">
+              <Badge estado={ficha.estado} />
+              <Badge>{rolDe(ficha)}</Badge>
+              {sinPrimerIngreso(ficha) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
+            </div>
+            <Datos
+              items={[
+                ['Correo', ficha.email],
+                ['Teléfono', ficha.telefono],
+                ['Rol', rolDe(ficha)],
+                ['Condominios', condosDe(ficha)],
+                ['Alta', fecha(ficha.createdAt)],
+              ]}
+            />
+            <Firma item={ficha} alta="Alta por" />
+            <Acciones>
+              <button className="btn-app secondary" onClick={() => (setEditar(ficha), setFicha(null))}>
+                <Icon name="settings" />
+                Cambiar rol y condominios
+              </button>
+              {/* La propia contraseña se cambia con «¿Olvidaste tu contraseña?»: asignarla aquí cerraría tu sesión. */}
+              {ficha.email !== yo && ficha.estado === 'APROBADO' && (
+                <button className="btn-app secondary" onClick={() => (setContrasena(ficha), setFicha(null))}>
+                  <Icon name="shield" />
+                  Contraseña
+                </button>
+              )}
+            </Acciones>
+          </div>
+        </Modal>
+      )}
       {contrasena && (
         <Contrasena p={contrasena} sinPrimerIngreso={sinPrimerIngreso(contrasena)} onClose={() => (setContrasena(null), cuentas.reload(true))} />
       )}

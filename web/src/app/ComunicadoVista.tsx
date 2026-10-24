@@ -7,7 +7,7 @@ export type ComunicadoDatos = { id: string; titulo: string; cuerpo: string; impo
 /** PDF adjunto: nombre y URL temporal que lo descarga. */
 export type Adjunto = { nombre: string; url: string };
 
-/** Tarjeta que se abre al tocarla. `acciones` (Editar/Eliminar) va fuera del área tocable. */
+/** Tarjeta que se abre al tocarla (orilla roja si es importante). Las acciones (Editar/Eliminar) van dentro del comunicado completo. */
 export function TarjetaComunicado({
   c,
   urls,
@@ -26,7 +26,7 @@ export function TarjetaComunicado({
 }) {
   const mas = urls.length - 3;
   return (
-    <article className="panel comunicado">
+    <article className={`panel comunicado${c.importante ? ' importante' : ''}`}>
       <button type="button" className="comunicado-abrir" onClick={onAbrir}>
         <span className="comunicado-cab">
           <strong>{c.titulo}</strong>
@@ -65,7 +65,20 @@ export function TarjetaComunicado({
 }
 
 /** Comunicado completo: texto entero y cada imagen a lo ancho; al tocar una imagen se ve en pantalla completa. */
-export function ComunicadoCompleto({ c, urls, adjuntos = [], onClose }: { c: ComunicadoDatos; urls: string[]; adjuntos?: Adjunto[]; onClose: () => void }) {
+export function ComunicadoCompleto({
+  c,
+  urls,
+  adjuntos = [],
+  onClose,
+  pie,
+}: {
+  c: ComunicadoDatos;
+  urls: string[];
+  adjuntos?: Adjunto[];
+  onClose: () => void;
+  /** Solo en el panel: firma y acciones (Editar/Eliminar) al final del comunicado. */
+  pie?: ReactNode;
+}) {
   const [grande, setGrande] = useState<string | null>(null);
   return (
     <Modal title="Comunicado" onClose={onClose} wide>
@@ -97,6 +110,7 @@ export function ComunicadoCompleto({ c, urls, adjuntos = [], onClose }: { c: Com
             <img src={u} alt={`Imagen ${i + 1} del comunicado`} loading="lazy" />
           </button>
         ))}
+        {pie}
       </div>
       {grande && <VerImagen src={grande} alt={c.titulo} onClose={() => setGrande(null)} />}
     </Modal>

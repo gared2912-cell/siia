@@ -2,7 +2,7 @@
 // cuotas extraordinarias, unidades y residentes (uno por uno o con el machote de Excel), amenidades y servicios.
 import { useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, MODULOS, Modal, PageHead, Seg, fecha, hoy, money, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, MODULOS, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, fecha, hoy, money, useAction, useLoad } from '../ui';
 import { TIPOS_UNIDAD, prefijoUnidad, textoDatosPago } from '../../../amplify/functions/shared/unidades';
 import { useAdmin, type Condominio } from './AdminApp';
 import { Residentes } from './Residentes';
@@ -59,40 +59,38 @@ export function Condominios({ inicio }: { inicio?: Tab } = {}) {
         )}
       </PageHead>
       {condos.length ? (
-        <div className="grid-cards">
+        <Tarjetas>
           {condos.map((c) => (
-            <article key={c.id} className="panel" style={{ marginTop: 0 }}>
-              <div className="panel-head">
-                <h3>{c.nombre}</h3>
-                {c.suspendido ? (
+            <Tarjeta
+              key={c.id}
+              tono={c.suspendido ? 'mal' : c.activo === false ? 'neutro' : 'ok'}
+              onClick={() => {
+                setCondoId(c.id);
+                setTab('general');
+                setVista('ficha');
+              }}
+              label={`Abrir ${c.nombre}`}
+              media={<TarjetaIcono name="building" />}
+              titulo={c.nombre}
+              sub={
+                <>
+                  {c.tipo ?? 'Sin tipo'} · {nombreTipoUnidad(c.tipoUnidad)}
+                  {c.direccion && <> · {c.direccion}</>}
+                  <br />
+                  Cuota: <strong>{c.cuotaMensual ? `${money(c.cuotaMensual)} al mes` : 'sin definir'}</strong>
+                  {c.cuotaAutomatica && ` (automática el día ${c.diaCargo ?? 1})`} · {(c.modulos ?? []).length} de {MODULOS.length} servicios
+                </>
+              }
+              lado={
+                c.suspendido ? (
                   <Badge estado="SUSPENDIDO">Suspendido</Badge>
                 ) : (
-                  <Badge estado={c.activo === false ? 'SUSPENDIDO' : 'APROBADO'}>{c.activo === false ? 'Inactivo' : 'Activo'}</Badge>
-                )}
-              </div>
-              <p className="small muted" style={{ margin: '0 0 8px' }}>
-                {c.tipo ?? 'Sin tipo'} · {nombreTipoUnidad(c.tipoUnidad)}
-                {c.direccion && <> · {c.direccion}</>}
-              </p>
-              <p className="small" style={{ margin: '0 0 12px' }}>
-                Cuota: <strong>{c.cuotaMensual ? `${money(c.cuotaMensual)} al mes` : 'sin definir'}</strong>
-                {c.cuotaAutomatica && ` (automática el día ${c.diaCargo ?? 1})`} · {(c.modulos ?? []).length} de{' '}
-                {MODULOS.length} servicios
-              </p>
-              <button
-                className="btn-app sm"
-                onClick={() => {
-                  setCondoId(c.id);
-                  setTab('general');
-                  setVista('ficha');
-                }}
-              >
-                Abrir condominio
-                <Icon name="arrow" />
-              </button>
-            </article>
+                  <Badge estado={c.activo === false ? 'CANCELADO' : 'APROBADO'}>{c.activo === false ? 'Inactivo' : 'Activo'}</Badge>
+                )
+              }
+            />
           ))}
-        </div>
+        </Tarjetas>
       ) : (
         <section className="panel">
           <Empty icon="building">{alta ? 'Da de alta el primer condominio.' : 'No tienes condominios asignados.'}</Empty>
@@ -440,6 +438,7 @@ function Extraordinarias() {
   const gestiona = puede('finanzas', 'editar');
   const { data, error, loading, reload } = useLoad(() => all<Cargo>((o) => db.models.Cargo.cargosPorCondominio({ condominioId: condoId }, o)), [condoId]);
   const [nueva, setNueva] = useState(false);
+  const [ficha, setFicha] = useState<string | null>(null);
   const { run, busy } = useAction();
 
   const grupos = Object.values(
@@ -447,6 +446,7 @@ function Extraordinarias() {
       .filter((x) => x.id.startsWith('extra#'))
       .reduce<Record<string, Cargo[]>>((acc, x) => ((acc[x.id.split('#')[1]] ??= []).push(x), acc), {}),
   ).sort((a, b) => String(b[0].vence).localeCompare(String(a[0].vence)));
+  const fichaG = grupos.find((g) => g[0].id === ficha);
 
   const cancelar = (g: Cargo[]) => {
     const pendientes = g.filter((x) => x.estado === 'PENDIENTE');
@@ -478,29 +478,47 @@ function Extraordinarias() {
       ) : error ? (
         <ErrorBox error={error} retry={reload} />
       ) : grupos.length ? (
-        <ul className="list">
+        <Tarjetas>
           {grupos.map((g) => {
             const pagados = g.filter((x) => x.estado === 'PAGADO').length;
             const vigentes = g.filter((x) => x.estado !== 'CANCELADO').length;
             return (
-              <li key={g[0].id}>
-                <div className="list-main">
-                  <strong>{g[0].concepto}</strong> {!vigentes && <Badge estado="CANCELADO">Cancelada</Badge>}
-                  <div className="list-sub">
-                    {money(g[0].monto)} por unidad · vence {fecha(g[0].vence)} · {vigentes} unidad(es) · {pagados} pagada(s)
-                  </div>
-                </div>
-                {gestiona && g.some((x) => x.estado === 'PENDIENTE') && (
-                  <button type="button" className="btn-app sm danger" disabled={busy} onClick={() => cancelar(g)}>
-                    Cancelar
-                  </button>
-                )}
-              </li>
+              <Tarjeta
+                key={g[0].id}
+                tono={!vigentes ? 'neutro' : pagados === vigentes ? 'ok' : g.some((x) => x.estado === 'PENDIENTE' && x.vence && x.vence < hoy()) ? 'mal' : 'warn'}
+                onClick={() => setFicha(g[0].id)}
+                media={<TarjetaIcono name="money" />}
+                titulo={g[0].concepto}
+                sub={`${money(g[0].monto)} por unidad · vence ${fecha(g[0].vence)}`}
+                lado={!vigentes ? <Badge estado="CANCELADO">Cancelada</Badge> : <Badge estado={pagados === vigentes ? 'PAGADO' : 'PENDIENTE'}>{`${pagados} de ${vigentes} pagadas`}</Badge>}
+              />
             );
           })}
-        </ul>
+        </Tarjetas>
       ) : (
         <Empty icon="money">Sin cuotas extraordinarias.</Empty>
+      )}
+      {fichaG && (
+        <Modal title={fichaG[0].concepto} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <Datos
+              items={[
+                ['Monto por unidad', money(fichaG[0].monto)],
+                ['Vence', fecha(fichaG[0].vence)],
+                ['Unidades', String(fichaG.filter((x) => x.estado !== 'CANCELADO').length)],
+                ['Pagadas', String(fichaG.filter((x) => x.estado === 'PAGADO').length)],
+                ['Pendientes', String(fichaG.filter((x) => x.estado === 'PENDIENTE').length)],
+              ]}
+            />
+            {gestiona && fichaG.some((x) => x.estado === 'PENDIENTE') && (
+              <Acciones>
+                <button type="button" className="btn-app danger" disabled={busy} onClick={() => (setFicha(null), cancelar(fichaG))}>
+                  Cancelar cuota
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
       )}
       {nueva && <NuevaExtraordinaria onClose={() => setNueva(false)} onDone={() => (setNueva(false), reload(true))} />}
     </section>

@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { Firma } from './Firma';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, errMsg, fecha, useAction, useLoad, useToast } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, Tarjeta, TarjetaIcono, Tarjetas, errMsg, fecha, useAction, useLoad, useToast, type Tono } from '../ui';
 import { claveUnidad, etiquetaUnidad, prefijoUnidad } from '../../../amplify/functions/shared/unidades';
 import { useAdmin, type Unidad } from './AdminApp';
 import { descargarMachote, leerMachote, type FilaActual, type FilaMachote } from './excel';
@@ -55,6 +55,8 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
     | { t: 'persona'; p: Perfil }
     | { t: 'contrasena'; p: Perfil }
     | { t: 'chat'; p: Perfil }
+    | { t: 'ficha-u'; id: string }
+    | { t: 'ficha-p'; id: string }
     | null
   >(null);
   const { run, busy } = useAction();
@@ -108,7 +110,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
   /** Acciones de un residente o vigilante según su estado. */
   const acciones = (p: Perfil) =>
     (gestionaUsuarios || veChat) && (
-      <div className="row-actions">
+      <Acciones>
         {veChat && p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.unidadId && (
           <button className="btn-app sm secondary" onClick={() => setModal({ t: 'chat', p })}>
             <Icon name="chat" />
@@ -171,29 +173,57 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
         )}
           </>
         )}
-      </div>
+      </Acciones>
     );
 
+  /** Color de la tarjeta de una persona: verde con acceso, ámbar por activar o solicitud, rojo suspendido. */
+  const tonoPersona = (p: Perfil): Tono =>
+    p.estado === 'SUSPENDIDO' || p.estado === 'RECHAZADO' ? 'mal' : p.estado === 'PENDIENTE' || sinPrimerIngreso(p) || p.accesoSinEnviar ? 'warn' : p.estado === 'APROBADO' ? 'ok' : 'neutro';
+  const insignias = (p: Perfil) => (
+    <>
+      {p.estado !== 'APROBADO' && <Badge estado={p.estado} />}
+      {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
+      {p.estado === 'APROBADO' && p.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
+      {p.estado === 'APROBADO' && !sinPrimerIngreso(p) && !p.accesoSinEnviar && <Badge estado="APROBADO">Con acceso</Badge>}
+    </>
+  );
+  const tarjetaPersona = (p: Perfil) => (
+    <Tarjeta
+      key={p.userId}
+      tono={tonoPersona(p)}
+      onClick={() => setModal({ t: 'ficha-p', id: p.userId })}
+      media={<TarjetaIcono name={p.rol === 'VIGILANTE' ? 'shield' : 'users'} />}
+      titulo={p.nombre || p.email}
+      sub={[p.email, p.telefono, p.estado === 'PENDIENTE' && p.unidadSolicitada ? `solicitó: ${p.unidadSolicitada}` : ''].filter(Boolean).join(' · ')}
+      lado={insignias(p)}
+    />
+  );
+  /** Color de la tarjeta de una unidad según sus residentes. */
+  const tonoUnidad = (rs: Perfil[]): Tono => {
+    if (!rs.length) return 'neutro';
+    if (rs.some((p) => p.estado === 'SUSPENDIDO' || p.estado === 'RECHAZADO')) return 'mal';
+    if (rs.some((p) => sinPrimerIngreso(p) || p.accesoSinEnviar)) return 'warn';
+    return rs.some((p) => p.estado === 'APROBADO') ? 'ok' : 'neutro';
+  };
+
   const persona = (p: Perfil) => (
-    <div key={p.userId} style={{ padding: '8px 0 0' }}>
-      <div className="row-actions" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ minWidth: 0 }}>
-          <strong>{p.nombre || p.email}</strong> {p.estado !== 'APROBADO' && <Badge estado={p.estado} />}{' '}
-          {sinPrimerIngreso(p) && <Badge estado="PENDIENTE">Sin primer ingreso</Badge>}
-          {p.estado === 'APROBADO' && p.accesoSinEnviar && <Badge estado="PENDIENTE">Accesos sin enviar</Badge>}
-          <div className="list-sub" style={{ overflowWrap: 'anywhere' }}>
-            {p.email}
-            {p.telefono && ` · ${p.telefono}`}
-            {p.telefono2 && ` · ${p.telefono2}`}
-            {p.estado === 'PENDIENTE' && p.unidadSolicitada && ` · solicitó: ${p.unidadSolicitada}`}
-          </div>
-          {p.nota && <div className="small">{p.nota}</div>}
-          <Firma item={p} alta="Alta por" />
-        </div>
-        {acciones(p)}
-      </div>
+    <div className="stack" key={p.userId}>
+      <div className="row-actions">{insignias(p)}</div>
+      <Datos
+        items={[
+          ['Correo', p.email],
+          ['Teléfono', [p.telefono, p.telefono2].filter(Boolean).join(' · ')],
+          ['Casa o departamento', unidades.find((u) => u.id === p.unidadId)?.etiqueta],
+          ['Solicitó', p.estado === 'PENDIENTE' ? p.unidadSolicitada : null],
+          ['Nota', p.nota],
+        ]}
+      />
+      <Firma item={p} alta="Alta por" />
+      {acciones(p)}
     </div>
   );
+  const fichaU = modal?.t === 'ficha-u' ? unidades.find((u) => u.id === modal.id) : undefined;
+  const fichaP = modal?.t === 'ficha-p' ? delCondo.find((p) => p.userId === modal.id) : undefined;
 
   if (veUsuarios && perfiles.loading && !perfiles.data) return <Loading />;
   if (perfiles.error) return <ErrorBox error={perfiles.error} retry={perfiles.reload} />;
@@ -212,7 +242,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
       {solicitudes.length > 0 && (
         <section className="panel">
           <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Solicitudes de acceso ({solicitudes.length})</h2>
-          {solicitudes.map(persona)}
+          <Tarjetas>{solicitudes.map(tarjetaPersona)}</Tarjetas>
         </section>
       )}
 
@@ -254,34 +284,33 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
           <input className="input" style={{ maxWidth: 280, marginBottom: 16 }} placeholder="Buscar número, nombre o correo" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
         </div>
         {filas.length ? (
-          <ul className="list">
+          <Tarjetas>
             {filas.map(({ u, rs }) => (
-              <li key={u.id} style={{ display: 'block' }}>
-                <div className="row-actions" style={{ justifyContent: 'space-between' }}>
-                  <div>
-                    <strong style={{ color: 'var(--slate)' }}>{u.etiqueta}</strong>
-                    <span className="list-sub">
-                      {u.fechaEntrega ? ` · entrega ${fecha(u.fechaEntrega)}` : ''}
-                      {u.propietario ? ` · propietario: ${u.propietario}` : ''}
-                    </span>
-                  </div>
-                  {(gestionaUnidades || gestionaUsuarios) && (
-                    <div className="row-actions">
-                      <button className="linklike" onClick={() => setModal({ t: 'unidad', u })}>
-                        Editar
-                      </button>
-                      {gestionaUnidades && !rs.length && (
-                        <button className="linklike" style={{ color: 'var(--danger)' }} onClick={() => borrarUnidad(u)}>
-                          Eliminar
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {veUsuarios && (rs.length ? rs.map(persona) : <div className="list-sub">Sin residente con acceso</div>)}
-              </li>
+              <Tarjeta
+                key={u.id}
+                tono={veUsuarios ? tonoUnidad(rs) : 'neutro'}
+                onClick={() => setModal({ t: 'ficha-u', id: u.id })}
+                media={<TarjetaIcono name="building" />}
+                titulo={u.etiqueta}
+                sub={
+                  veUsuarios
+                    ? rs.map((p) => p.nombre || p.email).join(', ') || 'Sin residente con acceso'
+                    : [u.propietario && `Propietario: ${u.propietario}`, u.fechaEntrega && `Entrega ${fecha(u.fechaEntrega)}`].filter(Boolean).join(' · ') || undefined
+                }
+                lado={
+                  veUsuarios
+                    ? rs.length
+                      ? rs.some((p) => p.estado === 'SUSPENDIDO' || p.estado === 'RECHAZADO')
+                        ? <Badge estado="SUSPENDIDO">Suspendido</Badge>
+                        : rs.some((p) => sinPrimerIngreso(p) || p.accesoSinEnviar)
+                          ? <Badge estado="PENDIENTE">Por activar</Badge>
+                          : <Badge estado="APROBADO">Con acceso</Badge>
+                      : <Badge>Sin residente</Badge>
+                    : undefined
+                }
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="building">
             {unidades.length ? 'Sin resultados con ese filtro.' : 'Descarga el machote, llénalo y súbelo con «Alta masiva», o agrega las unidades una por una.'}
@@ -290,7 +319,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
         {huerfanos.length > 0 && filtro === 'todas' && !q && (
           <>
             <h3 style={{ fontSize: '1rem' }}>Residentes sin unidad</h3>
-            {huerfanos.map(persona)}
+            <Tarjetas>{huerfanos.map(tarjetaPersona)}</Tarjetas>
           </>
         )}
       </section>
@@ -306,7 +335,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
               </button>
             )}
           </div>
-          {vigilantes.length ? vigilantes.map(persona) : <Empty icon="shield">Sin vigilantes dados de alta.</Empty>}
+          {vigilantes.length ? <Tarjetas>{vigilantes.map(tarjetaPersona)}</Tarjetas> : <Empty icon="shield">Sin vigilantes dados de alta.</Empty>}
         </section>
       )}
 
@@ -323,6 +352,48 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
       {modal?.t === 'chat' && (
         <Modal title={`Chat con ${unidades.find((u) => u.id === modal.p.unidadId)?.etiqueta ?? ''} · ${modal.p.nombre || modal.p.email}`} onClose={() => setModal(null)} wide>
           <ChatUnidad unidadId={modal.p.unidadId!} />
+        </Modal>
+      )}
+      {fichaU && (
+        <Modal title={fichaU.etiqueta} onClose={() => setModal(null)}>
+          <div className="stack">
+            <Datos
+              items={[
+                ['Propietario', fichaU.propietario],
+                ['Fecha de entrega', fichaU.fechaEntrega ? fecha(fichaU.fechaEntrega) : null],
+              ]}
+            />
+            {veUsuarios && (
+              <div className="stack" style={{ gap: 8 }}>
+                <span className="acciones-titulo">Residentes</span>
+                {porUnidad(fichaU.id).length ? (
+                  <Tarjetas>{porUnidad(fichaU.id).map(tarjetaPersona)}</Tarjetas>
+                ) : (
+                  <p className="small muted" style={{ margin: 0 }}>
+                    Sin residente con acceso.
+                  </p>
+                )}
+              </div>
+            )}
+            {(gestionaUnidades || gestionaUsuarios) && (
+              <Acciones>
+                <button className="btn-app secondary" onClick={() => setModal({ t: 'unidad', u: fichaU })}>
+                  Editar {prefijoUnidad(c.tipoUnidad) === 'Depto' ? 'departamento' : 'casa'} y residente
+                </button>
+                {gestionaUnidades && !porUnidad(fichaU.id).length && (
+                  <button className="btn-app danger" onClick={() => (setModal(null), borrarUnidad(fichaU))}>
+                    <Icon name="trash" />
+                    Eliminar
+                  </button>
+                )}
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
+      {fichaP && (
+        <Modal title={fichaP.nombre || fichaP.email || 'Residente'} onClose={() => setModal(null)}>
+          {persona(fichaP)}
         </Modal>
       )}
       {modal?.t === 'asignar' && <AsignarUnidad perfil={modal.p} onClose={() => setModal(null)} onDone={() => (setModal(null), recargar())} />}

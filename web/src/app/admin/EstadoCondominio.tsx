@@ -3,7 +3,7 @@
 // - Eliminado: va a la papelera 30 días (oculto para todos, cuentas desactivadas) y después se borra todo.
 import { useState } from 'react';
 import { adminCall } from '../api';
-import { Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, fecha, fechaHora, useAction, useLoad, useToast } from '../ui';
+import { Acciones, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, useAction, useLoad, useToast } from '../ui';
 import { DIAS_PAPELERA, jsonDe } from '../../../amplify/functions/shared/condominios';
 import { useAdmin, type Condominio } from './AdminApp';
 
@@ -210,6 +210,7 @@ export function Papelera({ onBack }: { onBack: () => void }) {
   const { data, error, loading, reload } = useLoad(() => adminCall<EnPapelera[]>('condominios.papelera'));
   const { run, busy } = useAction();
   const [borrar, setBorrar] = useState<EnPapelera | null>(null);
+  const [ficha, setFicha] = useState<EnPapelera | null>(null);
 
   async function restaurar(c: EnPapelera) {
     if (!confirm(`¿Restaurar ${c.nombre}? Vuelve a aparecer con todos sus datos y sus residentes y caseta recuperan el acceso con su misma contraseña.`)) return;
@@ -238,39 +239,49 @@ export function Papelera({ onBack }: { onBack: () => void }) {
         ) : error ? (
           <ErrorBox error={error} retry={reload} />
         ) : data?.length ? (
-          <ul className="list">
+          <Tarjetas>
             {data.map((c) => (
-              <li key={c.id}>
-                <div className="list-main">
-                  <strong>{c.nombre}</strong>
-                  <div className="list-sub">
-                    {c.unidades} unidades · {c.cuentas} cuentas de residentes y caseta
-                    <br />
-                    Eliminado el {fechaHora(c.eliminadoEn)}
-                    {c.porNombre && ` por ${c.porNombre}`}
-                    <br />
-                    {c.purgando ? <strong>Borrándose definitivamente…</strong> : <>Se borra definitivamente el {fecha(c.borraEl)}</>}
-                  </div>
-                </div>
-                {!c.purgando && (
-                  <div className="row-actions">
-                    <button type="button" className="btn-app sm" disabled={busy} onClick={() => restaurar(c)}>
-                      <Icon name="refresh" />
-                      Restaurar
-                    </button>
-                    <button type="button" className="btn-app sm danger" disabled={busy} onClick={() => setBorrar(c)}>
-                      <Icon name="trash" />
-                      Borrar ya
-                    </button>
-                  </div>
-                )}
-              </li>
+              <Tarjeta
+                key={c.id}
+                tono="mal"
+                onClick={() => setFicha(c)}
+                media={<TarjetaIcono name="building" />}
+                titulo={c.nombre}
+                sub={`Eliminado el ${fechaHora(c.eliminadoEn)}${c.porNombre ? ` por ${c.porNombre}` : ''}`}
+                lado={c.purgando ? <strong className="small">Borrándose…</strong> : <span className="small muted">Se borra el {fecha(c.borraEl)}</span>}
+              />
             ))}
-          </ul>
+          </Tarjetas>
         ) : (
           <Empty icon="trash">La papelera está vacía.</Empty>
         )}
       </section>
+      {ficha && (
+        <Modal title={ficha.nombre} onClose={() => setFicha(null)}>
+          <div className="stack">
+            <Datos
+              items={[
+                ['Unidades', String(ficha.unidades)],
+                ['Cuentas de residentes y caseta', String(ficha.cuentas)],
+                ['Eliminado', `${fechaHora(ficha.eliminadoEn)}${ficha.porNombre ? ` por ${ficha.porNombre}` : ''}`],
+                ['Se borra definitivamente', ficha.purgando ? 'Borrándose en este momento…' : fecha(ficha.borraEl)],
+              ]}
+            />
+            {!ficha.purgando && (
+              <Acciones>
+                <button type="button" className="btn-app" disabled={busy} onClick={() => (setFicha(null), restaurar(ficha))}>
+                  <Icon name="refresh" />
+                  Restaurar
+                </button>
+                <button type="button" className="btn-app danger" disabled={busy} onClick={() => (setBorrar(ficha), setFicha(null))}>
+                  <Icon name="trash" />
+                  Borrar ya
+                </button>
+              </Acciones>
+            )}
+          </div>
+        </Modal>
+      )}
       {borrar && (
         <Confirmar
           titulo="Borrar definitivamente"

@@ -3,7 +3,7 @@ import { itemDeAviso, useAvisos } from './Notificaciones';
 import { ComunicadoCompleto, type Adjunto, type ComunicadoDatos } from '../ComunicadoVista';
 import { ItemAviso } from '../Campana';
 import { portal } from '../api';
-import { Badge, Empty, ErrorBox, Icon, Loading, MODULOS, PageHead, fecha, money, useLoad } from '../ui';
+import { Badge, Empty, ErrorBox, Icon, Loading, MODULOS, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, money, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
 
 type Resumen = {
@@ -46,36 +46,30 @@ export function Inicio({ perfil, go, has }: ModProps) {
 
       <div className="grid-cards">
         {has('finanzas') && (
-          <div className="stat">
-            <div className="stat-label">Saldo pendiente</div>
-            <div className={`stat-value ${r.saldo > 0 ? (r.cargosVencidos ? 'is-alert' : '') : 'is-ok'}`}>{money(r.saldo)}</div>
-            <div className="small muted">{r.cargosVencidos ? `${r.cargosVencidos} cargo(s) vencido(s)` : r.saldo > 0 ? 'Al corriente' : 'Sin adeudos'}</div>
-            <button className="linklike" onClick={() => go('finanzas')}>
-              Ver estado de cuenta
-            </button>
-          </div>
+          <button type="button" className={`stat stat-tocable t-${r.cargosVencidos ? 'mal' : 'ok'}`} onClick={() => go('finanzas')}>
+            <span className="stat-label">Saldo pendiente</span>
+            <span className={`stat-value ${r.saldo > 0 ? (r.cargosVencidos ? 'is-alert' : '') : 'is-ok'}`}>{money(r.saldo)}</span>
+            <span className="small muted">{r.cargosVencidos ? `${r.cargosVencidos} cargo(s) vencido(s)` : r.saldo > 0 ? 'Al corriente' : 'Sin adeudos'}</span>
+            <span className="stat-ver">Ver estado de cuenta</span>
+          </button>
         )}
         {has('visitas') && (
-          <div className="stat">
-            <div className="stat-label">Visitas de hoy</div>
-            <div className="stat-value">{r.visitasHoy}</div>
-            <div className="small muted">Pases vigentes o visitas dentro</div>
-            <button className="linklike" onClick={() => go('visitas')}>
-              Registrar visita
-            </button>
-          </div>
+          <button type="button" className="stat stat-tocable t-info" onClick={() => go('visitas')}>
+            <span className="stat-label">Visitas de hoy</span>
+            <span className="stat-value">{r.visitasHoy}</span>
+            <span className="small muted">Pases vigentes o visitas dentro</span>
+            <span className="stat-ver">Registrar visita</span>
+          </button>
         )}
         {has('amenidades') && (
-          <div className="stat">
-            <div className="stat-label">Próximas reservas</div>
-            <div className="stat-value">{r.proximasReservas.length}</div>
-            <div className="small muted">
+          <button type="button" className="stat stat-tocable t-info" onClick={() => go('amenidades')}>
+            <span className="stat-label">Próximas reservas</span>
+            <span className="stat-value">{r.proximasReservas.length}</span>
+            <span className="small muted">
               {r.proximasReservas[0] ? `${fecha(r.proximasReservas[0].fecha)} · ${r.proximasReservas[0].horaInicio}` : 'Sin reservas'}
-            </div>
-            <button className="linklike" onClick={() => go('amenidades')}>
-              Reservar amenidad
-            </button>
-          </div>
+            </span>
+            <span className="stat-ver">Reservar amenidad</span>
+          </button>
         )}
       </div>
 
@@ -130,23 +124,21 @@ export function Inicio({ perfil, go, has }: ModProps) {
               Ver todos
             </button>
           </div>
-          <ul className="list">
+          <Tarjetas>
             {r.comunicados.map((c) => (
-              <li key={c.id}>
-                <button type="button" className="fila-click" onClick={() => setComunicado(c)}>
-                  {c.imagenUrls?.[0] && <img className="photo-thumb" src={c.imagenUrls[0]} alt="" loading="lazy" />}
-                  <span className="list-main">
-                    <strong>{c.titulo}</strong> {c.importante && <Badge estado="RECHAZADO">Importante</Badge>}
-                    <span className="small muted" style={{ display: 'block' }}>
-                      {fecha(c.createdAt)}
-                    </span>
-                    <span className="comunicado-resumen small">{c.cuerpo}</span>
-                  </span>
-                  <Icon name="arrow" />
-                </button>
-              </li>
+              <Tarjeta
+                key={c.id}
+                tono={c.importante ? 'mal' : 'info'}
+                onClick={() => setComunicado(c)}
+                media={c.imagenUrls?.[0] ? <img className="photo-thumb" src={c.imagenUrls[0]} alt="" loading="lazy" /> : <TarjetaIcono name="megaphone" />}
+                titulo={c.titulo}
+                sub={fecha(c.createdAt)}
+                lado={c.importante ? <Badge estado="RECHAZADO">Importante</Badge> : undefined}
+              >
+                <span className="comunicado-resumen small">{c.cuerpo}</span>
+              </Tarjeta>
             ))}
-          </ul>
+          </Tarjetas>
         </section>
       )}
       {comunicado && <ComunicadoCompleto c={comunicado} urls={comunicado.imagenUrls ?? []} adjuntos={comunicado.adjuntos} onClose={() => setComunicado(null)} />}

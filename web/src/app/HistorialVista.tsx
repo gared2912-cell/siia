@@ -1,7 +1,7 @@
 // Historial de pagos en pantalla (mismo cálculo que el PDF): para revisarlo mientras se atiende al residente y,
 // si lo pide, descargarlo en PDF desde aquí. Cada recibo aprobado se ve en la misma ventana (y se descarga).
 import { useState } from 'react';
-import { Archivo, Icon, Modal, fecha, money, useAction } from './ui';
+import { Archivo, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, money, useAction } from './ui';
 import { calcularHistorial, type DatosHistorial, type PagoHistorial } from './historialPdf';
 import { Recibo, type ReciboData } from './Recibo';
 
@@ -138,25 +138,20 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
         <div>
           <h3 className="hist-titulo">Recibos de pago ({recibos.length})</h3>
           {recibos.length ? (
-            <ul className="list mascotas-lista">
+            <Tarjetas>
               {recibos.map((p) => (
-                <li key={p.id}>
-                  <button type="button" className="mascota-fila" onClick={() => ver(p)} aria-label={`Ver recibo ${p.folio ?? ''}`}>
-                    <span className="photo-thumb sin-foto">
-                      <Icon name="file" />
-                    </span>
-                    <span className="list-main">
-                      <strong>{p.folio ?? 'Recibo'}</strong>
-                      <span className="list-sub">Pagado el {fecha(p.fecha ?? p.validadoEn)}</span>
-                    </span>
-                    <span className="mascota-fila-estado">
-                      <strong>{money(p.monto)}</strong>
-                    </span>
-                    <Icon name="chevron-right" />
-                  </button>
-                </li>
+                <Tarjeta
+                  key={p.id}
+                  tono="ok"
+                  onClick={() => ver(p)}
+                  label={`Ver recibo ${p.folio ?? ''}`}
+                  media={<TarjetaIcono name="file" />}
+                  titulo={p.folio ?? 'Recibo'}
+                  sub={`Pagado el ${fecha(p.fecha ?? p.validadoEn)}`}
+                  lado={<strong>{money(p.monto)}</strong>}
+                />
               ))}
-            </ul>
+            </Tarjetas>
           ) : (
             <p className="small muted">Aún no hay recibos aprobados.</p>
           )}
