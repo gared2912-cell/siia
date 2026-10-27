@@ -43,7 +43,8 @@ import { SITIO_CORREO, enviarPlantilla, enviarVarios } from '../shared/correo';
 import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento } from '../shared/plantillas-correo';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
 import { listaJson, type FotoReporte } from '../shared/proveedores';
-import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
+import { MODELOS_FIRMADOS, anotar, firmanteActual, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
+import { MOTIVOS_EDICION, edicionesDe, type Edicion } from '../shared/ediciones';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -226,8 +227,7 @@ const REGLAS: Record<string, Regla> = {
     seccion: 'finanzas',
     indices: { cargosPorCondominio: 'condominioId' },
     crear: ['condominioId', 'unidadId', 'concepto', 'periodo', 'monto', 'vence', 'estado', 'tipo'],
-    editar: ['estado'],
-    valores: { estado: ['CANCELADO'] },
+    // Editar y cancelar piden motivo y quedan en su historial: acciones cargos.editar y cargos.cancelar.
   },
   Pago: { seccion: 'finanzas', indices: { pagosPorCondominio: 'condominioId' } },
   // Egresos y saldos iniciales se escriben con las acciones egresos.* y saldos.inicial.
@@ -661,7 +661,87 @@ const corteDe = (i: Item): Corte => ({
 const cortesDe = async (condominioId: string) =>
   (await byIndex('CorteAccesos', 'byCondominio', 'condominioId', condominioId)).map(corteDe).sort((a, b) => b.numero - a.numero);
 
+// ---------- ediciones con motivo (shared/ediciones.ts) ----------
+/** Motivo obligatorio de un cambio en Finanzas; con «Otro» hay que explicar por qué. */
+function motivoEdicion(p: Item) {
+  const motivo = str(p.motivo, 30);
+  if (!MOTIVOS_EDICION.some((m) => m.key === motivo)) fail('Elige el motivo del cambio.');
+  const detalle = str(p.detalle, 500);
+  if (motivo === 'OTRO' && detalle.length < 5) fail('Con «Otro», describe por qué se hace el cambio.');
+  return { motivo, detalle: detalle || null };
+}
+
+/** Un registro que ya fue editado solo lo vuelve a modificar un superadministrador. */
+function exigirSinEdiciones(x: Item, yo: Yo, que: string) {
+  if (!yo.superadmin && edicionesDe(x.ediciones).length) fail(`Este ${que} ya fue editado: solo un superadministrador puede volver a modificarlo.`);
+}
+
+/** Los campos que cambian, con la entrada del historial (quién, cuándo, motivo y antes → después). */
+function conEdicion(actual: Item, nuevos: Item, m: { motivo: string; detalle: string | null }, accion: string) {
+  const resumen = (campo: string, v: unknown) => {
+    if (campo !== 'evidencias') return v ?? null;
+    const n = listaJson(v).length;
+    return `${n} archivo${n === 1 ? '' : 's'}`;
+  };
+  const cambios = Object.keys(nuevos)
+    .filter((k) => JSON.stringify(nuevos[k] ?? null) !== JSON.stringify(actual[k] ?? null))
+    .map((campo) => ({ campo, antes: resumen(campo, actual[campo]), despues: resumen(campo, nuevos[campo]) }));
+  if (accion === 'EDITAR' && !cambios.length) fail('No hay cambios que guardar.');
+  const f = firmanteActual()!;
+  const e: Edicion = { en: now(), por: { id: f.id, nombre: f.nombre, email: f.email ?? null, rol: f.rol }, ...m, accion, cambios };
+  return { ...nuevos, ediciones: JSON.stringify([...edicionesDe(actual.ediciones), e]) };
+}
+
 const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // Editar un cargo pendiente (monto, concepto, vencimiento o tipo de ingreso) con su motivo.
+  async 'cargos.editar'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const actual = await get('Cargo', { id: str(p.id, 200) });
+    if (!actual) fail('Cargo no encontrado.');
+    exigirCondo(yo, actual!.condominioId);
+    if (actual!.estado !== 'PENDIENTE') fail('Solo se editan cargos pendientes de pago.');
+    exigirSinEdiciones(actual!, yo, 'cargo');
+    const m = motivoEdicion(p);
+    const monto = Math.round(Number(p.monto) * 100) / 100;
+    if (!(monto > 0) || monto > 100_000_000) fail('Indica un monto válido.');
+    const concepto = str(p.concepto, 200);
+    if (!concepto) fail('Escribe el concepto del cargo.');
+    const vence = p.vence ? fechaValida(p.vence) : null;
+    if (p.vence && !vence) fail('Fecha de vencimiento no válida.');
+    const nuevos: Item = { monto, concepto, vence: vence ?? actual!.vence ?? null };
+    // Las cuotas y recargos conservan su tipo; los cargos manuales pueden cambiarlo.
+    if (p.tipo !== undefined && actual!.tipo && (TIPOS_CARGO_MANUAL as readonly string[]).includes(actual!.tipo)) {
+      if (!(TIPOS_CARGO_MANUAL as readonly string[]).includes(p.tipo)) fail('Tipo de ingreso no válido.');
+      nuevos.tipo = p.tipo;
+    }
+    // Un comprobante en revisión ya cubre este monto: primero se aprueba o rechaza.
+    if (monto !== actual!.monto) {
+      const pagos = await byIndex('Pago', 'byCondominio', 'condominioId', actual!.condominioId);
+      if (pagos.some((x) => x.estado === 'EN_REVISION' && (x.cargoIds ?? []).includes(actual!.id)))
+        fail('Este cargo tiene un comprobante en revisión. Apruébalo o recházalo antes de cambiar el monto.');
+    }
+    return update('Cargo', { id: actual!.id }, conEdicion(actual!, nuevos, m, 'EDITAR'));
+  },
+
+  // Cancelar uno o varios cargos pendientes (p. ej. una cuota extraordinaria completa) con su motivo.
+  async 'cargos.cancelar'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const ids: string[] = (Array.isArray(p.ids) ? p.ids : [p.id]).map((x: unknown) => str(x, 200)).filter(Boolean).slice(0, 2000);
+    if (!ids.length) fail('Indica el cargo.');
+    const m = motivoEdicion(p);
+    const cargos = (await Promise.all(ids.map((id) => get('Cargo', { id })))).filter(Boolean) as Item[];
+    if (cargos.length !== ids.length) fail('Cargo no encontrado.');
+    for (const c of cargos) {
+      exigirCondo(yo, c.condominioId);
+      exigirSinEdiciones(c, yo, 'cargo');
+    }
+    let cancelados = 0;
+    for (const c of cargos.filter((x) => x.estado === 'PENDIENTE')) {
+      await update('Cargo', { id: c.id }, conEdicion(c, { estado: 'CANCELADO' }, m, 'CANCELAR'), { estado: 'PENDIENTE' }).catch(() => undefined);
+      cancelados++;
+    }
+    return { cancelados };
+  },
   // URL firmada para subir un archivo de evidencia del egreso (PDF o imagen, 10 MB, 10 minutos).
   async 'egresos.subirEvidencia'(p, yo) {
     const c = await condominioFinanzas(p, yo, 'editar');
@@ -710,7 +790,10 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
       // Gasto pagado con el fondo de amenidades (se descuenta del ahorro de amenidades)
       fondo: p.fondo === FONDO_AMENIDADES ? FONDO_AMENIDADES : null,
     };
-    if (actual) return update('Egreso', { id: actual.id }, datos);
+    if (actual) {
+      exigirSinEdiciones(actual, yo, 'egreso');
+      return update('Egreso', { id: actual.id }, conEdicion(actual, datos, motivoEdicion(p), 'EDITAR'));
+    }
     const yoPerfil = await get('Perfil', { userId: yo.sub });
     return put('Egreso', { condominioId: c.id, ...datos, registradoPor: yo.email, registradoPorNombre: yoPerfil?.nombre || null });
   },
@@ -720,6 +803,9 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     const e = await get('Egreso', { id: str(p.id, 64) });
     if (!e) fail('Egreso no encontrado.');
     exigirCondo(yo, e!.condominioId);
+    exigirSinEdiciones(e!, yo, 'egreso');
+    // Antes de borrarlo se guarda el motivo en el registro, así la actividad conserva quién, cuándo y por qué.
+    await update('Egreso', { id: e!.id }, conEdicion(e!, {}, motivoEdicion(p), 'ELIMINAR'));
     await remove('Egreso', { id: e!.id });
     return { ok: true };
   },
@@ -1050,13 +1136,20 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     const periodo = str(p.periodo, 7);
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodo)) fail('Periodo no válido (AAAA-MM).');
     const id = `${c.id}#${periodo}`;
+    const actual = await get('SaldoMensual', { id });
+    if (actual) exigirSinEdiciones(actual, yo, 'saldo inicial');
     if (p.saldoInicial === null || p.saldoInicial === '') {
-      await remove('SaldoMensual', { id });
+      if (actual) {
+        await update('SaldoMensual', { id }, conEdicion(actual, {}, motivoEdicion(p), 'ELIMINAR'));
+        await remove('SaldoMensual', { id });
+      }
       return { ok: true };
     }
     const saldoInicial = Math.round(Number(p.saldoInicial) * 100) / 100;
     if (!Number.isFinite(saldoInicial) || Math.abs(saldoInicial) > 1_000_000_000) fail('Indica un saldo válido.');
-    return put('SaldoMensual', { id, condominioId: c.id, periodo, saldoInicial, nota: str(p.nota, 300) || null, editadoPor: yo.email });
+    const datos = { saldoInicial, nota: str(p.nota, 300) || null };
+    if (actual) return update('SaldoMensual', { id }, { ...conEdicion(actual, datos, motivoEdicion(p), 'EDITAR'), editadoPor: yo.email });
+    return put('SaldoMensual', { id, condominioId: c.id, periodo, ...datos, editadoPor: yo.email });
   },
 };
 

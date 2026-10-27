@@ -155,6 +155,8 @@ const schema = a
         // Tipo de ingreso para el balance (ver shared/finanzas.ts); los cargos anteriores se clasifican por su id.
         tipo: a.string(),
         avisoVencido: a.date(), // cuotas: día en que se avisó al residente que venció (un solo aviso por cuota)
+        // Historial de ediciones con motivo (shared/ediciones.ts); solo lo escribe admin-api.
+        ediciones: a.json(),
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('cargosPorUnidad'),
@@ -205,6 +207,7 @@ const schema = a
         fondo: a.string(),
         registradoPor: a.string(),
         registradoPorNombre: a.string(),
+        ediciones: a.json(), // historial de ediciones con motivo (shared/ediciones.ts)
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('egresosPorCondominio')])
       .authorization(admin),
@@ -221,6 +224,7 @@ const schema = a
         saldoInicial: a.float().required(),
         nota: a.string(),
         editadoPor: a.string(),
+        ediciones: a.json(), // historial de ediciones con motivo (shared/ediciones.ts)
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('saldosPorCondominio')])
       .authorization(admin),

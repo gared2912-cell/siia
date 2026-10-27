@@ -10,6 +10,7 @@ import { Documentos } from './Documentos';
 import { CatalogoAmenidades } from './Operacion';
 import { TipoIngreso } from './FinanzasAdmin';
 import { Firma } from './Firma';
+import { PedirMotivo } from './Ediciones';
 import { AdminsCondominio } from './AdminsCondominio';
 import { AvisoSuspendido, Papelera, ZonaCondominio } from './EstadoCondominio';
 
@@ -465,16 +466,7 @@ function Extraordinarias() {
   ).sort((a, b) => String(b[0].vence).localeCompare(String(a[0].vence)));
   const fichaG = grupos.find((g) => g[0].id === ficha);
 
-  const cancelar = (g: Cargo[]) => {
-    const pendientes = g.filter((x) => x.estado === 'PENDIENTE');
-    if (!confirm(`¿Cancelar «${g[0].concepto}»? Se cancelan ${pendientes.length} cargo(s) sin pagar; los ya pagados se conservan.`)) return;
-    run(async () => {
-      for (let i = 0; i < pendientes.length; i += 10) {
-        await Promise.all(pendientes.slice(i, i + 10).map(async (x) => ok(await db.models.Cargo.update({ id: x.id, estado: 'CANCELADO' }))));
-      }
-      reload(true);
-    }, 'Cuota extraordinaria cancelada');
-  };
+  const [cancelarG, setCancelarG] = useState<Cargo[] | null>(null);
 
   return (
     <section className="panel">
@@ -529,13 +521,31 @@ function Extraordinarias() {
             />
             {gestiona && fichaG.some((x) => x.estado === 'PENDIENTE') && (
               <Acciones>
-                <button type="button" className="btn-app danger" disabled={busy} onClick={() => (setFicha(null), cancelar(fichaG))}>
+                <button type="button" className="btn-app danger" disabled={busy} onClick={() => (setFicha(null), setCancelarG(fichaG))}>
                   Cancelar cuota
                 </button>
               </Acciones>
             )}
           </div>
         </Modal>
+      )}
+      {cancelarG && (
+        <PedirMotivo
+          titulo="Cancelar cuota extraordinaria"
+          texto={
+            <>
+              Se cancelan {cancelarG.filter((x) => x.estado === 'PENDIENTE').length} cargo(s) sin pagar de <strong>{cancelarG[0].concepto}</strong>; los ya pagados
+              se conservan. El motivo queda en el historial de cada cargo.
+            </>
+          }
+          boton="Cancelar cuota"
+          peligro
+          onClose={() => setCancelarG(null)}
+          onConfirmar={async (m) => {
+            await adminCall('cargos.cancelar', { ids: cancelarG.filter((x) => x.estado === 'PENDIENTE').map((x) => x.id), ...m });
+            reload(true);
+          }}
+        />
       )}
       {nueva && <NuevaExtraordinaria onClose={() => setNueva(false)} onDone={() => (setNueva(false), reload(true))} />}
     </section>

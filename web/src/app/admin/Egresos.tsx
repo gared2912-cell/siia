@@ -7,8 +7,10 @@ import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
 import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO } from '../../../amplify/functions/shared/finanzas';
+import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
 
 type Egreso = Schema['Egreso']['type'];
+type SaldoMensual = Schema['SaldoMensual']['type'];
 
 const FORMAS_PAGO = ['Transferencia', 'Efectivo', 'Cheque', 'Tarjeta', 'Domiciliación'];
 
@@ -54,15 +56,13 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
   const gestiona = puede('finanzas', 'editar');
   const [mes, setMes] = useState(periodoActual());
   const [editar, setEditar] = useState<Partial<Egreso> | null>(null);
-  const { run } = useAction();
   const lista = datos.egresos.filter((e) => e.fecha.slice(0, 7) === mes).sort((a, b) => b.fecha.localeCompare(a.fecha));
   const total = lista.reduce((s, e) => s + e.monto, 0);
   const [ficha, setFicha] = useState<string | null>(null);
   const fichaE = datos.egresos.find((e) => e.id === ficha);
 
-  const borrar = (e: Egreso) =>
-    confirm(`¿Eliminar el egreso "${e.concepto}" por ${money(e.monto)}?`) &&
-    run(() => adminCall('egresos.borrar', { id: e.id }).then(reload), 'Egreso eliminado');
+  const [borrar, setBorrar] = useState<Egreso | null>(null);
+  const bloqueado = useBloqueoEdicion();
 
   return (
     <>
@@ -135,20 +135,27 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
               )}
             </div>
             <Firma item={fichaE} altaAntes={fichaE.registradoPorNombre || fichaE.registradoPor} />
-            {gestiona && (
-              <Acciones>
-                <button className="btn-app secondary" onClick={() => (setEditar(fichaE), setFicha(null))}>
-                  Editar
-                </button>
-                <button className="btn-app danger" onClick={() => (setFicha(null), borrar(fichaE))}>
-                  <Icon name="trash" />
-                  Eliminar
-                </button>
-              </Acciones>
-            )}
+            <HistorialEdiciones item={fichaE} />
+            {gestiona &&
+              (bloqueado(fichaE) ? (
+                <p className="small muted" style={{ margin: 0 }}>
+                  {AVISO_BLOQUEO}
+                </p>
+              ) : (
+                <Acciones>
+                  <button className="btn-app secondary" onClick={() => (setEditar(fichaE), setFicha(null))}>
+                    Editar
+                  </button>
+                  <button className="btn-app danger" onClick={() => (setFicha(null), setBorrar(fichaE))}>
+                    <Icon name="trash" />
+                    Eliminar
+                  </button>
+                </Acciones>
+              ))}
           </div>
         </Modal>
       )}
+      {borrar && <EliminarEgreso e={borrar} onClose={() => setBorrar(null)} onDone={reload} />}
       {editar && (
         <EditarEgreso
           e={editar}
@@ -166,6 +173,27 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
 
 type Archivo = { ev?: Evidencia; file?: File };
 
+/** Eliminar un egreso o gasto del fondo: pide el motivo, que queda en la actividad. */
+export function EliminarEgreso({ e, onClose, onDone }: { e: Egreso; onClose: () => void; onDone: () => void }) {
+  return (
+    <PedirMotivo
+      titulo={e.fondo === FONDO_AMENIDADES ? 'Eliminar gasto del fondo' : 'Eliminar egreso'}
+      texto={
+        <>
+          Se elimina <strong>{e.concepto}</strong> por {money(e.monto)}. El motivo queda en el registro de actividad con tu nombre.
+        </>
+      }
+      boton="Eliminar"
+      peligro
+      onClose={onClose}
+      onConfirmar={async (m) => {
+        await adminCall('egresos.borrar', { id: e.id, ...m });
+        onDone();
+      }}
+    />
+  );
+}
+
 /** Alta o edición de un egreso. Con `fondo`, es un gasto pagado con el fondo de amenidades. */
 export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>; fondo?: boolean; onClose: () => void; onDone: (fecha: string) => void }) {
   const delFondo = fondo || e.fondo === FONDO_AMENIDADES;
@@ -179,6 +207,7 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
     monto: e.monto ? String(e.monto) : '',
   });
   const [archivos, setArchivos] = useState<Archivo[]>(() => (e.id ? evidenciasDe(e as Egreso).map((ev) => ({ ev })) : []));
+  const [m, setM] = useState<Motivo>(motivoVacio);
   const { run, busy } = useAction();
   const lleno = archivos.length >= MAX_EVIDENCIAS_EGRESO;
 
@@ -206,7 +235,7 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
         if (!put.ok) throw new Error(`No se pudo subir ${file.name}. Intenta de nuevo.`);
         evidencias.push({ path: r.path, nombre: file.name || nombre });
       }
-      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias, fondo: delFondo ? FONDO_AMENIDADES : null });
+      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias, fondo: delFondo ? FONDO_AMENIDADES : null, ...(e.id ? m : {}) });
     }, e.id ? 'Egreso actualizado' : 'Egreso registrado');
     if (okk) onDone(f.fecha);
   }
@@ -269,6 +298,15 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
               </li>
             ))}
           </ul>
+        )}
+        {e.id && (
+          <>
+            <CamposMotivo value={m} onChange={setM} />
+            <div className="alert small" style={{ margin: 0 }}>
+              El cambio queda registrado con tu nombre, la fecha, el motivo y lo que cambió. Después, solo un superadministrador puede volver a
+              modificarlo.
+            </div>
+          </>
         )}
         <button className="btn-app" disabled={busy || !archivos.length}>
           {busy ? 'Guardando…' : e.id ? 'Guardar cambios' : 'Registrar egreso'}
@@ -426,23 +464,37 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
           </table>
         </section>
       </div>
-      {saldo && <EditarSaldo periodo={mes} actual={b.saldoInicial} capturado={!!b.saldoCapturado} nota={b.saldoCapturado?.nota} onClose={() => setSaldo(false)} onDone={() => (setSaldo(false), reload())} />}
+      {saldo && <EditarSaldo periodo={mes} actual={b.saldoInicial} capturado={b.saldoCapturado} nota={b.saldoCapturado?.nota} onClose={() => setSaldo(false)} onDone={() => (setSaldo(false), reload())} />}
     </>
   );
 }
 
-function EditarSaldo({ periodo, actual, capturado, nota, onClose, onDone }: { periodo: string; actual: number; capturado: boolean; nota?: string | null; onClose: () => void; onDone: () => void }) {
+function EditarSaldo({ periodo, actual, capturado, nota, onClose, onDone }: { periodo: string; actual: number; capturado?: SaldoMensual; nota?: string | null; onClose: () => void; onDone: () => void }) {
   const { condoId } = useAdmin();
   const [monto, setMonto] = useState(String(actual));
   const [texto, setTexto] = useState(nota ?? '');
+  const [m, setM] = useState<Motivo>(motivoVacio);
   const { run, busy } = useAction();
+  const bloqueado = useBloqueoEdicion()(capturado);
   const guardar = async (ev: React.FormEvent) => {
     ev.preventDefault();
-    if (await run(() => adminCall('saldos.inicial', { condominioId: condoId, periodo, saldoInicial: Number(monto), nota: texto }), 'Saldo inicial guardado')) onDone();
+    if (await run(() => adminCall('saldos.inicial', { condominioId: condoId, periodo, saldoInicial: Number(monto), nota: texto, ...m }), 'Saldo inicial guardado')) onDone();
   };
   const arrastrar = async () => {
-    if (await run(() => adminCall('saldos.inicial', { condominioId: condoId, periodo, saldoInicial: null }), 'El saldo inicial vuelve a tomarse del mes anterior')) onDone();
+    if (!m.motivo) return alert('Elige el motivo del cambio.');
+    if (await run(() => adminCall('saldos.inicial', { condominioId: condoId, periodo, saldoInicial: null, ...m }), 'El saldo inicial vuelve a tomarse del mes anterior')) onDone();
   };
+  if (bloqueado)
+    return (
+      <Modal title={`Saldo inicial de ${nombreMes(periodo)}`} onClose={onClose}>
+        <div className="stack">
+          <p className="small muted" style={{ margin: 0 }}>
+            {AVISO_BLOQUEO}
+          </p>
+          <HistorialEdiciones item={capturado!} />
+        </div>
+      </Modal>
+    );
   return (
     <Modal title={`Saldo inicial de ${nombreMes(periodo)}`} onClose={onClose}>
       <form className="form" onSubmit={guardar}>
@@ -456,6 +508,12 @@ function EditarSaldo({ periodo, actual, capturado, nota, onClose, onDone }: { pe
         <Field label="Nota (opcional)">
           <input maxLength={300} value={texto} onChange={(x) => setTexto(x.target.value)} placeholder="Saldo según estado de cuenta bancario" />
         </Field>
+        {capturado && (
+          <>
+            <CamposMotivo value={m} onChange={setM} />
+            <HistorialEdiciones item={capturado} />
+          </>
+        )}
         <div className="row-actions">
           <button className="btn-app" disabled={busy}>
             Guardar

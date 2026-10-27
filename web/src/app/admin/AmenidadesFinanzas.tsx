@@ -6,7 +6,8 @@ import { adminCall, db, ok, type Schema } from '../api';
 import { Acciones, Archivo, Badge, Datos, Empty, Icon, Modal, Seg, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, hoy, money, periodoActual, useAction, type Tono } from '../ui';
 import { Firma } from './Firma';
 import { useAdmin } from './AdminApp';
-import { EditarEgreso, Mes, VerEvidencia } from './Egresos';
+import { EditarEgreso, EliminarEgreso, Mes, VerEvidencia } from './Egresos';
+import { AVISO_BLOQUEO, HistorialEdiciones, useBloqueoEdicion } from './Ediciones';
 import { evidenciasDe, mesCorto, nombreMes, type DatosFinanzas } from './balance';
 import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../../../amplify/functions/shared/finanzas';
 
@@ -74,9 +75,9 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
       estado === 'APROBADA' ? 'Reserva aprobada' : 'Reserva rechazada',
     );
   };
-  const borrarGasto = (e: Egreso) =>
-    confirm(`¿Eliminar el gasto "${e.concepto}" por ${money(e.monto)}? Se regresa al fondo de amenidades.`) &&
-    run(() => adminCall('egresos.borrar', { id: e.id }).then(() => (setFichaG(null), reload())), 'Gasto eliminado');
+  const [borrarG, setBorrarG] = useState<Egreso | null>(null);
+  const bloqueado = useBloqueoEdicion();
+  const borrarGasto = (e: Egreso) => (setBorrarG(e), setFichaG(null));
   /** Estado de una reserva para su insignia y el color de su tarjeta. */
   const estadoReserva = (r: ReservaFin): { insignia: React.ReactNode; tono: Tono } => {
     if (comprobanteDe(r, datos.pagos)) return { insignia: <Badge estado="EN_REVISION">Comprobante por aprobar</Badge>, tono: 'warn' };
@@ -294,20 +295,27 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
               </div>
             </div>
             <Firma item={gastoF} altaAntes={gastoF.registradoPorNombre || gastoF.registradoPor} />
-            {gestiona && (
-              <Acciones>
-                <button className="btn-app secondary" onClick={() => (setGasto(gastoF), setFichaG(null))}>
-                  Editar
-                </button>
-                <button className="btn-app danger" onClick={() => borrarGasto(gastoF)}>
-                  <Icon name="trash" />
-                  Eliminar
-                </button>
-              </Acciones>
-            )}
+            <HistorialEdiciones item={gastoF} />
+            {gestiona &&
+              (bloqueado(gastoF) ? (
+                <p className="small muted" style={{ margin: 0 }}>
+                  {AVISO_BLOQUEO}
+                </p>
+              ) : (
+                <Acciones>
+                  <button className="btn-app secondary" onClick={() => (setGasto(gastoF), setFichaG(null))}>
+                    Editar
+                  </button>
+                  <button className="btn-app danger" onClick={() => borrarGasto(gastoF)}>
+                    <Icon name="trash" />
+                    Eliminar
+                  </button>
+                </Acciones>
+              ))}
           </div>
         </Modal>
       )}
+      {borrarG && <EliminarEgreso e={borrarG} onClose={() => setBorrarG(null)} onDone={reload} />}
       {gasto && (
         <EditarEgreso
           e={gasto}

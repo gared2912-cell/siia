@@ -10,6 +10,8 @@ import { BalanceMensual, EgresosAdmin } from './Egresos';
 import { fechaIngreso } from './balance';
 import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
 import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
+import { edicionesDe } from '../../../amplify/functions/shared/ediciones';
+import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
 
 type Pago = Schema['Pago']['type'];
 type Cargo = Schema['Cargo']['type'];
@@ -44,6 +46,9 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const [fichaPago, setFichaPago] = useState<Pago | null>(null);
   const [fichaCargo, setFichaCargo] = useState<Cargo | null>(null);
+  const [editarCargo, setEditarCargo] = useState<Cargo | null>(null);
+  const [cancelarCargo, setCancelarCargo] = useState<Cargo | null>(null);
+  const bloqueado = useBloqueoEdicion();
   const [historialDe, setHistorialDe] = useState<string | null>(null);
   const [filtroUnidad, setFiltroUnidad] = useState('');
   const { run, busy } = useAction();
@@ -64,13 +69,6 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
     if (!aprobar && nota === null) return;
     run(() => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => (setFichaPago(null), reload(true))), aprobar ? 'Pago aprobado y recibo emitido; se notificó al residente' : 'Pago rechazado; se notificó al residente');
   };
-  const cancelarCargo = (c: Cargo) =>
-    confirm(`¿Cancelar el cargo "${c.concepto}" de ${etiqueta(c.unidadId)}?`) &&
-    run(async () => {
-      ok(await db.models.Cargo.update({ id: c.id, estado: 'CANCELADO' }));
-      setFichaCargo(null);
-      reload(true);
-    }, 'Cargo cancelado');
   const verRecibo = (p: Pago) => {
     const u = unidades.find((x) => x.id === p.unidadId);
     setRecibo({
@@ -251,6 +249,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                       <>
                         <strong>{money(c.monto)}</strong>
                         <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
+                        {edicionesDe(c.ediciones).length > 0 && <span className="badge">Editado</span>}
                       </>
                     }
                   />
@@ -365,15 +364,43 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
               ]}
             />
             <Firma item={fichaCargo} alta="Generado por" />
-            {gestiona && fichaCargo.estado === 'PENDIENTE' && (
-              <Acciones>
-                <button className="btn-app danger" disabled={busy} onClick={() => cancelarCargo(fichaCargo)}>
-                  Cancelar cargo
-                </button>
-              </Acciones>
-            )}
+            <HistorialEdiciones item={fichaCargo} />
+            {gestiona && fichaCargo.estado === 'PENDIENTE' &&
+              (bloqueado(fichaCargo) ? (
+                <p className="small muted" style={{ margin: 0 }}>
+                  {AVISO_BLOQUEO}
+                </p>
+              ) : (
+                <Acciones>
+                  <button className="btn-app secondary" disabled={busy} onClick={() => (setEditarCargo(fichaCargo), setFichaCargo(null))}>
+                    Editar
+                  </button>
+                  <button className="btn-app danger" disabled={busy} onClick={() => (setCancelarCargo(fichaCargo), setFichaCargo(null))}>
+                    Cancelar cargo
+                  </button>
+                </Acciones>
+              ))}
           </div>
         </Modal>
+      )}
+      {editarCargo && <EditarCargo c={editarCargo} onClose={() => setEditarCargo(null)} onDone={() => (setEditarCargo(null), reload(true))} />}
+      {cancelarCargo && (
+        <PedirMotivo
+          titulo="Cancelar cargo"
+          texto={
+            <>
+              Se cancela <strong>{cancelarCargo.concepto}</strong> de {etiqueta(cancelarCargo.unidadId)} por {money(cancelarCargo.monto)}. Queda en su historial
+              con tu nombre y el motivo.
+            </>
+          }
+          boton="Cancelar cargo"
+          peligro
+          onClose={() => setCancelarCargo(null)}
+          onConfirmar={async (m) => {
+            await adminCall('cargos.cancelar', { id: cancelarCargo.id, ...m });
+            reload(true);
+          }}
+        />
       )}
       {excelPagos && <ExcelPagos pagos={procesados} cargos={cargos} onClose={() => setExcelPagos(false)} />}
       {cobranza && <ReporteCobranza pagos={pagos} cargos={cargos} onClose={() => setCobranza(false)} />}
@@ -490,6 +517,46 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         </div>
         <button className="btn-app" disabled={busy}>
           Crear cargo
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+/** Editar un cargo pendiente: monto, concepto, vencimiento y tipo (solo cargos manuales), con su motivo. */
+function EditarCargo({ c, onClose, onDone }: { c: Cargo; onClose: () => void; onDone: () => void }) {
+  const { etiqueta } = useAdmin();
+  const manual = !!c.tipo && (TIPOS_CARGO_MANUAL as readonly string[]).includes(c.tipo);
+  const [f, setF] = useState({ concepto: c.concepto, monto: String(c.monto), vence: c.vence ?? '', tipo: c.tipo ?? 'OTRO' });
+  const [m, setM] = useState<Motivo>(motivoVacio);
+  const { run, busy } = useAction();
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault();
+    const datos = { id: c.id, concepto: f.concepto, monto: Number(f.monto), vence: f.vence || null, ...(manual ? { tipo: f.tipo } : {}), ...m };
+    if (await run(() => adminCall('cargos.editar', datos), 'Cargo actualizado; el cambio quedó en su historial')) onDone();
+  }
+  return (
+    <Modal title={`Editar cargo · ${etiqueta(c.unidadId)}`} onClose={onClose}>
+      <form className="form" onSubmit={guardar}>
+        <Field label="Concepto">
+          <input required maxLength={200} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} />
+        </Field>
+        {manual && <TipoIngreso value={f.tipo} onChange={(tipo) => setF({ ...f, tipo })} />}
+        <div className="form-2">
+          <Field label={`Monto (antes ${money(c.monto)})`}>
+            <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />
+          </Field>
+          <Field label="Vence">
+            <input type="date" value={f.vence} onChange={(e) => setF({ ...f, vence: e.target.value })} />
+          </Field>
+        </div>
+        <CamposMotivo value={m} onChange={setM} />
+        <div className="alert small" style={{ margin: 0 }}>
+          El cambio queda registrado con tu nombre, la fecha, el motivo y lo que cambió. Después, solo un superadministrador puede volver a modificar este
+          cargo.
+        </div>
+        <button className="btn-app" disabled={busy}>
+          {busy ? 'Guardando…' : 'Guardar cambios'}
         </button>
       </form>
     </Modal>

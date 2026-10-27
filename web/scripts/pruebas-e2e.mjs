@@ -123,6 +123,8 @@ async function bloqueado(p) {
   if (!(r && typeof r === 'object' && r.error)) throw new Error(`Se esperaba un rechazo y se obtuvo: ${JSON.stringify(r).slice(0, 150)}`);
   return r.error;
 }
+/** Historial de ediciones: texto JSON (superadministrador) u objeto ya leído (administradores, sin correos). */
+const jsonLista = (v) => (typeof v === 'string' ? JSON.parse(v) : v ?? []);
 const esperar = (cond, msg) => {
   if (!cond) throw new Error(msg);
 };
@@ -471,8 +473,38 @@ try {
   await prueba('Cargo de prueba cancelado; no se puede marcar como pagado a mano', async () => {
     const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Cargo erróneo', monto: 99, vence: manana } }));
     await bloqueado(ct.db('Cargo', 'update', { input: { id: c.id, estado: 'PAGADO' } }));
-    const r = await ok(ct.db('Cargo', 'update', { input: { id: c.id, estado: 'CANCELADO' } }));
-    esperar(r.estado === 'CANCELADO', r.estado);
+    // Cancelar ya no va por el proxy: pide motivo (cargos.cancelar).
+    await bloqueado(ct.db('Cargo', 'update', { input: { id: c.id, estado: 'CANCELADO' } }));
+    await bloqueado(ct.admin('cargos.cancelar', { id: c.id }));
+    const r = await ok(ct.admin('cargos.cancelar', { id: c.id, motivo: 'DUPLICADO' }));
+    const l = await hasta(() => ok(ct.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.robles } })), (x) => x.some((y) => y.id === c.id && y.estado === 'CANCELADO'));
+    const h = jsonLista(l.find((y) => y.id === c.id).ediciones);
+    esperar(r.cancelados === 1 && h.length === 1 && h[0].motivo === 'DUPLICADO' && h[0].accion === 'CANCELAR', JSON.stringify(h));
+  });
+  await prueba('Editar un cargo pide motivo; «Otro» pide explicarlo', async () => {
+    const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Multa mal capturada', monto: 1500, vence: manana, tipo: 'MULTA' } }));
+    X.cargoEditado = c.id;
+    const base = { id: c.id, concepto: 'Multa por ruido', monto: 150, vence: manana };
+    await bloqueado(ct.admin('cargos.editar', base));
+    await bloqueado(ct.admin('cargos.editar', { ...base, motivo: 'OTRO' }));
+    await bloqueado(cs.admin('cargos.editar', { ...base, motivo: 'ERROR_CAPTURA' }));
+    const e = await ok(ct.admin('cargos.editar', { ...base, motivo: 'ERROR_CAPTURA', detalle: 'Se capturó 1500 en lugar de 150' }));
+    const h = jsonLista(e.ediciones);
+    const monto = h[0]?.cambios.find((x) => x.campo === 'monto');
+    esperar(e.monto === 150 && h.length === 1 && h[0].por.nombre && monto?.antes === 1500 && monto?.despues === 150, JSON.stringify(h));
+    return '$1,500 → $150 con motivo y autor';
+  });
+  await prueba('Cargo ya editado: el administrador ya no lo cambia; el superadministrador sí', async () => {
+    await bloqueado(ct.admin('cargos.editar', { id: X.cargoEditado, concepto: 'Multa', monto: 200, motivo: 'AJUSTE' }));
+    await bloqueado(ct.admin('cargos.cancelar', { id: X.cargoEditado, motivo: 'AJUSTE' }));
+    const e = await ok(sa.admin('cargos.editar', { id: X.cargoEditado, concepto: 'Multa por ruido', monto: 200, motivo: 'OTRO', detalle: 'Acuerdo con el comité e2e' }));
+    // El administrador ve quién lo hizo, pero no su correo.
+    const l = await ok(ct.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.robles } }));
+    const h = l.find((y) => y.id === X.cargoEditado).ediciones;
+    const lista = typeof h === 'string' ? JSON.parse(h) : h;
+    esperar(e.monto === 200 && lista.length === 2 && lista[1].por.rol === 'SUPERADMIN' && !lista.some((x) => x.por.email), JSON.stringify(lista));
+    await ok(sa.admin('cargos.cancelar', { id: X.cargoEditado, motivo: 'AJUSTE' }));
+    return '2 ediciones en el historial, sin correos para el administrador';
   });
   await prueba('Residente ve su saldo en Inicio y Finanzas', async () => {
     const e = await hasta(() => ok(r1.portal('finanzas.estadoCuenta')), (x) => x.saldo === 2000);
@@ -584,10 +616,13 @@ try {
         concepto: 'Poda de áreas verdes',
         monto: 900,
         evidencias: [{ path: X.evidencia, nombre: 'factura-e2e-poda.pdf' }],
+        motivo: 'AJUSTE',
+        detalle: 'Factura final del proveedor',
       }),
     );
-    esperar(e.monto === 900 && JSON.parse(e.evidencias).length === 1 && e.registradoPor === E('contador'), JSON.stringify(e).slice(0, 160));
-    return '$900 · 1 archivo';
+    const h = jsonLista(e.ediciones);
+    esperar(e.monto === 900 && JSON.parse(e.evidencias).length === 1 && e.registradoPor === E('contador') && h[0]?.motivo === 'AJUSTE', JSON.stringify(e).slice(0, 160));
+    return '$900 · 1 archivo · motivo Ajuste';
   });
   await prueba('Saldo inicial capturado del mes', async () => {
     await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: 12500, nota: 'Estado de cuenta e2e' }));
@@ -624,8 +659,11 @@ try {
   });
   await prueba('Gerente de operación no ve egresos', () => bloqueado(op.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })));
   await prueba('Quitar saldo capturado y eliminar egreso', async () => {
-    await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: null }));
-    await ok(ct.admin('egresos.borrar', { id: X.egreso }));
+    await bloqueado(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: null }));
+    await ok(ct.admin('saldos.inicial', { condominioId: X.robles, periodo, saldoInicial: null, motivo: 'ERROR_CAPTURA' }));
+    // El egreso ya fue editado por la contadora: solo el superadministrador lo elimina.
+    await bloqueado(ct.admin('egresos.borrar', { id: X.egreso, motivo: 'DUPLICADO' }));
+    await ok(sa.admin('egresos.borrar', { id: X.egreso, motivo: 'DUPLICADO' }));
     const l = await hasta(() => ok(ct.db('Egreso', 'egresosPorCondominio', { args: { condominioId: X.robles } })), (x) => !x.some((e) => e.id === X.egreso));
     esperar(!l.some((e) => e.id === X.egreso), 'el egreso sigue registrado');
   });
@@ -634,7 +672,7 @@ try {
     const l = await hasta(() => ok(ct.db('Cargo', 'cargosPorCondominio', { args: { condominioId: X.robles } })), (x) => x.some((c) => c.concepto === 'Reparación de bomba'));
     const c = l.find((x) => x.concepto === 'Reparación de bomba');
     esperar(r.creados === 1 && c?.tipo === 'MANT_EXTERNO', JSON.stringify(c));
-    await ok(ct.db('Cargo', 'update', { input: { id: c.id, estado: 'CANCELADO' } }));
+    await ok(ct.admin('cargos.cancelar', { id: c.id, motivo: 'AJUSTE' }));
     return 'Mantenimiento externo';
   });
 

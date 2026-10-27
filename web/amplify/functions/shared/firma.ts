@@ -89,12 +89,14 @@ export function sinCorreos<T>(valor: T): T {
     if (!v || typeof v !== 'object') return v;
     const out: Record<string, any> = {};
     for (const [k, x] of Object.entries(v)) {
-      if ((k === 'firma' || k === 'firmaCambio') && x) {
+      if ((k === 'firma' || k === 'firmaCambio' || k === 'ediciones') && x) {
         try {
           // Puede venir codificada dos veces (AWSJSON de un valor que ya era texto JSON).
           let f: any = x;
           for (let i = 0; i < 2 && typeof f === 'string'; i++) f = JSON.parse(f);
-          if (f && typeof f === 'object') delete f.email;
+          // ediciones: [{ por: { nombre, email, … }, … }] (shared/ediciones.ts)
+          if (Array.isArray(f)) f.forEach((e) => e?.por && delete e.por.email);
+          else if (f && typeof f === 'object') delete f.email;
           out[k] = f;
         } catch {
           out[k] = null;
@@ -111,7 +113,7 @@ export function sinCorreos<T>(valor: T): T {
  * (registradoPor se conserva: en visitas y turnos es el vigilante, que la caseta sí debe ver.)
  */
 export function sinFirmas<T>(valor: T): T {
-  const quitar = new Set(['firma', 'firmaCambio', 'validadoPor', 'registradoPorNombre', 'editadoPor', 'autor']);
+  const quitar = new Set(['firma', 'firmaCambio', 'validadoPor', 'registradoPorNombre', 'editadoPor', 'autor', 'ediciones']);
   const limpiar = (v: any): any => {
     if (Array.isArray(v)) return v.map(limpiar);
     if (!v || typeof v !== 'object') return v;
