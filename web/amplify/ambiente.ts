@@ -15,6 +15,6 @@ export const SECRETO_VAPID = ES_PRODUCCION ? 'VAPID_PRIVATE_KEY_PRODUCCION' : 'V
 // Correos de las cuentas (invitación, contraseña temporal, códigos): por Amazon SES desde no-reply@siia.casa
 // (dominio verificado con DKIM). En false, Cognito usa su remitente genérico, con límite de ~50 correos al día
 // para toda la cuenta de AWS. Se activa cuando AWS saque a SES del modo de pruebas (solicitud del 2026-10-20).
-export const CORREO_SES = false;
+export const CORREO_SES = true;
 export const REMITENTE = 'SIIA <no-reply@siia.casa>';
 
