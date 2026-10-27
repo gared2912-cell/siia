@@ -18,7 +18,7 @@ export const MODELOS_FIRMADOS = new Set([
 ]);
 
 // Campos que se actualizan solos (contadores, marcas de lectura): no son un cambio de la administración.
-const IGNORADOS = new Set(['updatedAt', 'createdAt', '__typename', 'firma', 'firmaCambio', 'chatLeidoAdmin', 'chatLeidoCaseta', 'owner']);
+const IGNORADOS = new Set(['updatedAt', 'createdAt', '__typename', 'firma', 'firmaCambio', 'chatLeidoAdmin', 'chatLeidoCaseta', 'owner', 'avisoVencido']);
 // Nunca se guardan en el registro de actividad.
 const SECRETOS = /password|contrasena|token|p256dh|auth$/i;
 

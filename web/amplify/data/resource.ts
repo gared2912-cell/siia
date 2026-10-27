@@ -57,6 +57,10 @@ const schema = a
         recargoActivo: a.boolean(),
         recargoMonto: a.float(),
         recargoDesde: a.date(), // solo cuotas que vencen a partir de esta fecha (cuando se activó)
+        // Aviso de pago vencido (al día siguiente del vencimiento, con el estado de cuenta pendiente):
+        // NOTIFICACION (portal y app), CORREO o AMBOS. Solo cuotas que vencen a partir de avisoMorosidadDesde.
+        avisoMorosidad: a.string(),
+        avisoMorosidadDesde: a.date(),
         // Cuota automática: cada mes, el día diaCargo (1 a 28), se genera la cuota de mantenimiento de todas las unidades
         cuotaAutomatica: a.boolean(),
         diaCargo: a.integer(),
@@ -124,6 +128,9 @@ const schema = a
         chatLeidoCaseta: a.string(),
         // Alta (o cambio de correo) sin enviar los accesos por correo: falta enviarlos o asignarle contraseña.
         accesoSinEnviar: a.boolean(),
+        // Contraseña que la administración acaba de generar, para poder enviarla por correo: { hash, en }. Se borra
+        // al enviarla; vale 30 minutos. Nunca se muestra en el panel.
+        claveEnvio: a.json(),
         // Solo PROVEEDOR (ver shared/proveedores.ts): empresa (vacío = personal propio), servicios que da y condominios que atiende
         empresa: a.string(),
         servicios: a.string().array(),
@@ -147,6 +154,7 @@ const schema = a
         estado: a.enum(['PENDIENTE', 'PAGADO', 'CANCELADO']),
         // Tipo de ingreso para el balance (ver shared/finanzas.ts); los cargos anteriores se clasifican por su id.
         tipo: a.string(),
+        avisoVencido: a.date(), // cuotas: día en que se avisó al residente que venció (un solo aviso por cuota)
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('cargosPorUnidad'),
@@ -325,6 +333,9 @@ const schema = a
         estado: a.enum(['PROGRAMADO', 'EN_PROCESO', 'TERMINADO']),
         proveedor: a.string(),
         notas: a.string(),
+        // Importante: se resalta y la administración puede avisar también por correo a los residentes.
+        importante: a.boolean(),
+        correoResidentes: a.boolean(),
       })
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('mantenimientosPorCondominio')])
       .authorization(admin),

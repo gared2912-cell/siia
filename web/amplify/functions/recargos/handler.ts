@@ -3,32 +3,24 @@
 // Recargo por pago tardío. En los condominios que lo tienen activo, al día siguiente del vencimiento
 // se carga el recargo a cada cuota de mantenimiento que siga sin pagar, siempre que la unidad no tenga
 // ningún comprobante subido en revisión (por aprobar). Un solo recargo por cuota (id «<unidad>#<periodo>#recargo»),
-// solo para cuotas que vencen después de activarlo (recargoDesde). La unidad recibe un aviso en el portal (que
-// también llega como notificación a la app) y cada residente de la unidad, un correo a su dirección registrada.
-import { byIndex, hoyMX, put, scan, type Item } from '../shared/db';
+// solo para cuotas que vencen después de activarlo (recargoDesde).
+// Al final, el aviso de pago vencido (avisarVencidos): a cada unidad con una cuota recién vencida le llega su estado de
+// cuenta pendiente por notificación (portal y app), por correo o por ambos, según Condominio.avisoMorosidad.
+import { byIndex, hoyMX, put, scan, update, type Item } from '../shared/db';
 import { operando } from '../shared/condominios';
 import { crearCuotas, fechaCargo } from '../shared/cuotas';
 import { enviarCorreo } from '../shared/correo';
+import { armarAviso, fechaLarga, mxn } from './aviso-vencido';
 import { SISTEMA, firmarComo, tomarCambios } from '../shared/firma';
 import { guardarActividad } from '../shared/actividad';
 
 const PORTAL = process.env.PORTAL_URL ?? 'https://staging.siia.casa/portal/';
-const fechaLarga = (iso: string) => {
-  const [a, m, d] = iso.split('-').map(Number);
-  return new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(a, m - 1, d)));
-};
-
-const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 
 export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
   const monto = Number(c.recargoMonto);
   if (!c.recargoActivo || !(monto > 0) || c.activo === false || !operando(c)) return 0;
   const desde: string = c.recargoDesde ?? hoy;
-  const [cargos, pagos, perfiles] = await Promise.all([
-    byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
-    byIndex('Pago', 'byCondominio', 'condominioId', c.id),
-    byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
-  ]);
+  const [cargos, pagos] = await Promise.all([byIndex('Cargo', 'byCondominio', 'condominioId', c.id), byIndex('Pago', 'byCondominio', 'condominioId', c.id)]);
   // Si la unidad tiene cualquier comprobante subido por aprobar, no se le carga recargo.
   const unidadesConPago = new Set(pagos.filter((p) => p.estado === 'EN_REVISION').map((p) => p.unidadId));
   const existentes = new Set(cargos.map((x) => x.id));
@@ -52,6 +44,7 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
           monto,
           vence: hoy,
           estado: 'PENDIENTE',
+          tipo: 'RECARGO',
         },
         { ifNotExists: 'id' },
       );
@@ -59,28 +52,62 @@ export async function aplicarRecargos(c: Item, hoy = hoyMX()) {
       if (err?.name === 'ConditionalCheckFailedException') continue;
       throw err;
     }
-    const titulo = `Recargo por pago tardío de ${mxn(monto)}`;
-    await put('Aviso', {
-      condominioId: c.id,
-      unidadId: cuota.unidadId,
-      tipo: 'PAGO',
-      titulo,
-      texto: `Tu ${String(cuota.concepto).toLowerCase()} venció el ${fechaLarga(cuota.vence)} sin pago registrado. Puedes consultarlo y pagar en Finanzas.`,
-      leido: false,
-    });
-    const residentes = perfiles.filter((p) => p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.unidadId === cuota.unidadId && p.email);
-    for (const r of residentes) {
-      await enviarCorreo(
-        r.email,
-        `${titulo} · ${c.nombre}`,
-        [
-          `Hola${r.nombre ? ` ${r.nombre}` : ''}:`,
-          `Tu ${String(cuota.concepto).toLowerCase()} de ${mxn(Number(cuota.monto) || 0)} en ${c.nombre} venció el ${fechaLarga(cuota.vence)} y no tenemos registrado tu pago ni un comprobante por revisar.`,
-          `Por eso se agregó a tu cuenta un recargo por pago tardío de ${mxn(monto)}. Tu adeudo por esta cuota ahora es de ${mxn((Number(cuota.monto) || 0) + monto)}.`,
-          'Puedes consultar tu estado de cuenta y subir tu comprobante en el portal de residentes, sección Finanzas. Si ya pagaste, sube tu comprobante para que la administración lo revise.',
-        ],
-        { texto: 'Ir al portal', url: PORTAL },
-      );
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Aviso de pago vencido: una vez por cuota, al día siguiente de su vencimiento (o el primer día que se revise), a cada
+ * unidad que no haya pagado ni tenga un comprobante en revisión. Lleva todo lo pendiente de la unidad (incluido el
+ * recargo recién aplicado). Condominios que nunca eligieron cómo avisar: como antes, solo con el recargo activo y por
+ * notificación.
+ */
+export async function avisarVencidos(c: Item, hoy = hoyMX()) {
+  if (c.activo === false || !operando(c)) return 0;
+  const desde: string | undefined = c.avisoMorosidadDesde ?? (c.recargoActivo ? c.recargoDesde : undefined);
+  if (!desde) return 0;
+  const modo: string = c.avisoMorosidad ?? 'NOTIFICACION';
+  const [cargos, pagos, perfiles, unidades] = await Promise.all([
+    byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
+    byIndex('Pago', 'byCondominio', 'condominioId', c.id),
+    byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
+    byIndex('Unidad', 'byCondominio', 'condominioId', c.id),
+  ]);
+  const enRevision = new Set(pagos.filter((p) => p.estado === 'EN_REVISION').map((p) => p.unidadId));
+  const porId = new Map(cargos.map((x) => [x.id, x]));
+  const vencidas = cargos.filter(
+    (x) => String(x.id).endsWith('#cuota') && x.estado === 'PENDIENTE' && x.vence && x.vence < hoy && x.vence >= desde && !x.avisoVencido && !enRevision.has(x.unidadId),
+  );
+  const porUnidad = new Map<string, Item[]>();
+  for (const x of vencidas) porUnidad.set(x.unidadId, [...(porUnidad.get(x.unidadId) ?? []), x]);
+
+  let n = 0;
+  for (const [unidadId, nuevas] of porUnidad) {
+    // Se marca antes de avisar: si algo falla, no se repite el aviso mañana.
+    for (const x of nuevas) await update('Cargo', { id: x.id }, { avisoVencido: hoy });
+    // Cuotas a las que ya se les aplicó el recargo otro día: ese aviso ya se envió (versión anterior).
+    const pendientes = nuevas.filter((x) => !(porId.get(String(x.id).replace(/#cuota$/, '#recargo'))?.vence < hoy));
+    if (!pendientes.length) continue;
+    const unidad = unidades.find((u) => u.id === unidadId)?.etiqueta ?? 'Tu unidad';
+    const datos = {
+      condominio: c as any,
+      unidad,
+      cargos: cargos.filter((x) => x.unidadId === unidadId && x.estado === 'PENDIENTE') as any,
+      nuevos: pendientes.map((x) => x.id),
+      hoy,
+      portal: PORTAL,
+    };
+    if (modo !== 'CORREO') {
+      const a = armarAviso(datos);
+      await put('Aviso', { condominioId: c.id, unidadId, tipo: 'PAGO', titulo: a.avisoTitulo, texto: a.avisoTexto, leido: false });
+    }
+    if (modo !== 'NOTIFICACION') {
+      const residentes = perfiles.filter((p) => p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.unidadId === unidadId && p.email);
+      for (const r of residentes) {
+        const a = armarAviso({ ...datos, nombre: r.nombre });
+        await enviarCorreo(r.email, a.asunto, a.contenido, a.texto);
+      }
     }
     n++;
   }
@@ -137,6 +164,16 @@ export const handler = async () => {
       console.error(c.id, err);
     }
   }
+  let avisos = 0;
+  for (const c of todos) {
+    try {
+      const n = await avisarVencidos(c, hoy);
+      avisos += n;
+      if (n) console.log(`${c.nombre}: ${n} aviso(s) de pago vencido`);
+    } catch (err) {
+      console.error(c.id, err);
+    }
+  }
   await guardarActividad('auto.cuotas', SISTEMA, tomarCambios()).catch((e) => console.error('actividad', e));
-  return { hoy, cuotas, recargos: total };
+  return { hoy, cuotas, recargos: total, avisos };
 };

@@ -128,6 +128,7 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
   const { condoId } = useAdmin();
   const [f, setF] = useState({ titulo: c.titulo ?? '', cuerpo: c.cuerpo ?? '', importante: !!c.importante });
   const [notificar, setNotificar] = useState(!c.id);
+  const [porCorreo, setPorCorreo] = useState(false);
   // Archivos ya guardados (ruta + URL temporal para verlos) y nuevos por subir, en el orden en que se muestran
   const guardadas = useLoad(
     async () => {
@@ -183,11 +184,13 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
         condominioId: condoId,
         id: c.id,
         ...f,
+        // Solo los importantes pueden ir también por correo.
+        correo: f.importante && notificar && porCorreo,
         imagenes: [...actuales.map((g) => g.path), ...subidas],
         adjuntos: [...pdfsActuales.map((g) => g.path), ...pdfsSubidos],
       });
       if (notificar) await adminCall('avisar', { condominioId: condoId, tipo: 'COMUNICADO', titulo: `Nuevo comunicado: ${f.titulo}`, texto: f.cuerpo.slice(0, 200) });
-    }, 'Comunicado publicado');
+    }, f.importante && notificar && porCorreo ? 'Comunicado publicado y enviado por correo' : 'Comunicado publicado');
     if (okk) onDone();
   }
   return (
@@ -267,6 +270,14 @@ function EditarComunicado({ c, onClose, onDone }: { c: Partial<Comunicado>; onCl
           <input type="checkbox" checked={notificar} onChange={(e) => setNotificar(e.target.checked)} />
           Enviar aviso a todas las unidades
         </label>
+        {f.importante && notificar && (
+          <Field label="¿Cómo se avisa a los residentes?" hint="Por ser importante, también puedes enviarlo al correo de cada residente, con el diseño de SIIA.">
+            <select value={porCorreo ? 'AMBOS' : 'NOTIFICACION'} onChange={(e) => setPorCorreo(e.target.value === 'AMBOS')}>
+              <option value="NOTIFICACION">Solo notificación (portal y app)</option>
+              <option value="AMBOS">Notificación y correo</option>
+            </select>
+          </Field>
+        )}
         <button className="btn-app" disabled={busy}>
           {busy ? 'Publicando…' : 'Publicar'}
         </button>

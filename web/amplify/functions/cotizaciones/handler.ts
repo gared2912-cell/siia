@@ -1,11 +1,13 @@
 // Formularios del sitio público: «Cotizar» (solicitud de cotización) y «Contacto». Sin sesión: se llama por la URL
 // pública de la función (CORS solo para el dominio del sitio). Guarda la solicitud en Cotizacion, que el panel muestra
-// en Cotizaciones (y en la campana hasta que alguien la marque «Respondido al solicitante»). Por ahora no se envía
-// por correo (decisión del 2026-10-21): llega solo al panel, con notificación push.
+// en Cotizaciones (y en la campana hasta que alguien la marque «Respondido al solicitante»), con notificación push.
+// Si dejó su correo, le llega un acuse automático con el diseño de SIIA (shared/plantillas-correo.ts).
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { createHash } from 'node:crypto';
 import { ddb, put, table } from '../shared/db';
+import { SITIO_CORREO, enviarPlantilla } from '../shared/correo';
+import { correoCotizacionRecibida } from '../shared/plantillas-correo';
 
 /** Envíos por hora desde la misma conexión (protección básica contra abuso). */
 const MAX_POR_HORA = 8;
@@ -82,6 +84,8 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     pagina: texto(b.page, 120) || null,
     ipHash: ip,
   });
+  // Acuse al solicitante (si falla, la solicitud ya quedó guardada).
+  if (correo) await enviarPlantilla(correo, correoCotizacionRecibida({ nombre, cotizacion: origen === 'COTIZACION', sitio: SITIO_CORREO }));
 
   return responder(200, { ok: true });
 };

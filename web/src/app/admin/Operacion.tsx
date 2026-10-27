@@ -401,12 +401,20 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
     proveedor: m.proveedor ?? '',
     notas: m.notas ?? '',
   });
+  const [importante, setImportante] = useState(!!m.importante);
+  const [porCorreo, setPorCorreo] = useState(!!m.correoResidentes);
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setF({ ...f, [k]: e.target.value });
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    const datos = { ...f, tipo: f.tipo as 'PREVENTIVO' | 'CORRECTIVO', estado: f.estado as 'PROGRAMADO' | 'EN_PROCESO' | 'TERMINADO' };
+    const datos = {
+      ...f,
+      tipo: f.tipo as 'PREVENTIVO' | 'CORRECTIVO',
+      estado: f.estado as 'PROGRAMADO' | 'EN_PROCESO' | 'TERMINADO',
+      importante,
+      correoResidentes: importante && porCorreo,
+    };
     const okk = await run(async () => {
       if (m.id) ok(await db.models.Mantenimiento.update({ id: m.id, ...datos }));
       else ok(await db.models.Mantenimiento.create({ condominioId: condoId, ...datos }));
@@ -446,9 +454,22 @@ function EditarMant({ m, onClose, onDone }: { m: Partial<Mantenimiento>; onClose
         <Field label="Notas (visibles para residentes)">
           <textarea maxLength={2000} value={f.notas} onChange={set('notas')} />
         </Field>
+        <label className="check">
+          <input type="checkbox" checked={importante} onChange={(e) => setImportante(e.target.checked)} />
+          Marcar como importante (corte de agua, elevador, accesos…)
+        </label>
+        {importante && f.estado !== 'TERMINADO' && (
+          <Field label="¿Cómo se avisa a los residentes?" hint="Por ser importante, también puedes avisar al correo de cada residente, con el diseño de SIIA.">
+            <select value={porCorreo ? 'AMBOS' : 'NOTIFICACION'} onChange={(e) => setPorCorreo(e.target.value === 'AMBOS')}>
+              <option value="NOTIFICACION">Solo notificación (portal y app)</option>
+              <option value="AMBOS">Notificación y correo</option>
+            </select>
+          </Field>
+        )}
         {f.estado !== 'TERMINADO' && (
           <p className="small muted" style={{ margin: 0 }}>
-            {m.id ? 'Si cambias la fecha, se avisa' : 'Al guardarlo se avisa'} a todos los residentes con una notificación.
+            {m.id ? 'Si cambias la fecha, se avisa' : 'Al guardarlo se avisa'} a todos los residentes con una notificación
+            {importante && porCorreo ? ' y por correo' : ''}.
           </p>
         )}
         <button className="btn-app" disabled={busy}>

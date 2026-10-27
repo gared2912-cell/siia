@@ -22,7 +22,7 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { randomInt, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
@@ -39,6 +39,8 @@ import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo, estadoDeAcceso } fro
 import { MIN_CUOTAS_DEFECTO, jsonCorte, type AccesoCorte, type Corte, type CriterioCorte, type EstadoCorte, type FilaCorte, type ResumenCorte } from '../shared/cortes';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL, tipoDeCargo } from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
+import { SITIO_CORREO, enviarPlantilla, enviarVarios } from '../shared/correo';
+import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento } from '../shared/plantillas-correo';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
 import { listaJson, type FotoReporte } from '../shared/proveedores';
 import { MODELOS_FIRMADOS, anotar, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
@@ -59,6 +61,8 @@ const UserPoolId = process.env.USER_POOL_ID!;
 const ROLES = ['SUPERADMIN', 'ADMIN', 'RESIDENTE', 'VIGILANTE', 'PROVEEDOR'] as const;
 type Rol = (typeof ROLES)[number];
 const ES_ADMIN = (rol?: string | null) => rol === 'ADMIN' || rol === 'SUPERADMIN';
+/** Huella de una contraseña generada (para confirmar que es la misma al enviarla por correo). */
+const huellaClave = (sal: string, password: string) => createHash('sha256').update(`${sal}:${password}`).digest('hex');
 
 // ---------- quién llama y qué puede hacer ----------
 type Yo = {
@@ -192,18 +196,23 @@ type Regla = {
 // Datos bancarios y cuota del condominio: requieren el permiso «condominios.datosPago».
 const CAMPOS_PAGO = ['datosPago', 'banco', 'beneficiario', 'clabe', 'cuentaBancaria', 'referenciaPago', 'notasPago', 'cuotaMensual', 'diaVencimiento', 'recargoActivo', 'recargoMonto', 'recargoDesde', 'cuotaAutomatica', 'diaCargo', 'cuotaAutomaticaDesde'];
 
+// Cómo se avisa de los pagos vencidos: requiere el permiso «condominios.avisoMorosidad».
+const CAMPOS_AVISO = ['avisoMorosidad', 'avisoMorosidadDesde'];
+
 const REGLAS: Record<string, Regla> = {
   Condominio: {
     seccion: 'condominios',
     lecturaLibre: true,
     indices: {},
-    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO],
-    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO],
+    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
+    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
     extras: {
       modulos: 'condominios.servicios',
       activo: 'condominios.servicios',
       ...Object.fromEntries(CAMPOS_PAGO.map((k) => [k, 'condominios.datosPago'])),
+      ...Object.fromEntries(CAMPOS_AVISO.map((k) => [k, 'condominios.avisoMorosidad'])),
     },
+    valores: { avisoMorosidad: ['NOTIFICACION', 'CORREO', 'AMBOS'] },
   },
   Unidad: {
     seccion: 'condominios',
@@ -249,8 +258,8 @@ const REGLAS: Record<string, Regla> = {
   Mantenimiento: {
     seccion: 'mantenimientos',
     indices: { mantenimientosPorCondominio: 'condominioId' },
-    crear: ['condominioId', 'titulo', 'tipo', 'area', 'fecha', 'estado', 'proveedor', 'notas'],
-    editar: ['titulo', 'tipo', 'area', 'fecha', 'estado', 'proveedor', 'notas'],
+    crear: ['condominioId', 'titulo', 'tipo', 'area', 'fecha', 'estado', 'proveedor', 'notas', 'importante', 'correoResidentes'],
+    editar: ['titulo', 'tipo', 'area', 'fecha', 'estado', 'proveedor', 'notas', 'importante', 'correoResidentes'],
     borrar: true,
   },
   Amenidad: {
@@ -306,7 +315,7 @@ function soloCampos(input: Item, permitidos: string[], omitir: string[] = []) {
 async function perfilesVisibles(yo: Yo) {
   const todos = await scan('Perfil');
   const visibles = yo.superadmin ? todos : todos.filter((p) => !ES_ADMIN(p.rol) && enAlcance(yo, p.condominioId));
-  return visibles.map(({ __typename, ...p }) => p);
+  return visibles.map(({ __typename, claveEnvio, ...p }) => p);
 }
 
 /**
@@ -336,6 +345,16 @@ async function avisarMantenimiento(m: Item, reprogramado: boolean) {
       ),
     );
   }
+  // Importante con correo: además, un correo a cada residente autorizado del condominio.
+  if (m.importante && m.correoResidentes) {
+    const correo = correoMantenimiento({ condominio: c.nombre, titulo: str(m.titulo, 140), reprogramado, cuando, area: m.area, notas: m.notas, url: `${SITIO_CORREO}/portal/` });
+    await enviarVarios((await residentesConCorreo(m.condominioId)).map((r) => ({ email: r.email, correo })));
+  }
+}
+
+/** Residentes autorizados de un condominio con correo registrado. */
+async function residentesConCorreo(condominioId: string) {
+  return (await byIndex('Perfil', 'byCondominio', 'condominioId', condominioId)).filter((p) => p.rol === 'RESIDENTE' && p.estado === 'APROBADO' && p.email);
 }
 
 async function db(p: Item, yo: Yo) {
@@ -410,6 +429,7 @@ async function db(p: Item, yo: Yo) {
       // Lo que requiere permiso especial se crea vacío si no lo tiene.
       if (!yo.permisos.extras.includes('condominios.servicios')) Object.assign(input, { modulos: [], activo: true });
       if (!yo.permisos.extras.includes('condominios.datosPago')) CAMPOS_PAGO.forEach((k) => delete input[k]);
+      if (!yo.permisos.extras.includes('condominios.avisoMorosidad')) CAMPOS_AVISO.forEach((k) => delete input[k]);
     }
     if (input.unidadId) {
       const u = await get('Unidad', { id: str(input.unidadId, 64) });
@@ -498,7 +518,9 @@ async function db(p: Item, yo: Yo) {
     }
     if (m === 'Reserva' && (input.estado === 'RECHAZADA' || input.estado === 'CANCELADA')) await cancelarCargoReserva(actual!.id);
     const r = await actualizar(input);
-    if (m === 'Mantenimiento' && cambian.includes('fecha')) await avisarMantenimiento({ ...actual!, ...input }, true);
+    // Nueva fecha, o se pidió avisar por correo de un mantenimiento importante que antes no lo tenía.
+    const pideCorreo = cambian.includes('correoResidentes') && input.correoResidentes === true && (input.importante ?? actual!.importante);
+    if (m === 'Mantenimiento' && (cambian.includes('fecha') || pideCorreo)) await avisarMantenimiento({ ...actual!, ...input }, cambian.includes('fecha'));
     return r;
   }
 
@@ -959,7 +981,40 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
       resumen: JSON.stringify(resumen),
       filas: JSON.stringify(filas),
     });
-    return { corte: corteDe(corte), previos: anteriores.slice(0, 2) };
+    // 4. Aviso a quienes se les desactivarán accesos (la administración elige: no avisar, notificación o también correo).
+    const avisar = p.avisar === 'NOTIFICACION' || p.avisar === 'AMBOS' ? p.avisar : 'NO';
+    let avisados = 0;
+    if (avisar !== 'NO') {
+      const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
+      const porCortar = filas.filter((f) => f.userId && f.accesos.some((a) => a.estado === 'POR_DESACTIVAR'));
+      const unidadesAvisadas = new Set<string>();
+      const correos: { email: string; correo: ReturnType<typeof correoCorteAccesos> }[] = [];
+      for (const f of porCortar) {
+        const accesos = f.accesos.filter((a) => a.estado === 'POR_DESACTIVAR').map((a) => `${a.tipo}${a.codigo ? ` ${a.codigo}` : ''}`);
+        const vencidos = f.cuotas + f.extras;
+        if (!unidadesAvisadas.has(f.unidadId)) {
+          unidadesAvisadas.add(f.unidadId);
+          await put('Aviso', {
+            condominioId: c.id,
+            unidadId: f.unidadId,
+            tipo: 'PAGO',
+            titulo: 'Tus accesos se desactivarán por falta de pago',
+            texto: `Tienes ${vencidos} ${vencidos === 1 ? 'pago vencido' : 'pagos vencidos'} por ${mxn(f.monto)}. Se desactivarán: ${accesos.join(', ')}. Al quedar cubierto tu adeudo, se reactivan en el siguiente corte.`,
+            leido: false,
+          });
+        }
+        const r = residentes.find((x) => x.userId === f.userId);
+        if (avisar === 'AMBOS' && r?.email && r.estado === 'APROBADO') {
+          correos.push({
+            email: r.email,
+            correo: correoCorteAccesos({ condominio: c.nombre, unidad: f.unidad, nombre: r.nombre, accesos, cuotas: vencidos, monto: mxn(f.monto), url: `${SITIO_CORREO}/portal/` }),
+          });
+        }
+      }
+      await enviarVarios(correos);
+      avisados = unidadesAvisadas.size;
+    }
+    return { corte: corteDe(corte), previos: anteriores.slice(0, 2), avisados };
   },
 
   // URL firmada para subir una foto al chat con una unidad (10 minutos, imagen de 10 MB máximo).
@@ -1077,9 +1132,17 @@ const accionesComunicados: Record<string, (p: Item, yo: Yo) => Promise<unknown>>
     const imagenes = await validar(p.imagenes, MAX_IMAGENES_COMUNICADO, false, 'imágenes');
     const adjuntos = await validar(p.adjuntos, MAX_ADJUNTOS_COMUNICADO, true, 'PDF');
     const datos = { titulo, cuerpo, importante: p.importante === true, imagenes, adjuntos };
-    if (actual) return update('Comunicado', { id: actual.id }, datos);
-    const yoPerfil = await get('Perfil', { userId: yo.sub });
-    return put('Comunicado', { condominioId: c.id, ...datos, autor: yoPerfil?.nombre || yo.email });
+    const yoPerfil = actual ? undefined : await get('Perfil', { userId: yo.sub });
+    const r = actual ? await update('Comunicado', { id: actual.id }, datos) : await put('Comunicado', { condominioId: c.id, ...datos, autor: yoPerfil?.nombre || yo.email });
+    // Solo los importantes pueden ir también por correo (la administración lo elige al publicar).
+    if (p.correo === true && datos.importante) {
+      const correo = correoComunicado({ condominio: c.nombre, titulo, cuerpo, autor: r.autor, archivos: imagenes.length + adjuntos.length, url: `${SITIO_CORREO}/portal/` });
+      const residentes = await residentesConCorreo(c.id);
+      const enviados = await enviarVarios(residentes.map((x) => ({ email: x.email, correo })));
+      anotar('Comunicado', r, 'correo', `Se envió por correo a ${enviados} residente(s)`);
+      return { ...r, correos: enviados };
+    }
+    return r;
   },
 
   // URLs temporales (1 hora) de las imágenes, en el mismo orden, y de los PDF (para descargar, con su nombre).
@@ -1600,8 +1663,33 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       throw err;
     }
     await cerrarSesiones(perfil.userId);
-    if (perfil.accesoSinEnviar) await update('Perfil', { userId: perfil.userId }, { accesoSinEnviar: null });
+    // Para poder enviarla por correo después (enviarContrasena) sin guardarla: solo su huella, por 30 minutos.
+    const sal = randomUUID();
+    await update('Perfil', { userId: perfil.userId }, { accesoSinEnviar: null, claveEnvio: JSON.stringify({ sal, hash: huellaClave(sal, password), en: now() }) });
     anotar('Perfil', perfil, 'acceso', 'Se asignó una contraseña nueva');
+    return { ok: true, email: perfil.email };
+  },
+
+  // Envía por correo la contraseña que la administración acaba de generar (botón «Enviar por correo»).
+  async enviarContrasena(p, yo) {
+    const perfil = await perfilDe(str(p.userId, 64));
+    exigirGestionable(yo, perfil);
+    exigir(yo, seccionDe(perfil), 'editar');
+    const password = typeof p.password === 'string' ? p.password : '';
+    const envio = jsonDe(perfil.claveEnvio) as { sal?: string; hash?: string; en?: string } | null;
+    const vigente = envio?.sal && envio.en && Date.now() - Date.parse(envio.en) < 30 * 60_000;
+    if (!vigente || huellaClave(envio!.sal!, password) !== envio!.hash) fail('Esta contraseña ya no se puede enviar. Genera una nueva.');
+    const esAdmin = ES_ADMIN(perfil.rol);
+    const correo = correoContrasena({
+      nombre: perfil.nombre,
+      email: perfil.email,
+      password,
+      url: `${SITIO_CORREO}/${esAdmin ? 'admin' : 'portal'}/`,
+      destino: esAdmin ? 'al panel de administración de' : 'al portal de residentes de',
+    });
+    if (!(await enviarPlantilla(perfil.email, correo))) fail('No se pudo enviar el correo. Intenta de nuevo o copia la contraseña.');
+    await update('Perfil', { userId: perfil.userId }, { claveEnvio: null });
+    anotar('Perfil', perfil, 'acceso', 'Se envió la contraseña por correo');
     return { ok: true, email: perfil.email };
   },
 

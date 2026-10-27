@@ -1011,6 +1011,7 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
   const [pass, setPass] = useState('');
   const [generada, setGenerada] = useState('');
   const [copiado, setCopiado] = useState(false);
+  const [enviado, setEnviado] = useState(false);
   const reglas: [string, boolean][] = [
     ['8 caracteres o más', pass.length >= 8],
     ['Una mayúscula', /[A-Z]/.test(pass)],
@@ -1045,15 +1046,16 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
       /* el texto queda visible para copiarlo a mano */
     }
   };
-  const tel = (p.telefono ?? '').replace(/\D/g, '');
-  // El enlace va solo en su renglón: WhatsApp toma como parte de la liga cualquier signo pegado a ella.
-  const mensaje = `Hola ${p.nombre ?? ''}. Tus datos para entrar ${destino} SIIA:\n\n${location.origin}/${esAdmin ? 'admin' : 'portal'}\n\nUsuario: ${p.email}\nContraseña: ${generada}`;
+  // La contraseña recién generada se envía con el diseño de SIIA desde no-reply@siia.casa.
+  const enviarCorreo = async () => {
+    if (await run(() => adminCall('enviarContrasena', { userId: p.userId, password: generada }), `Contraseña enviada a ${p.email}`)) setEnviado(true);
+  };
 
   return (
     <Modal title={`Contraseña de ${nombre}`} onClose={onClose}>
       {generada ? (
         <div className="form">
-          <p style={{ margin: 0 }}>Comparte estos datos con {nombre}. Es su contraseña definitiva para entrar {destino}.</p>
+          <p style={{ margin: 0 }}>Contraseña asignada. Es la contraseña definitiva de {nombre} para entrar {destino}: cópiala o envíasela por correo.</p>
           <div className="alert" style={{ display: 'grid', gap: 6 }}>
             <div>
               Usuario: <strong style={{ overflowWrap: 'anywhere' }}>{p.email}</strong>
@@ -1067,22 +1069,18 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
               <Icon name="check" />
               {copiado ? 'Copiada' : 'Copiar contraseña'}
             </button>
-            <a
-              className="btn-app secondary"
-              href={`https://wa.me/${tel.length === 10 ? `52${tel}` : tel}?text=${encodeURIComponent(mensaje)}`}
-              target="_blank"
-              rel="noopener"
-            >
-              <Icon name="chat" />
-              Enviar por WhatsApp
-            </a>
+            <button type="button" className="btn-app secondary" disabled={busy || enviado} onClick={enviarCorreo}>
+              <Icon name="mail" />
+              {enviado ? 'Enviada por correo' : busy ? 'Enviando…' : 'Enviar por correo'}
+            </button>
+            <button type="button" className="btn-app secondary" disabled={busy} onClick={onClose}>
+              Cerrar
+            </button>
           </div>
           <p className="small muted" style={{ margin: 0 }}>
-            Por seguridad no volveremos a mostrarla. Si se pierde, asigna otra.
+            {enviado ? `Le llegó a ${p.email} con su usuario y el botón para entrar. ` : `El correo llega a ${p.email}. `}Por seguridad no volveremos a mostrarla; si se
+            pierde, asigna otra.
           </p>
-          <button type="button" className="btn-app secondary" onClick={onClose}>
-            Listo
-          </button>
         </div>
       ) : escribir ? (
         <form className="form" onSubmit={guardar}>
@@ -1128,8 +1126,7 @@ export function Contrasena({ p, sinPrimerIngreso, onClose }: { p: Perfil; sinPri
           <section className="panel" style={{ margin: 0 }}>
             <h3 style={{ fontSize: '1rem', marginTop: 0 }}>Generar contraseña</h3>
             <p className="small muted">
-              Para quien no revisa o no tiene correo: tú escribes la contraseña, se la compartes (en persona o por WhatsApp) y con ella entra
-              directo {destino}.
+              Tú escribes la contraseña y con ella entra directo {destino}. Al asignarla puedes copiarla o enviársela por correo.
             </p>
             <button type="button" className="btn-app" disabled={busy} onClick={() => setEscribir(true)}>
               <Icon name="shield" />

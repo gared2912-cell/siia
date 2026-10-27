@@ -193,20 +193,22 @@ if (CORREO_SES) {
     sourceArn: Stack.of(userPool).formatArn({ service: 'ses', resource: 'identity', resourceName: 'siia.casa' }),
   };
 }
-// Recargos por pago tardío: aviso por correo a los residentes (Amazon SES, dominio siia.casa verificado con DKIM).
-// EN PAUSA hasta tener el dominio con HTTPS y SES listo; para activarlo: CORREOS_ACTIVOS = '1'.
-backend.recargos.addEnvironment('CORREOS_ACTIVOS', '0');
-backend.recargos.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions: ['ses:SendEmail'],
-    resources: [`arn:aws:ses:${Stack.of(backend.recargos.resources.lambda).region}:${Stack.of(backend.recargos.resources.lambda).account}:identity/*`],
-  }),
-);
+// Correos con el diseño de SIIA (shared/correo.ts): pago vencido (recargos), contraseña, comunicados y mantenimientos
+// importantes y corte de accesos (admin-api) y acuse de cotizaciones del sitio. '0' pausa los correos de esa función.
+for (const fn of [backend.recargos, backend.adminApi, backend.cotizaciones]) {
+  fn.addEnvironment('CORREOS_ACTIVOS', '1');
+  fn.addEnvironment('PORTAL_URL', PORTAL_URL);
+  fn.resources.lambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['ses:SendEmail'],
+      resources: [`arn:aws:ses:${Stack.of(fn.resources.lambda).region}:${Stack.of(fn.resources.lambda).account}:identity/*`],
+    }),
+  );
+}
 
 // ---------- ambiente (staging o producción) ----------
 // Cada ambiente tiene su llave pública VAPID y su dirección del portal (enlaces de correos y avisos).
 for (const fn of [backend.adminApi, backend.portalApi, backend.notificador]) fn.addEnvironment('VAPID_PUBLIC_KEY', VAPID_PUBLICA);
-backend.recargos.addEnvironment('PORTAL_URL', PORTAL_URL);
 // El sitio lee estos datos de amplify_outputs.json (y los scripts de prueba se niegan a correr en producción).
 backend.addOutput({ custom: { ambiente: AMBIENTE, sitio: SITIO, vapidPublica: VAPID_PUBLICA, cotizacionesUrl: urlCotizaciones.url } });
 

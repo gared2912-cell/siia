@@ -35,6 +35,7 @@ export const EXTRAS: { key: string; seccion: string; label: string }[] = [
   { key: 'condominios.alta', seccion: 'condominios', label: 'Dar de alta condominios nuevos' },
   { key: 'condominios.servicios', seccion: 'condominios', label: 'Activar o desactivar servicios del portal y el portal completo' },
   { key: 'condominios.datosPago', seccion: 'condominios', label: 'Editar la cuota de mantenimiento y los datos bancarios' },
+  { key: 'condominios.avisoMorosidad', seccion: 'condominios', label: 'Elegir cómo se avisa de los pagos vencidos (notificación, correo o ambos)' },
   { key: 'usuarios.eliminar', seccion: 'usuarios', label: 'Eliminar cuentas definitivamente' },
   { key: 'finanzas.validarPagos', seccion: 'finanzas', label: 'Aprobar o rechazar comprobantes de pago (emite recibos)' },
   { key: 'finanzas.generarCuotas', seccion: 'finanzas', label: 'Generar las cuotas de mantenimiento del mes' },

@@ -197,6 +197,7 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
     diaVencimiento: String(c.diaVencimiento ?? 10),
     recargoActivo: !!c.recargoActivo,
     recargoMonto: c.recargoMonto != null ? String(c.recargoMonto) : '',
+    avisoMorosidad: c.avisoMorosidad ?? 'NOTIFICACION',
     cuotaAutomatica: !!c.cuotaAutomatica,
     diaCargo: String(c.diaCargo ?? 1),
     banco: c.banco ?? '',
@@ -213,8 +214,9 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
   const ver = (s: Exclude<Seccion, 'todo'>) => seccion === 'todo' || seccion === s;
   const puedeGeneral = puede('condominios', 'editar');
   const puedePago = tiene('condominios.datosPago');
+  const puedeAviso = tiene('condominios.avisoMorosidad');
   const puedeServicios = tiene('condominios.servicios');
-  const editable = (seccion === 'general' && puedeGeneral) || (seccion === 'cuotas' && puedePago) || (seccion === 'servicios' && puedeServicios) || seccion === 'todo';
+  const editable = (seccion === 'general' && puedeGeneral) || (seccion === 'cuotas' && (puedePago || puedeAviso)) || (seccion === 'servicios' && puedeServicios) || seccion === 'todo';
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const toggle = (m: string) => setF({ ...f, modulos: f.modulos.includes(m) ? f.modulos.filter((x) => x !== m) : [...f.modulos, m] });
 
@@ -247,7 +249,9 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
       diaCargo: Math.min(Math.max(Number(f.diaCargo) || 1, 1), 28),
       cuotaAutomaticaDesde: f.cuotaAutomatica ? (c.cuotaAutomatica && c.cuotaAutomaticaDesde ? c.cuotaAutomaticaDesde : hoy()) : null,
     };
-    const pagoTodo = { ...pago, datosPago: textoDatosPago(pago) };
+    // Aviso de pago vencido: solo cuenta para las cuotas que venzan desde la primera vez que se guarda.
+    const aviso = { avisoMorosidad: f.avisoMorosidad, avisoMorosidadDesde: c.avisoMorosidadDesde ?? hoy() };
+    const pagoTodo = { ...pago, datosPago: textoDatosPago(pago), ...aviso };
     const servicios = { modulos: f.modulos, activo: f.activo };
     const datos =
       seccion === 'general'
@@ -362,7 +366,7 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
               </label>
               <p className="small muted" style={{ margin: '4px 0 10px' }}>
                 Al día siguiente del vencimiento (día {Math.min(Math.max(Number(f.diaVencimiento) || 10, 1), 28) + 1}) se carga el recargo a cada residente que no
-                haya pagado ni subido su comprobante. Se aplica una sola vez por cuota y el residente recibe un aviso.
+                haya pagado ni subido su comprobante. Se aplica una sola vez por cuota y se incluye en el aviso de pago vencido.
                 {c.recargoActivo && c.recargoDesde ? ` Activo desde el ${fecha(c.recargoDesde)}.` : ' Al activarlo, aplica a las cuotas que venzan a partir de hoy.'}
               </p>
               {f.recargoActivo && (
@@ -370,6 +374,19 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
                   <input type="number" min="0.01" step="0.01" required value={f.recargoMonto} onChange={set('recargoMonto')} disabled={!puedePago} placeholder="150.00" style={{ maxWidth: 220 }} />
                 </Field>
               )}
+            </div>
+            <div className="recargo">
+              <Field
+                label="Aviso de pago vencido"
+                hint="Al día siguiente del vencimiento, cada casa o departamento que no haya pagado ni subido su comprobante recibe un aviso con su estado de cuenta: lo que venció, sus pendientes anteriores, el total y los datos para pagar."
+              >
+                <select value={f.avisoMorosidad} onChange={set('avisoMorosidad')} disabled={!puedeAviso} style={{ maxWidth: 360 }}>
+                  <option value="NOTIFICACION">Solo notificación (portal y app)</option>
+                  <option value="CORREO">Solo correo</option>
+                  <option value="AMBOS">Notificación y correo</option>
+                </select>
+              </Field>
+              {!puedeAviso && <p className="small muted" style={{ margin: '4px 0 0' }}>Tu rol no permite cambiar cómo se avisa de los pagos vencidos.</p>}
             </div>
             <h3 style={{ fontSize: '1rem', margin: '8px 0 0' }}>¿Dónde se pagan las cuotas?</h3>
             <p className="small muted" style={{ margin: 0 }}>

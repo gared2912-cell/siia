@@ -135,13 +135,14 @@ function NuevoCorte({
   const [elegidos, setElegidos] = useState<string[]>(ultimo?.criterio.tipos.filter((t) => tipos.includes(t)) ?? []);
   const [cuenta, setCuenta] = useState<'cuotas' | 'extras'>(ultimo?.criterio.extraordinarios ? 'extras' : 'cuotas');
   const [minCuotas, setMinCuotas] = useState(ultimo?.criterio.minCuotas ?? MIN_CUOTAS_DEFECTO);
+  const [avisar, setAvisar] = useState<'NO' | 'NOTIFICACION' | 'AMBOS'>('NO');
   const { run, busy } = useAction();
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     let r: { corte: Corte; previos: Corte[] } | undefined;
     const ok = await run(async () => {
-      r = await adminCall('cortes.crear', { condominioId: condo!.id, tipos: elegidos, extraordinarios: cuenta === 'extras', minCuotas });
+      r = await adminCall('cortes.crear', { condominioId: condo!.id, tipos: elegidos, extraordinarios: cuenta === 'extras', minCuotas, avisar });
     });
     if (ok && r) await run(() => onDone(r!), `Corte #${r.corte.numero} listo y descargado`);
   }
@@ -183,6 +184,16 @@ function NuevoCorte({
                 {n} vencida{n > 1 ? 's' : ''}
               </option>
             ))}
+          </select>
+        </Field>
+        <Field
+          label="Avisar a los residentes que se les desactivarán accesos"
+          hint="Les llega qué accesos se desactivan, cuántos pagos deben y el monto, con el botón para ver su estado de cuenta."
+        >
+          <select value={avisar} onChange={(e) => setAvisar(e.target.value as typeof avisar)}>
+            <option value="NO">No avisar</option>
+            <option value="NOTIFICACION">Solo notificación (portal y app)</option>
+            <option value="AMBOS">Notificación y correo</option>
           </select>
         </Field>
         <div className="alert small">
