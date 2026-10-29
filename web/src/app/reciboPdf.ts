@@ -1,7 +1,7 @@
 // Recibo de pago en PDF (mismo contenido que el recibo en pantalla), con el formato del historial de pagos.
 // Lo descargan la administración y el propio residente. Va protegido: se puede ver e imprimir, pero no modificar.
 // jsPDF se carga solo al descargar.
-import type { ReciboData } from './Recibo';
+import { conceptoRecibo, notasRecibo, type ReciboData } from './Recibo';
 
 const TEAL: [number, number, number] = [56, 203, 185];
 const TEAL_OSCURO: [number, number, number] = [0, 124, 125];
@@ -76,7 +76,7 @@ export async function construirRecibo(d: ReciboData, logoPng?: string) {
     startY: y + 3,
     margin: { left: M, right: M, bottom: 22 },
     head: [['#', 'Concepto', 'Importe']],
-    body: cargos.length ? cargos.map((c, i) => [String(i + 1), c.concepto, mxn.format(c.monto)]) : [['1', 'Pago a cuenta de mantenimiento', mxn.format(pago.monto)]],
+    body: cargos.length ? cargos.map((c, i) => [String(i + 1), conceptoRecibo(c, mxn.format), mxn.format(c.monto)]) : [['1', 'Pago a cuenta de mantenimiento', mxn.format(pago.monto)]],
     theme: 'plain',
     styles: { font: 'helvetica', fontSize: 9.5, textColor: TEXTO, cellPadding: { top: 2.6, bottom: 2.6, left: 2, right: 2 }, lineColor: LINEA, lineWidth: { bottom: 0.2 } },
     headStyles: { fillColor: TEAL_OSCURO, textColor: [255, 255, 255], fontStyle: 'bold' },
@@ -93,8 +93,10 @@ export async function construirRecibo(d: ReciboData, logoPng?: string) {
   doc.setFillColor(...VERDE_CLARO).roundedRect(xT, y, 82, 13, 2, 2, 'F');
   doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(...TEXTO).text('TOTAL RECIBIDO', xT + 4, y + 8.5);
   doc.setTextColor(...VERDE).text(mxn.format(pago.monto), W - M - 4, y + 8.5, { align: 'right' });
-  y += 22;
+  y += 13;
   doc.setFont('helvetica', 'normal').setFontSize(9.5).setTextColor(...TEXTO);
+  for (const t of notasRecibo(pago, mxn.format)) doc.text(t, W - M - 4, (y += 5.5), { align: 'right' });
+  y += 9;
   doc.text(`Fecha de pago: ${fechaLarga(pago.fecha)}`, M, y);
   if (pago.referencia) doc.text(`Referencia: ${pago.referencia}`, M, y + 6);
 

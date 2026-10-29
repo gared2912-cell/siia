@@ -3094,3 +3094,178 @@ table.tbl {
     transition: none;
   }
 }
+
+/* Cuadre de un pago contra sus cargos (aprobar comprobante / subir comprobante) */
+.cuadre {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+}
+.cuadre > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.95rem;
+}
+.cuadre > div > span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cuadre .cuadre-res {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--card-line);
+  font-weight: 700;
+}
+.cuadre.ok .cuadre-res {
+  color: #1e7d4f;
+}
+.cuadre.warn .cuadre-res {
+  color: #8a6100;
+}
+.cuadre.info .cuadre-res {
+  color: #007c7d;
+}
+.opciones-ajuste {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.opciones-ajuste legend {
+  margin-bottom: 4px;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+.opciones-ajuste .check {
+  align-items: flex-start;
+}
+.opciones-ajuste .check input {
+  margin-top: 2px;
+  flex: none;
+}
+
+/* Botón flotante: reportar una falla o solicitar una mejora (administradores) */
+.fab-reporte {
+  position: fixed;
+  right: 16px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  min-width: 52px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 999px;
+  background: #d0453e;
+  color: #fff;
+  font: 700 0.92rem/1 var(--font-body);
+  box-shadow: 0 6px 18px -6px rgb(161 51 46 / 0.6), 0 2px 0 #a1332e;
+  cursor: pointer;
+}
+.fab-reporte .ico {
+  width: 22px;
+  height: 22px;
+}
+.fab-reporte:hover {
+  background: #b93a34;
+}
+.fab-reporte span {
+  display: none;
+}
+.fab-reporte:focus-visible {
+  outline: 3px solid var(--mint);
+  outline-offset: 2px;
+}
+@media (min-width: 960px) {
+  .fab-reporte {
+    right: 28px;
+    bottom: 28px;
+  }
+  .fab-reporte span {
+    display: inline;
+  }
+}
+.tipos-reporte {
+  display: grid;
+  gap: 10px;
+}
+.tipo-reporte {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--card-line);
+  border-radius: var(--radius-app);
+  background: #fff;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.tipo-reporte:hover {
+  border-color: var(--teal);
+}
+.tipo-reporte strong {
+  display: block;
+  font-size: 1rem;
+}
+.tipo-reporte .tarjeta-icono {
+  flex: none;
+}
+.miniaturas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.miniaturas figure {
+  position: relative;
+  margin: 0;
+}
+.miniaturas img {
+  display: block;
+  width: 76px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--card-line);
+}
+.miniaturas button.quitar {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--slate-dark);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.miniaturas button.quitar .ico {
+  width: 14px;
+  height: 14px;
+}
+.miniaturas button.ver {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.alert.ok {
+  background: #e6f4ec;
+  border-color: #b7e0c8;
+  color: #1e7d4f;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}

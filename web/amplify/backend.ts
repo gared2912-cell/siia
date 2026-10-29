@@ -82,6 +82,8 @@ backend.storage.resources.bucket.grantRead(backend.adminApi.resources.lambda, 'r
 backend.adminApi.addEnvironment('BUCKET', backend.storage.resources.bucket.bucketName);
 // Documentos del condominio (reglamento y otros): admin-api firma la subida y la descarga.
 backend.storage.resources.bucket.grantReadWrite(backend.adminApi.resources.lambda, 'condominios/*');
+// Imágenes de los reportes de fallas y mejoras del botón flotante del panel.
+backend.storage.resources.bucket.grantReadWrite(backend.adminApi.resources.lambda, 'reportes/*');
 
 // portal-api solo lee el correo del usuario en Cognito (el access token no lo incluye).
 backend.portalApi.addEnvironment('USER_POOL_ID', userPool.userPoolId);

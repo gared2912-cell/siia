@@ -98,3 +98,33 @@ export function correoCotizacionRecibida(d: { nombre: string; cotizacion: boolea
     pie: 'Este correo es automático, no lo respondas. Nuestro equipo te contactará muy pronto.',
   };
 }
+
+/** Aviso al desarrollador: un administrador reportó una falla o pidió una mejora desde el panel. */
+export function correoReporte(d: { tipo: string; texto: string; por: string; condominio?: string | null; pagina?: string | null; imagenes: number; url: string }): Correo {
+  const datos = [`De: ${d.por}`, d.condominio ? `Condominio: ${d.condominio}` : '', d.pagina ? `Sección: ${d.pagina}` : '', d.imagenes ? `Imágenes: ${d.imagenes}` : '']
+    .filter(Boolean);
+  const contenido = `
+      ${etiquetaCorreo(d.tipo)}
+      ${tituloCorreo(`${d.tipo} desde el panel`)}
+      ${caja(`<div style="font-size:14px;color:#4b526f;margin:0 0 8px">${datos.map(e).join('<br>')}</div><div>${textoLibre(d.texto)}</div>`)}
+      ${botonCorreo('Ver en el panel', d.url)}
+      ${notaCorreo('Lo atiendes en Administración › Reportes y mejoras; quien lo envió ve el estado y tu respuesta.', true)}`;
+  const texto = [`${d.tipo} desde el panel`, ...datos, d.texto, `Ver en el panel:\n${d.url}`].join('\n\n');
+  return { asunto: `SIIA · ${d.tipo}: ${d.texto.slice(0, 60)}`, contenido, texto, pie: 'Correo automático del panel de administración de SIIA.' };
+}
+
+/** A quien reportó una falla o pidió una mejora: ya quedó resuelta (en producción o arreglada). */
+export function correoReporteResuelto(d: { titulo: string; nombre?: string | null; texto: string; respuesta?: string | null; url: string }): Correo {
+  const contenido = `
+      ${etiquetaCorreo('Reportes y mejoras')}
+      ${tituloCorreo(e(d.titulo))}
+      ${parrafo(`${e(hola(d.nombre))} gracias por avisarnos. Esto es lo que enviaste:`)}
+      ${caja(`<div>${textoLibre(d.texto)}</div>`)}
+      ${d.respuesta ? parrafo(`<strong>Respuesta del equipo de SIIA:</strong><br>${textoLibre(d.respuesta)}`) : ''}
+      ${botonCorreo('Entrar al panel', d.url)}
+      ${notaCorreo('Lo ves también en el botón «Reportar o sugerir» › «Ver mis reportes».', true)}`;
+  const texto = [d.titulo, hola(d.nombre), `Lo que enviaste:\n${d.texto}`, d.respuesta ? `Respuesta del equipo de SIIA:\n${d.respuesta}` : '', `Entrar al panel:\n${d.url}`]
+    .filter(Boolean)
+    .join('\n\n');
+  return { asunto: `SIIA · ${d.titulo}`, contenido, texto, pie: 'Correo automático del panel de administración de SIIA.' };
+}

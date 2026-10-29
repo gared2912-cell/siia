@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Archivo, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, money, useAction } from './ui';
 import { calcularHistorial, type DatosHistorial, type PagoHistorial } from './historialPdf';
-import { Recibo, type ReciboData } from './Recibo';
+import { Recibo, cargoRecibo, pagoRecibo, type ReciboData } from './Recibo';
 
 const ESTADO: Record<string, { texto: string; clase: string }> = {
   PAGADO: { texto: 'Pagado', clase: 'ok' },
@@ -33,8 +33,8 @@ export function HistorialVista({ datos, onClose }: { datos: DatosHistorial; onCl
   const ver = (p: PagoHistorial) =>
     setRecibo({
       data: {
-        pago: { id: p.id, folio: p.folio ?? '', monto: p.monto, fecha: p.fecha ?? undefined, referencia: p.referencia ?? undefined, validadoEn: p.validadoEn ?? undefined },
-        cargos: datos.cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => ({ id: c.id, concepto: c.concepto, monto: c.monto })),
+        pago: pagoRecibo(p),
+        cargos: datos.cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map(cargoRecibo),
         condominio: { nombre: datos.condominio, direccion: datos.direccion ?? undefined },
         unidad: { etiqueta: datos.unidad, propietario: datos.residente ?? undefined },
       },

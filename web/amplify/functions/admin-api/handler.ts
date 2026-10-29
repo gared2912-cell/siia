@@ -28,7 +28,7 @@ import { generateClient } from 'aws-amplify/data';
 import { getAmplifyDataClientConfig } from '@aws-amplify/backend/function/runtime';
 import type { Schema } from '../../data/resource';
 import { cognito, emailDe } from '../shared/cognito';
-import { accionNotificaciones } from '../shared/push';
+import { accionNotificaciones, enviarAUsuario } from '../shared/push';
 import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
@@ -40,11 +40,13 @@ import { MIN_CUOTAS_DEFECTO, jsonCorte, type AccesoCorte, type Corte, type Crite
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL, tipoDeCargo } from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
 import { SITIO_CORREO, enviarPlantilla, enviarVarios } from '../shared/correo';
-import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento } from '../shared/plantillas-correo';
+import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento, correoReporte, correoReporteResuelto } from '../shared/plantillas-correo';
+import { ESTADOS_REPORTE, REPORTES_CORREO, avisoResuelto, MAX_IMAGENES_REPORTE, MIN_TEXTO_REPORTE, TIPOS_REPORTE, esDesarrollador, type EstadoReporte, type TipoReporte } from '../shared/reportes';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
 import { listaJson, type FotoReporte } from '../shared/proveedores';
 import { MODELOS_FIRMADOS, anotar, firmanteActual, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { MOTIVOS_EDICION, edicionesDe, type Edicion } from '../shared/ediciones';
+import { ajusteDe, conceptoPendiente, favorAUsar, r2, repartirPago, type Excedente, type Faltante } from '../shared/pagos';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -690,6 +692,25 @@ function conEdicion(actual: Item, nuevos: Item, m: { motivo: string; detalle: st
   const f = firmanteActual()!;
   const e: Edicion = { en: now(), por: { id: f.id, nombre: f.nombre, email: f.email ?? null, rol: f.rol }, ...m, accion, cambios };
   return { ...nuevos, ediciones: JSON.stringify([...edicionesDe(actual.ediciones), e]) };
+}
+
+/** Suma (o resta, con negativo) al saldo a favor de la unidad; nunca lo deja negativo. */
+async function moverSaldoFavor(unidadId: string, delta: number) {
+  if (!delta) return;
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: table('Unidad'),
+        Key: { id: unidadId },
+        UpdateExpression: 'SET saldoFavor = if_not_exists(saldoFavor, :cero) + :d, updatedAt = :ts',
+        ConditionExpression: delta < 0 ? 'saldoFavor >= :min' : 'attribute_exists(id)',
+        ExpressionAttributeValues: { ':cero': 0, ':d': r2(delta), ':ts': now(), ...(delta < 0 ? { ':min': r2(-delta) } : {}) },
+      }),
+    );
+  } catch (err: any) {
+    if (err?.name === 'ConditionalCheckFailedException') fail('El saldo a favor de la unidad cambió. Vuelve a abrir el comprobante.');
+    throw err;
+  }
 }
 
 const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
@@ -1617,6 +1638,110 @@ function confirmarNombre(c: Item, p: Item) {
   if (!norm(p.confirmacion) || norm(p.confirmacion) !== norm(c.nombre)) fail('Escribe el nombre exacto del condominio para confirmar.');
 }
 
+// ---------- reportes de fallas y solicitudes de mejora (botón flotante del panel; shared/reportes.ts) ----------
+const exigirDesarrollador = (yo: Yo) => {
+  if (!esDesarrollador(yo.email)) fail('Solo el desarrollador atiende los reportes.');
+};
+
+/** Reporte con URLs firmadas de sus imágenes (válidas 15 minutos). */
+async function conImagenesReporte(r: Item) {
+  const imagenes = await Promise.all(
+    ((r.imagenes ?? []) as string[]).map((k) => getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: k }), { expiresIn: 900 })),
+  );
+  return { ...r, imagenUrls: imagenes };
+}
+
+const accionesReportes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // URL firmada para subir una imagen del reporte a la carpeta de quien reporta.
+  async 'reportes.subirImagen'(p, yo) {
+    const nombre = str(p.nombre, 120).normalize('NFD').replace(/[^\w.-]+/g, '_') || 'captura.jpg';
+    const ext = nombre.split('.').pop()?.toLowerCase() ?? '';
+    if (!TIPOS_FOTO[ext]) fail('Adjunta una imagen (JPG, PNG, WEBP o HEIC).');
+    if (!(Number(p.tamano) > 0) || Number(p.tamano) > 10 * 1024 * 1024) fail('Cada imagen debe pesar máximo 10 MB.');
+    const path = `reportes/${yo.sub}/${randomUUID()}-${nombre}`;
+    const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.BUCKET!, Key: path, ContentType: TIPOS_FOTO[ext] }), { expiresIn: 600 });
+    return { url, path, contentType: TIPOS_FOTO[ext] };
+  },
+
+  // Guarda el reporte y avisa al desarrollador (notificación y correo).
+  async 'reportes.crear'(p, yo) {
+    const tipo = str(p.tipo, 10) as TipoReporte;
+    if (!TIPOS_REPORTE[tipo]) fail('Elige si es una falla o una mejora.');
+    const texto = str(p.texto, 4000);
+    if (texto.length < MIN_TEXTO_REPORTE) fail('Describe con un poco más de detalle (mínimo 10 caracteres).');
+    const imagenes: string[] = (Array.isArray(p.imagenes) ? p.imagenes : []).map((x: unknown) => str(x, 400)).filter(Boolean);
+    if (imagenes.length > MAX_IMAGENES_REPORTE) fail(`Máximo ${MAX_IMAGENES_REPORTE} imágenes por reporte.`);
+    if (imagenes.some((k) => !k.startsWith(`reportes/${yo.sub}/`))) fail('Imagen no válida.');
+    const condo = str(p.condominioId, 64) ? await get('Condominio', { id: str(p.condominioId, 64) }) : undefined;
+    const r = await put('Reporte', {
+      tipo,
+      estado: 'NUEVO',
+      texto,
+      imagenes,
+      pagina: str(p.pagina, 80) || null,
+      condominioId: condo?.id ?? null,
+      condominioNombre: condo?.nombre ?? null,
+      porId: yo.sub,
+      porNombre: yo.nombre || null,
+      porEmail: yo.email,
+      porRol: yo.superadmin ? 'Superadministrador' : yo.rolNombre,
+      navegador: str(p.navegador, 300) || null,
+    });
+    const por = `${yo.nombre || yo.email}${yo.nombre ? ` (${yo.email})` : ''}`;
+    const tipoTxt = TIPOS_REPORTE[tipo].corto === 'Falla' ? 'Falla reportada' : 'Mejora solicitada';
+    const url = `${SITIO_CORREO}/admin/?abrir=1#/reportes`;
+    // Los reportes de las pruebas automáticas (@e2e.siia.casa) no avisan al desarrollador.
+    if (yo.email.endsWith('@e2e.siia.casa')) return r;
+    const dev = (await scan('Perfil')).find((x) => esDesarrollador(x.email));
+    await Promise.all([
+      dev ? enviarAUsuario(dev.userId, { title: `${tipoTxt}: ${yo.nombre || yo.email}`, body: texto.slice(0, 140), url: '/admin/?abrir=1#/reportes', tag: `reporte-${r.id}` }).catch(() => 0) : 0,
+      enviarPlantilla(
+        REPORTES_CORREO,
+        correoReporte({ tipo: tipoTxt, texto, por, condominio: condo?.nombre, pagina: str(p.pagina, 80), imagenes: imagenes.length, url }),
+      ),
+    ]);
+    return r;
+  },
+
+  // Lo que reportó quien llama, con su estado y la respuesta.
+  async 'reportes.mios'(_p, yo) {
+    const mios = (await scan('Reporte')).filter((r) => r.porId === yo.sub).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return Promise.all(mios.slice(0, 50).map(conImagenesReporte));
+  },
+
+  // Todos los reportes (solo el desarrollador).
+  async 'reportes.lista'(_p, yo) {
+    exigirDesarrollador(yo);
+    const todos = (await scan('Reporte')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return Promise.all(todos.map(conImagenesReporte));
+  },
+
+  // El desarrollador cambia el estado y responde; quien lo envió recibe una notificación.
+  async 'reportes.atender'(p, yo) {
+    exigirDesarrollador(yo);
+    const r = await get('Reporte', { id: str(p.id, 64) });
+    if (!r) fail('Reporte no encontrado.');
+    const estado = str(p.estado, 20) as EstadoReporte;
+    if (!ESTADOS_REPORTE[estado]) fail('Estado no válido.');
+    const respuesta = str(p.respuesta, 2000) || null;
+    const nuevo = await update('Reporte', { id: r!.id }, { estado, respuesta, atendidoEn: now() });
+    // Quien lo envió recibe una notificación (y la ve en su campana). Al quedar resuelto: «ya está en producción»
+    // o «ya quedó arreglada», también por correo.
+    if (estado !== r!.estado || respuesta !== (r!.respuesta ?? null)) {
+      const resuelto = estado === 'RESUELTO' && r!.estado !== 'RESUELTO';
+      const que = TIPOS_REPORTE[r!.tipo as TipoReporte]?.corto === 'Falla' ? 'Tu reporte de falla' : 'Tu solicitud de mejora';
+      const titulo = resuelto ? avisoResuelto(r!.tipo) : `${que}: ${ESTADOS_REPORTE[estado]}`;
+      await Promise.all([
+        enviarAUsuario(r!.porId, { title: titulo, body: respuesta ?? r!.texto.slice(0, 140), url: '/admin/?abrir=1#/panel', tag: `reporte-${r!.id}` }).catch(() => 0),
+        resuelto && r!.porEmail
+          ? enviarPlantilla(r!.porEmail, correoReporteResuelto({ titulo, nombre: r!.porNombre, texto: r!.texto, respuesta, url: `${SITIO_CORREO}/admin/` }))
+          : false,
+      ]);
+    }
+    return conImagenesReporte(nuevo);
+  },
+};
+
 const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Permisos efectivos de quien llama (el panel muestra solo lo permitido).
   async yo(_p, yo) {
@@ -1637,6 +1762,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   ...accionesEncuestas,
   ...accionesComunicados,
   ...accionesFinanzas,
+  ...accionesReportes,
 
   // ----- app y notificaciones push (solo categorías que su rol permite) -----
   ...Object.fromEntries(
@@ -1847,7 +1973,9 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   },
 
   // ----- finanzas -----
-  // Valida o rechaza un comprobante. Al validar asigna folio consecutivo por condominio y liquida los cargos.
+  // Valida o rechaza un comprobante. Al validar asigna folio consecutivo por condominio y aplica lo recibido a los
+  // cargos (shared/pagos.ts): la administración confirma el monto del comprobante y, si no cuadra con los cargos,
+  // decide si la diferencia queda pendiente o se condona, o si el excedente pasa al saldo a favor de la unidad.
   async validarPago(p, yo) {
     exigirExtra(yo, 'finanzas.validarPagos');
     const pago = await get('Pago', { id: str(p.pagoId, 64) });
@@ -1873,13 +2001,50 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       });
       return r;
     }
+    // Monto que muestra el comprobante (la administración puede corregir lo que escribió el residente).
+    const monto = p.montoRecibido == null || p.montoRecibido === '' ? pago!.monto : r2(Number(p.montoRecibido));
+    if (!(monto >= 0) || monto > 1_000_000) fail('Indica el monto recibido.');
+    const faltante: Faltante = p.faltante === 'CONDONAR' ? 'CONDONAR' : 'PENDIENTE';
+    const excedente: Excedente = p.excedente === 'INGRESO' ? 'INGRESO' : 'SALDO_FAVOR';
+    // Solo cuentan los cargos que siguen pendientes.
+    const cargos = (await Promise.all((pago!.cargoIds ?? []).map((id: string) => get('Cargo', { id })))).filter(
+      (c): c is Item & { id: string; monto: number; concepto: string } => !!c && c.estado === 'PENDIENTE' && c.unidadId === pago!.unidadId,
+    );
+    const total = r2(cargos.reduce((s, c) => s + c.monto, 0));
+    const unidad = await get('Unidad', { id: pago!.unidadId });
+    const usar = p.usarSaldoFavor ?? pago!.usarSaldoFavor;
+    const favorUsado = usar ? favorAUsar(unidad?.saldoFavor ?? 0, total, monto) : 0;
+    if (!(monto > 0) && !(favorUsado > 0)) fail('Indica el monto recibido.');
+    const plan = repartirPago(cargos, monto + favorUsado);
+    // Lo que sobra puede abonarse a otros cargos pendientes de la unidad (p. ej. pagó cuota y multa en una sola
+    // transferencia pero solo marcó la cuota): primero los que vencen antes; si el último no alcanza, se abona.
+    type CargoX = (typeof cargos)[number];
+    let extra: { pagados: CargoX[]; parcial: { cargo: CargoX; pagado: number; pendiente: number } | null; abonado: number } | null = null;
+    const pedidos: string[] = Array.isArray(p.cargosExtra) ? p.cargosExtra.slice(0, 50).map(String) : [];
+    if (plan.diferencia > 0.004 && pedidos.length) {
+      const propios = new Set(cargos.map((c) => c.id));
+      const otros = (await Promise.all(pedidos.filter((id) => !propios.has(id)).map((id) => get('Cargo', { id })))).filter(
+        (c): c is CargoX => !!c && c.estado === 'PENDIENTE' && c.unidadId === pago!.unidadId,
+      );
+      const pe = repartirPago(otros, plan.diferencia);
+      // Una reserva no se abona a medias: ese dinero se queda como excedente.
+      const parcialExtra = pe.parcial && !pe.parcial.cargo.id.startsWith('reserva#') ? pe.parcial : null;
+      const abonado = r2(pe.pagados.reduce((s, c) => s + c.monto, 0) + (parcialExtra?.pagado ?? 0));
+      if (abonado > 0) extra = { pagados: pe.pagados, parcial: parcialExtra, abonado };
+    }
+    // Excedente que queda después de abonar a otros cargos (va al saldo a favor u otro ingreso).
+    const diferencia = extra ? r2(plan.diferencia - extra.abonado) : plan.diferencia;
+    const ajuste = ajusteDe(diferencia, faltante, excedente);
+    if (ajuste === 'CONDONADO' && (nota ?? '').length < 5) fail('Escribe el motivo por el que se condona la diferencia.');
+    // Si es parcial, se liquidan los cargos completos y se parte uno; los demás siguen pendientes.
+    const liquidados = [...(ajuste === 'PARCIAL' ? plan.pagados : cargos), ...(extra?.pagados ?? [])];
+    const parcial = ajuste === 'PARCIAL' ? plan.parcial : (extra?.parcial ?? null);
+    // Las reservas de amenidades se pagan completas (apartan el horario al aprobar).
+    if (ajuste === 'PARCIAL' && [...(parcial ? [parcial.cargo] : []), ...plan.sinCubrir].some((c) => c.id.startsWith('reserva#')))
+      fail('Las reservas de amenidades se pagan completas. Rechaza el comprobante o pide al residente el pago completo.');
     // Reservas de amenidades que se pagan con este comprobante: se aprueban al validar (bloquean el horario).
     const reservas = (
-      await Promise.all(
-        (pago!.cargoIds ?? [])
-          .filter((id: string) => id.startsWith('reserva#'))
-          .map((id: string) => get('Reserva', { id: id.slice('reserva#'.length) })),
-      )
+      await Promise.all(liquidados.filter((c) => c.id.startsWith('reserva#')).map((c) => get('Reserva', { id: c.id.slice('reserva#'.length) })))
     ).filter((r): r is Item => !!r && r.estado === 'PENDIENTE_PAGO');
     for (const r of reservas) {
       const choque = await choqueAprobado(r);
@@ -1889,7 +2054,26 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
         );
       }
     }
-    await marcar({ estado: 'VALIDADO', nota, validadoPor: yo.email, validadoEn: now() });
+    // El saldo a favor se descuenta antes de marcar el pago (condicional: nunca queda negativo).
+    if (favorUsado > 0) await moverSaldoFavor(pago!.unidadId, -favorUsado);
+    try {
+      await marcar({
+        estado: 'VALIDADO',
+        nota,
+        validadoPor: yo.email,
+        validadoEn: now(),
+        monto,
+        montoDeclarado: monto !== pago!.monto ? pago!.monto : null,
+        saldoFavorUsado: favorUsado || null,
+        totalCargos: total,
+        ajuste,
+        diferencia: ajuste === 'COMPLETO' ? null : Math.abs(diferencia),
+        abonoOtros: extra?.abonado ?? null,
+      });
+    } catch (err) {
+      if (favorUsado > 0) await moverSaldoFavor(pago!.unidadId, favorUsado);
+      throw err;
+    }
     const seq = await ddb.send(
       new UpdateCommand({
         TableName: table('Condominio'),
@@ -1900,18 +2084,102 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       }),
     );
     const folio = `R-${String(seq.Attributes?.folioSeq ?? 1).padStart(5, '0')}`;
-    await Promise.all((pago!.cargoIds ?? []).map((id: string) => update('Cargo', { id }, { estado: 'PAGADO' }).catch(() => undefined)));
-    const r = await update('Pago', { id: pago!.id }, { folio });
+    await Promise.all(liquidados.map((c) => update('Cargo', { id: c.id }, { estado: 'PAGADO' }).catch(() => undefined)));
+    // Pago parcial o abono: el cargo queda pagado por lo abonado y la diferencia pasa a un cargo nuevo, con el mismo tipo y vencimiento.
+    let cargoPendienteId: string | null = null;
+    if (parcial) {
+      const c = parcial.cargo;
+      await update('Cargo', { id: c.id }, { estado: 'PAGADO', monto: parcial.pagado, montoOriginal: c.montoOriginal ?? c.monto });
+      cargoPendienteId = `${pago!.id}#pendiente`;
+      await put('Cargo', {
+        id: cargoPendienteId,
+        condominioId: c.condominioId,
+        unidadId: c.unidadId,
+        concepto: conceptoPendiente(c.concepto),
+        periodo: c.periodo ?? null,
+        monto: parcial.pendiente,
+        vence: c.vence ?? null,
+        estado: 'PENDIENTE',
+        tipo: tipoDeCargo(c as { id: string; tipo?: string }),
+        origenCargoId: c.id,
+      });
+    }
+    if (ajuste === 'SALDO_FAVOR') await moverSaldoFavor(pago!.unidadId, diferencia);
+    const r = await update(
+      'Pago',
+      { id: pago!.id },
+      { folio, cargoIds: [...liquidados.map((c) => c.id), ...(parcial ? [parcial.cargo.id] : [])], cargoPendienteId },
+    );
     for (const x of reservas) await confirmarReserva(x, 'Tu reserva quedó confirmada');
+    // Aviso al residente: aprobado y, si no cuadró, cuánto quedó pendiente, a qué se abonó o cuánto tiene a favor.
+    const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
+    const recibido = monto > 0 ? `Aprobamos tu pago por ${mxn(monto)}` : `Aplicamos ${mxn(favorUsado)} de tu saldo a favor`;
+    const conFavor = monto > 0 && favorUsado > 0 ? ` y usamos ${mxn(favorUsado)} de tu saldo a favor` : '';
+    const saldoNuevo = r2((unidad?.saldoFavor ?? 0) - favorUsado + (ajuste === 'SALDO_FAVOR' ? diferencia : 0));
+    const abono = extra
+      ? ` Con lo que sobró abonamos ${mxn(extra.abonado)} a: ${[...extra.pagados, ...(extra.parcial ? [extra.parcial.cargo] : [])].map((c) => c.concepto).join(', ')}.${
+          extra.parcial ? ` De ${extra.parcial.cargo.concepto} queda pendiente ${mxn(extra.parcial.pendiente)}.` : ''
+        }`
+      : '';
+    const cargoTxt = total ? `Tu cargo de ${mxn(total)} quedó cubierto.` : '';
+    const detalle = {
+      COMPLETO: `${recibido}${conFavor}. ${cargoTxt}${abono}`,
+      PARCIAL:
+        monto > 0
+          ? `${recibido}${conFavor}, pero tu cargo era de ${mxn(total)}: tu pago fue por una cantidad menor y queda pendiente ${mxn(plan.pendiente)}. Lo ves en Finanzas.`
+          : `${recibido} a tu cargo de ${mxn(total)}; queda pendiente ${mxn(plan.pendiente)}. Lo ves en Finanzas.`,
+      CONDONADO: `${recibido}${conFavor}. Tu cargo era de ${mxn(total)} y la administración dio por liquidada la diferencia de ${mxn(plan.pendiente)}.`,
+      SALDO_FAVOR:
+        total || extra
+          ? `${recibido}${conFavor}.${total ? ` Tu cargo fue por ${mxn(total)}.` : ''}${abono} Tienes un saldo a favor de ${mxn(saldoNuevo)}, que se aplicará a tus próximos pagos.`
+          : `${recibido}. Quedó como saldo a favor: ahora tienes ${mxn(saldoNuevo)} a favor, que se aplicará a tus próximos pagos.`,
+      EXCEDENTE: `${recibido}${conFavor}.${total ? ` Tu cargo fue por ${mxn(total)}.` : ''}${abono} El excedente de ${mxn(diferencia)} quedó registrado como ingreso del condominio.`,
+    }[ajuste].replace(/\s+/g, ' ').trim();
     await put('Aviso', {
       condominioId: pago!.condominioId,
       unidadId: pago!.unidadId,
       tipo: 'PAGO',
-      titulo: `Tu pago fue aprobado · recibo ${folio}`,
-      texto: `Aprobamos tu pago por ${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(pago!.monto)}. Ya puedes descargar tu recibo en Finanzas.`,
+      titulo: `${ajuste === 'PARCIAL' ? (monto > 0 ? 'Pago parcial aprobado' : 'Abonamos tu saldo a favor') : 'Tu pago fue aprobado'} · recibo ${folio}`,
+      texto: `${detalle}${nota && ajuste !== 'CONDONADO' ? ` Nota: ${nota}.` : ''} Ya puedes descargar tu recibo en Finanzas.`,
       leido: false,
     });
     return r;
+  },
+
+  // Pagar uno o varios cargos pendientes con el saldo a favor de la unidad (sin comprobante): queda como un pago
+  // aprobado por $0 que usa el saldo a favor, primero los que vencen antes; si no alcanza, el último se abona.
+  async 'saldoFavor.aplicar'(p, yo) {
+    exigirExtra(yo, 'finanzas.validarPagos');
+    const ids: string[] = (Array.isArray(p.cargoIds) ? p.cargoIds : [p.cargoId]).map((x: unknown) => str(x, 200)).filter(Boolean).slice(0, 50);
+    if (!ids.length) fail('Indica el cargo.');
+    const cargos = await Promise.all(ids.map((id) => get('Cargo', { id })));
+    if (cargos.some((c) => !c)) fail('Cargo no encontrado.');
+    const unidadId = cargos[0]!.unidadId;
+    for (const c of cargos) {
+      exigirCondo(yo, c!.condominioId);
+      if (c!.unidadId !== unidadId) fail('Los cargos deben ser de la misma casa o departamento.');
+      if (c!.estado !== 'PENDIENTE') fail('El cargo ya no está pendiente.');
+    }
+    const unidad = await get('Unidad', { id: unidadId });
+    if (!((unidad?.saldoFavor ?? 0) > 0)) fail('Esta casa o departamento no tiene saldo a favor.');
+    const plan = repartirPago(cargos as (Item & { id: string; monto: number; concepto: string })[], unidad!.saldoFavor);
+    if (plan.parcial?.cargo.id.startsWith('reserva#')) fail('El saldo a favor no alcanza para pagar la reserva completa.');
+    const pago = await put('Pago', {
+      condominioId: cargos[0]!.condominioId,
+      unidadId,
+      monto: 0,
+      fecha: hoyMX(),
+      referencia: 'Saldo a favor',
+      cargoIds: ids,
+      usarSaldoFavor: true,
+      estado: 'EN_REVISION',
+    });
+    try {
+      return await acciones.validarPago({ pagoId: pago.id, aprobar: true, usarSaldoFavor: true, faltante: 'PENDIENTE' }, yo);
+    } catch (err) {
+      await remove('Pago', { id: pago.id }).catch(() => undefined);
+      throw err;
+    }
   },
 
   // Genera la cuota del periodo para cada unidad con cuota > 0 (idempotente por unidad y periodo).

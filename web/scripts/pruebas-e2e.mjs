@@ -204,6 +204,8 @@ async function limpiar() {
     (x) => x.condominioId === 'GLOBAL' && (String(x.porEmail ?? '').endsWith(`@${DOMINIO}`) || (x.accion === 'condominios.purgar' && String(x.resumen).includes(SUFIJO))),
   );
   await borrarItems('Actividad', actividadGlobal.map((x) => ({ id: x.id })));
+  const reportes = (await scanTodo('Reporte')).filter((x) => String(x.porEmail ?? '').endsWith(`@${DOMINIO}`));
+  await borrarItems('Reporte', reportes.map((x) => ({ id: x.id })));
   const roles = (await scanTodo('RolAdmin')).filter((r) => String(r.nombre).startsWith('E2E '));
   await borrarItems('RolAdmin', roles.map((r) => ({ id: r.id })));
 
@@ -554,6 +556,111 @@ try {
     esperar(a.avisos.some((v) => v.titulo === 'Tu pago no fue aprobado'), 'sin aviso de rechazo');
   });
 
+  await prueba('Pago menor al cargo: pago parcial y la diferencia queda pendiente', async () => {
+    const e = await ok(r2.portal('finanzas.estadoCuenta'));
+    const c = e.cargos.find((x) => x.estado === 'PENDIENTE' && x.id.endsWith('#cuota'));
+    esperar(c, 'Casa 2 sin cuota pendiente');
+    X.cuotaR2 = c;
+    const key = await r2.subir('comprobantes', 'parcial.pdf', '%PDF-1.4 parcial', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: c.monto - 50, comprobantePath: key, cargoIds: [c.id] }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.cargos.some((y) => y.origenCargoId === c.id));
+    const orig = d.cargos.find((y) => y.id === c.id);
+    const resto = d.cargos.find((y) => y.origenCargoId === c.id);
+    const pago = d.pagos.find((y) => y.id === p.id);
+    X.restoR2 = resto.id;
+    esperar(
+      orig.estado === 'PAGADO' && orig.monto === c.monto - 50 && orig.montoOriginal === c.monto && resto.estado === 'PENDIENTE' && resto.monto === 50 && resto.vence === c.vence,
+      JSON.stringify({ orig, resto }),
+    );
+    esperar(pago.ajuste === 'PARCIAL' && pago.diferencia === 50 && pago.cargoPendienteId === resto.id, JSON.stringify(pago));
+    const a = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.titulo.startsWith('Pago parcial aprobado')));
+    esperar(a.avisos.find((v) => v.titulo.startsWith('Pago parcial aprobado')).texto.includes('queda pendiente $50.00'), 'aviso sin el pendiente');
+    return `abono $${c.monto - 50}, pendiente $50 (${resto.concepto})`;
+  });
+  await prueba('Pago mayor al cargo: el excedente queda como saldo a favor', async () => {
+    const key = await r2.subir('comprobantes', 'favor.pdf', '%PDF-1.4 favor', 'application/pdf');
+    // El residente escribió $50, pero el comprobante dice $80: la contadora corrige el monto al aprobar.
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 50, comprobantePath: key, cargoIds: [X.restoR2] }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true, montoRecibido: 80 }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.saldoFavor === 30);
+    const pago = d.pagos.find((y) => y.id === p.id);
+    esperar(d.saldoFavor === 30 && pago.monto === 80 && pago.montoDeclarado === 50 && pago.ajuste === 'SALDO_FAVOR', JSON.stringify(pago));
+    const a = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.texto.includes('saldo a favor de $30.00')));
+    esperar(a.avisos.some((v) => v.texto.includes('Tu cargo fue por $50.00')), 'aviso sin el cargo');
+    return 'saldo a favor $30';
+  });
+  await prueba('El saldo a favor paga un cargo sin comprobante', async () => {
+    const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Llave extra', monto: 20, vence: manana, periodo, tipo: 'OTRO' } }));
+    await bloqueado(r2.portal('finanzas.registrarPago', { monto: 0, comprobantePath: 'x', cargoIds: [c.id] }));
+    const p = await ok(ct.admin('saldoFavor.aplicar', { cargoId: c.id }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.saldoFavor === 10);
+    esperar(p.folio && d.cargos.find((y) => y.id === c.id).estado === 'PAGADO' && d.pagos.find((y) => y.id === p.id).saldoFavorUsado === 20, JSON.stringify(p));
+    return `recibo ${p.folio}, quedan $10 a favor`;
+  });
+  await prueba('El saldo a favor completa un comprobante menor al cargo', async () => {
+    const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Tarjeta de acceso', monto: 100, vence: manana, periodo, tipo: 'OTRO' } }));
+    const key = await r2.subir('comprobantes', 'tarjeta.pdf', '%PDF-1.4 tarjeta', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 90, comprobantePath: key, cargoIds: [c.id], usarSaldoFavor: true }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.saldoFavor === 0);
+    const pago = d.pagos.find((y) => y.id === p.id);
+    esperar(d.cargos.find((y) => y.id === c.id).estado === 'PAGADO' && pago.ajuste === 'COMPLETO' && pago.saldoFavorUsado === 10, JSON.stringify(pago));
+  });
+  await prueba('Condonar la diferencia pide motivo', async () => {
+    const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Cuota de jardín', monto: 100, vence: manana, periodo, tipo: 'OTRO' } }));
+    const key = await r2.subir('comprobantes', 'jardin.pdf', '%PDF-1.4 jardin', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 98, comprobantePath: key, cargoIds: [c.id] }));
+    await bloqueado(ct.admin('validarPago', { pagoId: p.id, aprobar: true, faltante: 'CONDONAR' }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true, faltante: 'CONDONAR', nota: 'Comisión bancaria' }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.cargos.some((y) => y.id === c.id && y.estado === 'PAGADO'));
+    const pago = d.pagos.find((y) => y.id === p.id);
+    esperar(pago.ajuste === 'CONDONADO' && pago.diferencia === 2 && !d.cargos.some((y) => y.origenCargoId === c.id), JSON.stringify(pago));
+  });
+
+  const cargoR2 = (concepto, monto) =>
+    ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto, monto, vence: manana, periodo, tipo: 'OTRO' } }));
+  await prueba('Un solo pago para varios cargos: el excedente se abona a otro cargo pendiente', async () => {
+    const a = await cargoR2('Cuota de alberca', 100);
+    const b = await cargoR2('Multa por basura', 50);
+    const key = await r2.subir('comprobantes', 'todo.pdf', '%PDF-1.4 todo', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 150, comprobantePath: key, cargoIds: [a.id] }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true, cargosExtra: [b.id] }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.cargos.some((y) => y.id === b.id && y.estado === 'PAGADO'));
+    const pago = d.pagos.find((y) => y.id === p.id);
+    esperar(d.cargos.find((y) => y.id === a.id).estado === 'PAGADO' && pago.ajuste === 'COMPLETO' && pago.abonoOtros === 50 && pago.cargoIds.length === 2 && d.saldoFavor === 0, JSON.stringify(pago));
+    const av = await hasta(() => ok(r2.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.texto.includes('abonamos $50.00 a: Multa por basura')));
+    esperar(av, 'sin aviso del abono');
+    return 'cuota y multa pagadas con un comprobante';
+  });
+  await prueba('Si el excedente no alcanza el otro cargo, se abona y queda pendiente la diferencia', async () => {
+    const a = await cargoR2('Cuota de gimnasio', 100);
+    const b = await cargoR2('Reposición de control', 80);
+    const key = await r2.subir('comprobantes', 'abono.pdf', '%PDF-1.4 abono', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 150, comprobantePath: key, cargoIds: [a.id] }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true, cargosExtra: [b.id] }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.cargos.some((y) => y.origenCargoId === b.id));
+    const resto = d.cargos.find((y) => y.origenCargoId === b.id);
+    const orig = d.cargos.find((y) => y.id === b.id);
+    esperar(orig.estado === 'PAGADO' && orig.monto === 50 && resto.monto === 30 && resto.estado === 'PENDIENTE' && d.saldoFavor === 0, JSON.stringify({ orig, resto }));
+    return 'abono $50, pendiente $30';
+  });
+  await prueba('El saldo a favor se abona a varios cargos pendientes', async () => {
+    const key = await r2.subir('comprobantes', 'cuenta.pdf', '%PDF-1.4 cuenta', 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 40, comprobantePath: key }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true }));
+    await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.saldoFavor === 40);
+    const e = await cargoR2('Copia de llave', 30);
+    const f = await cargoR2('Calcomanía de auto', 30);
+    const r = await ok(ct.admin('saldoFavor.aplicar', { cargoIds: [e.id, f.id] }));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => x.saldoFavor === 0);
+    // Mismo vencimiento: uno se paga completo y el otro se abona (quedan $20 pendientes).
+    const resto = d.cargos.find((y) => y.origenCargoId === e.id || y.origenCargoId === f.id);
+    const ambos = d.cargos.filter((y) => y.id === e.id || y.id === f.id);
+    esperar(r.folio && ambos.every((y) => y.estado === 'PAGADO') && resto?.monto === 20, JSON.stringify({ ambos, resto }));
+    return `recibo ${r.folio}: $30 + $10, quedan $20 pendientes`;
+  });
+
   // =====================================================================
   grupo('Finanzas: egresos con evidencia y balance mensual');
   const subirEvidencia = async (sesion, nombre, tipo, contenido) => {
@@ -839,13 +946,21 @@ try {
   await prueba('Alta de amenidades (con y sin aprobación)', async () => {
     const a1 = await ok(ag.db('Amenidad', 'create', { input: { condominioId: X.robles, nombre: 'Salón de eventos', horaApertura: '10:00', horaCierre: '22:00', maxHoras: 5, capacidad: 50, costo: 800, requiereAprobacion: true, activa: true } }));
     const a2 = await ok(ag.db('Amenidad', 'create', { input: { condominioId: X.robles, nombre: 'Asador', horaApertura: '09:00', horaCierre: '21:00', maxHoras: 3, requiereAprobacion: false, activa: true } }));
+    const a3 = await ok(ag.db('Amenidad', 'create', { input: { condominioId: X.robles, nombre: 'Terraza', horaApertura: '09:00', horaCierre: '22:00', maxHoras: 4, requiereAprobacion: true, activa: true } }));
     X.salon = a1.id;
     X.asador = a2.id;
+    X.terraza = a3.id;
   });
-  await prueba('Reserva que requiere aprobación queda solicitada', async () => {
-    const r = await ok(r1.portal('amenidades.reservar', { amenidadId: X.salon, fecha: manana, horaInicio: '14:00', horaFin: '18:00', invitados: 30, nota: 'Cumpleaños' }));
+  await prueba('Reserva con costo queda pendiente de pago, con su cargo, y aparta el horario', async () => {
+    const [r] = await ok(r1.portal('amenidades.reservar', { amenidadId: X.salon, fecha: manana, horaInicio: '14:00', horaFin: '18:00', invitados: 30, nota: 'Cumpleaños' }));
     X.reserva = r.id;
-    esperar(r.estado === 'SOLICITADA', r.estado);
+    esperar(r.estado === 'PENDIENTE_PAGO', r.estado);
+    const e = await hasta(() => ok(r1.portal('finanzas.estadoCuenta')), (x) => x.cargos.some((c) => c.id === `reserva#${r.id}`));
+    const c = e.cargos.find((x) => x.id === `reserva#${r.id}`);
+    esperar(c.monto === 800 && c.estado === 'PENDIENTE', JSON.stringify(c));
+    const a = await hasta(() => ok(r1.portal('inicio.avisos')), (x) => x.avisos.some((v) => v.tipo === 'RESERVA'));
+    esperar(a.avisos.some((v) => v.titulo.startsWith('Reserva pendiente de pago')), 'sin aviso de pago pendiente');
+    return 'cargo $800 en su estado de cuenta';
   });
   await prueba('Reglas de reserva: horario ocupado, fuera de horario, máx. horas y capacidad', async () => {
     await bloqueado(r2.portal('amenidades.reservar', { amenidadId: X.salon, fecha: manana, horaInicio: '17:00', horaFin: '19:00' }));
@@ -853,14 +968,24 @@ try {
     await bloqueado(r2.portal('amenidades.reservar', { amenidadId: X.salon, fecha: manana, horaInicio: '10:00', horaFin: '16:00' }));
     return bloqueado(r2.portal('amenidades.reservar', { amenidadId: X.salon, fecha: manana, horaInicio: '19:00', horaFin: '21:00', invitados: 80 }));
   });
-  await prueba('Administrador aprueba la reserva', async () => {
-    await ok(ag.db('Reserva', 'update', { input: { id: X.reserva, estado: 'APROBADA' } }));
+  await prueba('Reserva con costo no se aprueba a mano: se confirma al aprobar su comprobante', async () => {
+    await bloqueado(ag.db('Reserva', 'update', { input: { id: X.reserva, estado: 'APROBADA' } }));
+    const key = await r1.subir('comprobantes', 'salon.pdf', '%PDF-1.4 salon', 'application/pdf');
+    const p = await ok(r1.portal('finanzas.registrarPago', { monto: 800, comprobantePath: key, cargoIds: [`reserva#${X.reserva}`] }));
+    await ok(ct.admin('validarPago', { pagoId: p.id, aprobar: true }));
     const d = await hasta(() => ok(r2.portal('amenidades.disponibilidad', { amenidadId: X.salon, fecha: manana })), (x) => x[0]?.estado === 'APROBADA');
     esperar(d.length === 1 && d[0].estado === 'APROBADA', JSON.stringify(d));
     return 'el vecino ve el horario ocupado';
   });
+  await prueba('Reserva gratuita que requiere aprobación queda solicitada y el administrador la aprueba', async () => {
+    const [r] = await ok(r1.portal('amenidades.reservar', { amenidadId: X.terraza, fecha: manana, horaInicio: '10:00', horaFin: '12:00' }));
+    esperar(r.estado === 'SOLICITADA', r.estado);
+    await ok(ag.db('Reserva', 'update', { input: { id: r.id, estado: 'APROBADA' } }));
+    const d = await hasta(() => ok(r2.portal('amenidades.disponibilidad', { amenidadId: X.terraza, fecha: manana })), (x) => x[0]?.estado === 'APROBADA');
+    esperar(d.length === 1 && d[0].horaInicio === '10:00', JSON.stringify(d));
+  });
   await prueba('Reserva con confirmación automática y cancelación', async () => {
-    const r = await ok(r2.portal('amenidades.reservar', { amenidadId: X.asador, fecha: manana, horaInicio: '13:00', horaFin: '15:00' }));
+    const [r] = await ok(r2.portal('amenidades.reservar', { amenidadId: X.asador, fecha: manana, horaInicio: '13:00', horaFin: '15:00' }));
     esperar(r.estado === 'APROBADA', r.estado);
     await bloqueado(r1.portal('amenidades.cancelar', { reservaId: r.id }));
     const c = await ok(r2.portal('amenidades.cancelar', { reservaId: r.id }));
@@ -1154,7 +1279,8 @@ try {
     esperar(await notificado(ag), 'sin envío por la mascota');
     await registrar(ag);
     const pasado = new Date(Date.parse(`${manana}T12:00:00Z`) + 86400000).toISOString().slice(0, 10);
-    await ok(r2.portal('amenidades.reservar', { amenidadId: X.salon, fecha: pasado, horaInicio: '12:00', horaFin: '14:00' }));
+    // Solo las reservas por aprobar avisan a la administración (las de costo se revisan con su comprobante).
+    await ok(r2.portal('amenidades.reservar', { amenidadId: X.terraza, fecha: pasado, horaInicio: '12:00', horaFin: '14:00' }));
     esperar(await notificado(ag), 'sin envío por la reserva');
   });
 
@@ -1392,6 +1518,40 @@ try {
     }
     return bloqueado(sesiones.op2.admin('yo'));
   });
+  // =====================================================================
+  grupo('Botón flotante: reportar fallas y solicitar mejoras');
+  await prueba('Un administrador reporta una falla con imagen', async () => {
+    const img = await ok(ct.admin('reportes.subirImagen', { nombre: 'captura-e2e-falla.png', tamano: 12 }));
+    esperar(img.path.startsWith('reportes/'), img.path);
+    const put = await fetch(img.url, { method: 'PUT', headers: { 'Content-Type': img.contentType }, body: 'png de prueba' });
+    esperar(put.ok, `PUT ${put.status}`);
+    const r = await ok(ct.admin('reportes.crear', { tipo: 'FALLA', texto: 'El botón de Excel no descarga nada (prueba e2e).', imagenes: [img.path], pagina: 'Finanzas', condominioId: X.robles }));
+    X.reporte = r.id;
+    esperar(r.estado === 'NUEVO' && r.porEmail === E('contador') && r.condominioNombre?.endsWith(SUFIJO), JSON.stringify(r).slice(0, 160));
+  });
+  await prueba('Solicitud de mejora sin imágenes; texto muy corto o tipo inválido se rechazan', async () => {
+    await bloqueado(ct.admin('reportes.crear', { tipo: 'MEJORA', texto: 'corto' }));
+    await bloqueado(ct.admin('reportes.crear', { tipo: 'OTRO', texto: 'Un texto suficientemente largo' }));
+    await ok(ct.admin('reportes.crear', { tipo: 'MEJORA', texto: 'Poder filtrar los cargos por mes (prueba e2e).' }));
+  });
+  await prueba('No se pueden adjuntar imágenes de otra persona', async () => {
+    const img = await ok(ag.admin('reportes.subirImagen', { nombre: 'ajena-e2e.png', tamano: 10 }));
+    return bloqueado(ct.admin('reportes.crear', { tipo: 'FALLA', texto: 'Intento con imagen ajena e2e', imagenes: [img.path] }));
+  });
+  await prueba('Quien reporta ve sus reportes con estado e imágenes', async () => {
+    const l = await ok(ct.admin('reportes.mios'));
+    const r = l.find((x) => x.id === X.reporte);
+    esperar(l.length === 2 && r?.imagenUrls.length === 1, JSON.stringify(l).slice(0, 160));
+    const img = await fetch(r.imagenUrls[0]);
+    esperar(img.ok && (await img.text()) === 'png de prueba', `HTTP ${img.status}`);
+    esperar(!(await ok(ag.admin('reportes.mios'))).some((x) => x.id === X.reporte), 'otro administrador ve el reporte ajeno');
+  });
+  await prueba('Solo el desarrollador ve y atiende todos los reportes', async () => {
+    await bloqueado(sa.admin('reportes.lista'));
+    await bloqueado(ct.admin('reportes.lista'));
+    return bloqueado(sa.admin('reportes.atender', { id: X.reporte, estado: 'RESUELTO', respuesta: 'listo' }));
+  });
+
   // =====================================================================
   grupo('Proveedores: bitácora de trabajo con fotos');
   const mesActual = hoy.slice(0, 7);

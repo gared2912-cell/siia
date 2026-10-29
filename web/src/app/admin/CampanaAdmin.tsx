@@ -3,7 +3,7 @@
 // sección donde se atiende y, una vez visto, desaparece de la campana. Excepción: las cotizaciones del sitio web
 // (de todos los condominios) siguen en la campana hasta que alguien las marca «Respondido al solicitante».
 import { useMemo } from 'react';
-import { all, db, type Schema } from '../api';
+import { adminCall, all, db, type Schema } from '../api';
 import { money, useLoad, usePoll } from '../ui';
 import { Campana, useVistos, type ItemCampana } from '../Campana';
 import { useInsigniaApp } from '../AppMovil';
@@ -11,11 +11,15 @@ import { useInsigniaApp } from '../AppMovil';
 export const VISTOS_ADMIN = 'siia-vistos-admin';
 import { useAdmin } from './AdminApp';
 import { listaCotizaciones, resumenCotizacion, type Cotizacion } from './Cotizaciones';
+import { EVENTO_MIS_REPORTES, type ReporteVista } from './BotonReporte';
+import { ESTADOS_REPORTE, TIPOS_REPORTE, avisoResuelto, esDesarrollador } from '../../../amplify/functions/shared/reportes';
 
 type Mensaje = Schema['Mensaje']['type'];
 
 export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensajes: Mensaje[] }) {
-  const { condo, puede, tiene, etiqueta, superadmin } = useAdmin();
+  const { condo, puede, tiene, etiqueta, superadmin, yo } = useAdmin();
+  // Respuestas a mis reportes de fallas y mejoras (el desarrollador no reporta: él los atiende).
+  const reporta = !esDesarrollador(yo);
   const vistos = useVistos(VISTOS_ADMIN);
   const id = condo?.id ?? '';
   // Solo se consultan las secciones que el rol puede ver (igual que el Panel).
@@ -33,9 +37,10 @@ export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensaj
       si(enCondo && puede('usuarios'), () => all((o) => db.models.Perfil.list(o))),
       veCotizaciones ? listaCotizaciones() : Promise.resolve([] as Cotizacion[]),
     ]);
-    return { pagos, reservas, mascotas, incidentes, perfiles, cotizaciones };
+    const reportes = reporta ? await adminCall<ReporteVista[]>('reportes.mios').catch(() => [] as ReporteVista[]) : [];
+    return { pagos, reservas, mascotas, incidentes, perfiles, cotizaciones, reportes };
   }, [id, enCondo]);
-  usePoll(() => datos.reload(true), 60000, !!id || veCotizaciones);
+  usePoll(() => datos.reload(true), 60000, !!id || veCotizaciones || reporta);
 
   const items = useMemo<ItemCampana[]>(() => {
     const d = datos.data;
@@ -58,6 +63,18 @@ export function CampanaAdmin({ go, mensajes }: { go: (k: string) => void; mensaj
       for (const p of d.perfiles.filter((x) => x.estado === 'PENDIENTE' && x.condominioId === id))
         out.push({ id: `perfil-${p.userId}`, icono: 'users', titulo: `Solicitud de acceso: ${p.nombre || p.email}`, texto: p.unidadSolicitada ?? undefined, fecha: p.createdAt, nuevo: true, abrir: () => go('condominios/residentes') });
     }
+    // Mis reportes atendidos: aparecen cada vez que cambian de estado o reciben respuesta; al verlos se van.
+    for (const r of d?.reportes ?? [])
+      if (r.atendidoEn)
+        out.push({
+          id: `reporte-${r.id}-${r.estado}`,
+          icono: r.estado === 'RESUELTO' ? 'check' : 'flag',
+          titulo: r.estado === 'RESUELTO' ? avisoResuelto(r.tipo) : `${TIPOS_REPORTE[r.tipo]?.corto ?? 'Reporte'}: ${ESTADOS_REPORTE[r.estado]}`,
+          texto: r.respuesta || r.texto.slice(0, 90),
+          fecha: r.atendidoEn,
+          nuevo: true,
+          abrir: () => window.dispatchEvent(new Event(EVENTO_MIS_REPORTES)),
+        });
     // Cotizaciones pendientes: no se quitan al verlas, solo al marcarlas «Respondido al solicitante».
     const cotizaciones: ItemCampana[] = (d?.cotizaciones ?? [])
       .filter((c) => c.estado === 'PENDIENTE')

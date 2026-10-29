@@ -7,6 +7,9 @@ import { alcanza, type Nivel, type Permisos } from '../../../amplify/functions/s
 import { Acceso, Shell, useHashNav, type NavItem } from '../Shell';
 import { ErrorBox, Field, Icon, Loading, ToastProvider, useLoad, usePoll } from '../ui';
 import { Panel } from './Panel';
+import { BotonReporte } from './BotonReporte';
+import { Reportes } from './Reportes';
+import { esDesarrollador } from '../../../amplify/functions/shared/reportes';
 import { Administradores } from './Administradores';
 import { Condominios } from './Condominios';
 import { FinanzasAdmin } from './FinanzasAdmin';
@@ -93,7 +96,7 @@ function SoloAdmin() {
   return <Admin yo={user?.signInDetails?.loginId ?? ''} mios={mios.data} />;
 }
 
-const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
+const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean; soloDesarrollador?: boolean })[] = [
   { key: 'panel', label: 'Panel', icon: 'home' },
   { key: 'administradores', label: 'Administradores', icon: 'shield', global: true, soloSuper: true },
   { key: 'condominios', label: 'Condominios', icon: 'building', global: true },
@@ -109,6 +112,7 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean })[] = [
   { key: 'mascotas', label: 'Mascotas', icon: 'paw' },
   { key: 'proveedores', label: 'Proveedores', icon: 'package' },
   { key: 'actividad', label: 'Actividad', icon: 'clock', soloSuper: true },
+  { key: 'reportes', label: 'Reportes y mejoras', icon: 'flag', global: true, soloDesarrollador: true },
 ];
 
 const LS = 'siia-admin-condo';
@@ -119,7 +123,9 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   const tiene = (extra: string) => mios.superadmin || mios.permisos.extras.includes(extra);
   // Condominios incluye a sus residentes: lo ve quien tenga acceso a condominios o a usuarios.
   const visible = (k: string) => k === 'panel' || puede(k) || (k === 'condominios' && puede('usuarios'));
-  const secciones = SECCIONES.filter((s) => (s.soloSuper ? mios.superadmin : visible(s.key)));
+  // El desarrollador (Gared) atiende los reportes y no ve el botón flotante; los demás administradores sí.
+  const desarrollador = esDesarrollador(mios.email);
+  const secciones = SECCIONES.filter((s) => (s.soloDesarrollador ? desarrollador : s.soloSuper ? mios.superadmin : visible(s.key)));
   const condos = useLoad(() => all<Condominio>((o) => db.models.Condominio.list(o)));
   // Una notificación push abre /admin/?c=<condominio>#/sección: ese condominio queda seleccionado.
   const [condoId, setCondoIdState] = useState<string>(() => {
@@ -133,7 +139,9 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   });
   // Al entrar (o recargar) siempre se abre el Panel; una notificación push (?c=…) sí abre su sección.
   useEffect(() => {
-    if (!new URLSearchParams(location.search).get('c')) go('panel');
+    // ?abrir=1: un aviso que lleva a una sección global (p. ej. Reportes y mejoras) sin cambiar de condominio.
+    const q = new URLSearchParams(location.search);
+    if (!q.get('c') && !q.get('abrir')) go('panel');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -255,6 +263,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'panel' && (rapido ? <ResidentesRapido go={go} /> : <Panel go={go} />)}
             {actual === 'administradores' && <Administradores />}
             {actual === 'actividad' && <Actividad />}
+            {actual === 'reportes' && <Reportes />}
             {actual === 'condominios' && <Condominios key={cur} inicio={sub === 'residentes' ? 'residentes' : undefined} />}
             {actual === 'finanzas' && <FinanzasAdmin key={cur} inicio={sub === 'revision' ? 'revision' : undefined} />}
             {actual === 'comunicados' && <ComunicadosAdmin />}
@@ -269,6 +278,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'cotizaciones' && <CotizacionesAdmin key={cur} abrir={sub} />}
           </>
         )}
+        {!desarrollador && <BotonReporte seccion={sec.label} />}
       </Shell>
     </AdminCtx.Provider>
   );

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
-import { Recibo, type ReciboData } from '../Recibo';
+import { Recibo, cargoRecibo, pagoRecibo, type ReciboData } from '../Recibo';
 import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, Tarjetas, fecha, hoy, money, periodoActual, tonoDe, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { HistorialVista } from '../HistorialVista';
@@ -11,6 +11,8 @@ import { fechaIngreso } from './balance';
 import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
 import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
 import { edicionesDe } from '../../../amplify/functions/shared/ediciones';
+import { AprobarPago, cargosDelPago, otrosPendientes } from './AprobarPago';
+import { AJUSTES_PAGO, type AjustePago } from '../../../amplify/functions/shared/pagos';
 import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
 
 type Pago = Schema['Pago']['type'];
@@ -23,7 +25,7 @@ type SaldoMensual = Schema['SaldoMensual']['type'];
 
 /** `inicio`: subpestaña de Ingresos con la que abre (notificación de comprobante → «Por aprobar»). */
 export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
-  const { condo, etiqueta, unidades, puede, tiene, firmaReporte } = useAdmin();
+  const { condo, etiqueta, unidades, puede, tiene, firmaReporte, reloadUnidades } = useAdmin();
   const id = condo!.id;
   const gestiona = puede('finanzas', 'editar');
   const valida = tiene('finanzas.validarPagos');
@@ -45,6 +47,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const [cargo, setCargo] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const [fichaPago, setFichaPago] = useState<Pago | null>(null);
+  const [aprobarPago, setAprobarPago] = useState<Pago | null>(null);
   const [fichaCargo, setFichaCargo] = useState<Cargo | null>(null);
   const [editarCargo, setEditarCargo] = useState<Cargo | null>(null);
   const [cancelarCargo, setCancelarCargo] = useState<Cargo | null>(null);
@@ -64,16 +67,39 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
     .filter((c) => !filtroUnidad || c.unidadId === filtroUnidad)
     .sort((a, b) => String(b.periodo ?? '').localeCompare(String(a.periodo ?? '')) || etiqueta(a.unidadId).localeCompare(etiqueta(b.unidadId), 'es', { numeric: true }));
 
-  const validar = (p: Pago, aprobar: boolean) => {
-    const nota = aprobar ? '' : prompt('Motivo del rechazo (lo verá el residente):');
-    if (!aprobar && nota === null) return;
-    run(() => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => (setFichaPago(null), reload(true))), aprobar ? 'Pago aprobado y recibo emitido; se notificó al residente' : 'Pago rechazado; se notificó al residente');
+  const rechazar = (p: Pago) => {
+    const nota = prompt('Motivo del rechazo (lo verá el residente):');
+    if (nota === null) return;
+    run(() => adminCall('validarPago', { pagoId: p.id, aprobar: false, nota }).then(() => (setFichaPago(null), reload(true))), 'Pago rechazado; se notificó al residente');
   };
+  const favorDe = (unidadId: string) => unidades.find((u) => u.id === unidadId)?.saldoFavor ?? 0;
+  // Comprobante que no cuadra con sus cargos: se señala en la lista para revisarlo con calma.
+  const descuadre = (p: Pago) => {
+    const total = cargosDelPago(p, cargos).reduce((s, c) => s + c.monto, 0);
+    if (!total || Math.abs(p.monto - total) < 0.005) return '';
+    return p.monto < total ? ` · Menor al cargo (${money(total)})` : ` · Mayor al cargo (${money(total)})`;
+  };
+  // Unidades con saldo a favor y cargos pendientes: el sistema pregunta si se abona el saldo a esos cargos.
+  const favorPorAplicar = unidades
+    .filter((u) => (u.saldoFavor ?? 0) > 0)
+    .map((u) => ({ u, pend: otrosPendientes(u.id, [], cargos, pagos) }))
+    .filter((x) => x.pend.length > 0);
+  const aplicarFavor = (u: (typeof unidades)[number], pend: Cargo[]) => {
+    const total = pend.reduce((s, c) => s + c.monto, 0);
+    const usa = Math.min(u.saldoFavor ?? 0, total);
+    if (!confirm(`¿Abonar ${money(usa)} del saldo a favor de ${u.etiqueta} a: ${pend.map((c) => c.concepto).join(', ')}? Se emite un recibo y se avisa al residente.`)) return;
+    run(
+      () => adminCall('saldoFavor.aplicar', { cargoIds: pend.map((c) => c.id) }).then(() => (reloadUnidades(), reload(true))),
+      'Saldo a favor abonado; se notificó al residente',
+    );
+  };
+  const resultadoPago = (p: Pago) =>
+    p.ajuste && p.ajuste !== 'COMPLETO' ? `${AJUSTES_PAGO[p.ajuste as AjustePago] ?? p.ajuste}${p.diferencia ? `: ${money(p.diferencia)}` : ''}` : null;
   const verRecibo = (p: Pago) => {
     const u = unidades.find((x) => x.id === p.unidadId);
     setRecibo({
-      pago: { id: p.id, folio: p.folio ?? '', monto: p.monto, fecha: p.fecha ?? undefined, referencia: p.referencia ?? undefined, validadoEn: p.validadoEn ?? undefined },
-      cargos: cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map((c) => ({ id: c.id, concepto: c.concepto, monto: c.monto })),
+      pago: pagoRecibo(p),
+      cargos: cargos.filter((c) => (p.cargoIds ?? []).includes(c.id)).map(cargoRecibo),
       condominio: { nombre: condo!.nombre, direccion: condo!.direccion ?? undefined },
       unidad: { etiqueta: u?.etiqueta ?? '', propietario: u?.propietario ?? undefined },
     });
@@ -150,7 +176,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
         onChange={setTab}
         options={[
           ['residentes', 'Residentes'],
-          ['revision', `Por aprobar (${revision.length})`],
+          ['revision', `Por aprobar (${revision.length + (valida ? favorPorAplicar.length : 0)})`],
           ['pagos', 'Pagos procesados'],
           ['cargos', 'Cargos'],
           ['saldos', 'Saldos por unidad'],
@@ -162,6 +188,30 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       {vista === 'ingresos' && tab === 'residentes' && <ResidentesFinanzas pagos={pagos} cargos={cargos} />}
       {vista === 'ingresos' && tab === 'amenidades' && <AmenidadesFinanzas datos={data!} reservas={data!.reservas} reload={() => reload(true)} />}
 
+      {vista === 'ingresos' && tab === 'revision' && valida && favorPorAplicar.length > 0 && (
+        <section className="panel">
+          <h2>Saldo a favor por aplicar</h2>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Estas casas o departamentos tienen saldo a favor y cargos pendientes. ¿Quieres abonar el saldo a favor a esos cargos?
+          </p>
+          <Tarjetas>
+            {favorPorAplicar.map(({ u, pend }) => {
+              const total = pend.reduce((s, c) => s + c.monto, 0);
+              return (
+                <Tarjeta
+                  key={u.id}
+                  tono="info"
+                  onClick={() => aplicarFavor(u, pend)}
+                  label={`Abonar el saldo a favor de ${u.etiqueta}`}
+                  titulo={`${u.etiqueta} · ${money(u.saldoFavor!)} a favor`}
+                  sub={`Pendiente ${money(total)}: ${pend.map((c) => `${c.concepto} (${money(c.monto)})`).join(', ')}`}
+                  lado={<span className="pill ok">{u.saldoFavor! >= total ? 'Alcanza para todo' : `Abona ${money(u.saldoFavor!)}`}</span>}
+                />
+              );
+            })}
+          </Tarjetas>
+        </section>
+      )}
       {vista === 'ingresos' && tab === 'revision' && (
         <section className="panel">
           {revision.length ? (
@@ -172,7 +222,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                   tono="warn"
                   onClick={() => setFichaPago(p)}
                   titulo={etiqueta(p.unidadId)}
-                  sub={`Pagado el ${fecha(p.fecha)} · Enviado ${fecha(p.createdAt)} · ${cubre(p)}`}
+                  sub={`Pagado el ${fecha(p.fecha)} · Enviado ${fecha(p.createdAt)} · ${cubre(p)}${descuadre(p)}`}
                   lado={
                     <>
                       <strong>{money(p.monto)}</strong>
@@ -205,7 +255,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                   tono={tonoDe(p.estado)}
                   onClick={() => setFichaPago(p)}
                   titulo={etiqueta(p.unidadId)}
-                  sub={`${p.folio ? `${p.folio} · ` : ''}Pagado el ${fecha(p.fecha)}`}
+                  sub={`${p.folio ? `${p.folio} · ` : ''}Pagado el ${fecha(p.fecha)}${resultadoPago(p) ? ` · ${resultadoPago(p)}` : ''}`}
                   lado={
                     <>
                       <strong>{money(p.monto)}</strong>
@@ -272,7 +322,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                 onClick={() => setHistorialDe(u.id)}
                 label={`Ver historial de pagos de ${u.etiqueta}`}
                 titulo={u.etiqueta}
-                sub={u.propietario ?? undefined}
+                sub={[u.propietario, (u.saldoFavor ?? 0) > 0 ? `A favor ${money(u.saldoFavor!)}` : null].filter(Boolean).join(' · ') || undefined}
                 lado={
                   <>
                     <strong>{money(saldo)}</strong>
@@ -318,7 +368,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                 ['Enviado', fecha(fichaPago.createdAt)],
                 ['Referencia', fichaPago.referencia],
                 ['Cubre', cubre(fichaPago)],
-                ['Motivo del rechazo', fichaPago.estado === 'RECHAZADO' ? fichaPago.nota : null],
+                ['El residente indicó', fichaPago.montoDeclarado != null ? money(fichaPago.montoDeclarado) : null],
+                ['Saldo a favor usado', fichaPago.saldoFavorUsado ? money(fichaPago.saldoFavorUsado) : null],
+                ['Resultado', resultadoPago(fichaPago)],
+                ['Saldo a favor de la unidad', fichaPago.estado === 'EN_REVISION' && favorDe(fichaPago.unidadId) > 0 ? money(favorDe(fichaPago.unidadId)) : null],
+                [fichaPago.estado === 'RECHAZADO' ? 'Motivo del rechazo' : 'Nota', fichaPago.estado === 'EN_REVISION' ? null : fichaPago.nota],
               ]}
             />
             <Firma
@@ -336,11 +390,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
               )}
               {fichaPago.estado === 'EN_REVISION' && valida && (
                 <>
-                  <button className="btn-app" disabled={busy} onClick={() => validar(fichaPago, true)}>
+                  <button className="btn-app" disabled={busy} onClick={() => (setAprobarPago(fichaPago), setFichaPago(null))}>
                     <Icon name="check" />
                     Aprobar
                   </button>
-                  <button className="btn-app danger" disabled={busy} onClick={() => validar(fichaPago, false)}>
+                  <button className="btn-app danger" disabled={busy} onClick={() => rechazar(fichaPago)}>
                     Rechazar
                   </button>
                 </>
@@ -365,6 +419,29 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             />
             <Firma item={fichaCargo} alta="Generado por" />
             <HistorialEdiciones item={fichaCargo} />
+            {valida && fichaCargo.estado === 'PENDIENTE' && favorDe(fichaCargo.unidadId) > 0 && (
+              <div className="alert small" style={{ margin: 0 }}>
+                <p style={{ margin: '0 0 8px' }}>
+                  {etiqueta(fichaCargo.unidadId)} tiene {money(favorDe(fichaCargo.unidadId))} a favor.{' '}
+                  {favorDe(fichaCargo.unidadId) >= fichaCargo.monto
+                    ? 'Alcanza para pagar este cargo completo.'
+                    : `Se abona y quedan pendientes ${money(fichaCargo.monto - favorDe(fichaCargo.unidadId))}.`}
+                </p>
+                <button
+                  className="btn-app sm"
+                  disabled={busy}
+                  onClick={() =>
+                    confirm(`¿Pagar ${fichaCargo.concepto} con el saldo a favor? Se emite un recibo y se avisa al residente.`) &&
+                    run(
+                      () => adminCall('saldoFavor.aplicar', { cargoId: fichaCargo.id }).then(() => (setFichaCargo(null), reloadUnidades(), reload(true))),
+                      'Cargo pagado con saldo a favor; se notificó al residente',
+                    )
+                  }
+                >
+                  Pagar con saldo a favor
+                </button>
+              </div>
+            )}
             {gestiona && fichaCargo.estado === 'PENDIENTE' &&
               (bloqueado(fichaCargo) ? (
                 <p className="small muted" style={{ margin: 0 }}>
@@ -383,6 +460,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
           </div>
         </Modal>
       )}
+      {aprobarPago && <AprobarPago pago={aprobarPago} cargos={cargos} pagos={pagos} onClose={() => setAprobarPago(null)} onDone={() => (setAprobarPago(null), reload(true))} />}
       {editarCargo && <EditarCargo c={editarCargo} onClose={() => setEditarCargo(null)} onDone={() => (setEditarCargo(null), reload(true))} />}
       {cancelarCargo && (
         <PedirMotivo
@@ -724,7 +802,7 @@ function ResidentesFinanzas({ pagos, cargos }: { pagos: Pago[]; cargos: Cargo[] 
                 onClick={() => abrir(u)}
                 label={`Ver historial de pagos de ${u.etiqueta}`}
                 titulo={u.etiqueta}
-                sub={nombre(u) || 'Sin residente registrado'}
+                sub={`${nombre(u) || 'Sin residente registrado'}${(u.saldoFavor ?? 0) > 0 ? ` · A favor ${money(u.saldoFavor!)}` : ''}`}
                 lado={<span className={`pill ${vencido > 0 ? 'mal' : 'ok'}`}>{vencido > 0 ? `Debe ${money(vencido)}` : 'Al corriente'}</span>}
               />
             );

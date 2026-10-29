@@ -91,6 +91,8 @@ const schema = a
         condominioId: a.id().required(),
         etiqueta: a.string().required(), // Casa 12, Depto 3B…
         cuota: a.float(), // histórico: la cuota vigente es Condominio.cuotaMensual
+        // Saldo a favor (excedentes de pagos aprobados); solo lo mueve admin-api al aprobar pagos o aplicarlo a cargos.
+        saldoFavor: a.float(),
         propietario: a.string(),
         fechaEntrega: a.date(),
         notas: a.string(),
@@ -155,6 +157,9 @@ const schema = a
         // Tipo de ingreso para el balance (ver shared/finanzas.ts); los cargos anteriores se clasifican por su id.
         tipo: a.string(),
         avisoVencido: a.date(), // cuotas: día en que se avisó al residente que venció (un solo aviso por cuota)
+        // Pago parcial: el cargo se parte en lo pagado (monto) y otro cargo PENDIENTE con la diferencia (origenCargoId = este).
+        montoOriginal: a.float(),
+        origenCargoId: a.string(),
         // Historial de ediciones con motivo (shared/ediciones.ts); solo lo escribe admin-api.
         ediciones: a.json(),
       })
@@ -182,6 +187,18 @@ const schema = a
         nota: a.string(),
         validadoPor: a.string(),
         validadoEn: a.datetime(),
+        // Al aprobar (admin-api validarPago): monto = lo recibido según el comprobante; montoDeclarado = lo que
+        // escribió el residente si la administración lo corrigió. ajuste: COMPLETO | PARCIAL (la diferencia queda
+        // pendiente en cargoPendienteId) | CONDONADO | SALDO_FAVOR (el excedente pasa al saldo a favor de la unidad)
+        // | EXCEDENTE (el excedente queda como otro ingreso). diferencia = lo que faltó o sobró.
+        montoDeclarado: a.float(),
+        usarSaldoFavor: a.boolean(), // el residente pidió descontar su saldo a favor
+        saldoFavorUsado: a.float(),
+        totalCargos: a.float(),
+        ajuste: a.string(),
+        diferencia: a.float(),
+        cargoPendienteId: a.string(),
+        abonoOtros: a.float(), // excedente abonado a otros cargos pendientes de la unidad (ya incluidos en cargoIds)
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('pagosPorUnidad'),
@@ -575,6 +592,27 @@ const schema = a
         respondidaEn: a.datetime(),
         respondidaPor: a.json(), // { id, nombre, email }
         notaRespuesta: a.string(),
+      })
+      .authorization(admin),
+
+    // Reportes de fallas y solicitudes de mejora del botón flotante del panel (admin-api reportes.*; shared/reportes.ts).
+    // Los atiende el desarrollador; quien lo manda ve el estado y la respuesta en «Mis reportes».
+    Reporte: a
+      .model({
+        tipo: a.string().required(), // FALLA | MEJORA
+        estado: a.string().required(), // NUEVO | EN_REVISION | RESUELTO | DESCARTADO
+        texto: a.string().required(),
+        imagenes: a.string().array(), // S3 reportes/<sub>/…
+        pagina: a.string(), // sección del panel donde estaba
+        condominioId: a.string(),
+        condominioNombre: a.string(),
+        porId: a.string().required(),
+        porNombre: a.string(),
+        porEmail: a.string(),
+        porRol: a.string(),
+        navegador: a.string(),
+        respuesta: a.string(),
+        atendidoEn: a.datetime(),
       })
       .authorization(admin),
 

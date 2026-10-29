@@ -2,8 +2,8 @@
 // Cada cargo uno por uno con su estado (pagado, pendiente, vencido o en revisión), y al final lo pagado y lo que
 // debe. El PDF va protegido: se puede ver e imprimir, pero no modificar. jsPDF se carga solo al descargar.
 
-export type CargoHistorial = { id: string; concepto: string; periodo?: string | null; monto: number; vence?: string | null; estado?: string | null };
-export type PagoHistorial = { id: string; monto: number; fecha?: string | null; folio?: string | null; estado?: string | null; cargoIds?: (string | null)[] | null; validadoEn?: string | null; referencia?: string | null; comprobantePath?: string | null };
+export type CargoHistorial = { id: string; concepto: string; periodo?: string | null; monto: number; vence?: string | null; estado?: string | null; montoOriginal?: number | null };
+export type PagoHistorial = { id: string; monto: number; fecha?: string | null; folio?: string | null; estado?: string | null; cargoIds?: (string | null)[] | null; validadoEn?: string | null; referencia?: string | null; comprobantePath?: string | null; saldoFavorUsado?: number | null; ajuste?: string | null; diferencia?: number | null; abonoOtros?: number | null };
 export type DatosHistorial = {
   condominio: string;
   direccion?: string | null;

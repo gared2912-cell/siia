@@ -229,6 +229,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         .map(sinPrivados),
       pagos: pagos.sort(newest).map(sinPrivados),
       datosPago: condominio.datosPago ?? null,
+      saldoFavor: unidad!.saldoFavor ?? 0,
       cuota: condominio.cuotaMensual ?? unidad!.cuota ?? null,
       // Para el historial de pagos en PDF
       titular: { condominio: condominio.nombre, direccion: condominio.direccion ?? null, unidad: unidad!.etiqueta, residente: perfil.nombre || email },
@@ -256,6 +257,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       referencia: str(p.referencia, 120),
       comprobantePath,
       cargoIds,
+      // Pide descontar su saldo a favor; la administración lo confirma al aprobar.
+      usarSaldoFavor: p.usarSaldoFavor === true && (unidad!.saldoFavor ?? 0) > 0 ? true : null,
       estado: 'EN_REVISION',
     });
     // Confirmación en la sesión del residente: comprobante recibido (el segundo aviso llega al aprobarse).
