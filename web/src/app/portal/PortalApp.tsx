@@ -1,5 +1,6 @@
 // /portal — residentes y vigilantes. El acceso real lo decide la Lambda portal-api:
 // sin aprobación de la administración no se muestra ningún dato.
+import { useEffect } from 'react';
 import { useAuthenticator } from '@aws-amplify/ui-react';
 import { portal } from '../api';
 import { Acceso, Shell, useHashNav, type NavItem } from '../Shell';
@@ -26,7 +27,17 @@ export type PerfilResp = {
     unidadSolicitada?: string;
     nota?: string;
   };
-  condominio?: { id: string; nombre: string; modulos: string[]; datosPago?: string; telefonoCaseta?: string; serviciosCondominio?: string[]; suspendido?: boolean } | null;
+  condominio?: {
+    id: string;
+    nombre: string;
+    modulos: string[];
+    datosPago?: string;
+    telefonoCaseta?: string;
+    serviciosCondominio?: string[];
+    suspendido?: boolean;
+    mensajeComprobante?: string | null;
+    categoriasPropias?: { key: string; label: string }[];
+  } | null;
   unidad?: { id: string; etiqueta: string; cuota?: number } | null;
 };
 
@@ -38,8 +49,8 @@ export default function PortalApp() {
         hideSignUp
         foot={
           <>
-            Tus accesos te los envía por correo la administración de tu condominio. ¿No los recibiste o vencieron? Pídele que te
-            reenvíe tu acceso. <a href="/portal-residentes/">Más información</a>
+            Tus accesos te los envía por correo la administración de tu condominio. ¿No los recibiste, vencieron u olvidaste tu
+            contraseña? <a href="/ayuda/">Pide ayuda</a>
           </>
         }
       >
@@ -169,22 +180,28 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
   const mods = perfil.condominio!.modulos ?? [];
   const has = (m: string) => mods.includes(m);
   const [cur, go] = useHashNav('inicio');
-  const { sinLeer, chatSinLeer } = useAvisos();
+  const { sinLeer, chatSinLeer, porModulo, leerModulo } = useAvisos();
 
+  // Cada módulo muestra en rojo sus avisos sin leer (pagos, visitas, reservas…); Inicio, el total.
   const nav: NavItem[] = [
     { key: 'inicio', label: 'Inicio', icon: 'home', count: sinLeer },
-    ...(has('finanzas') ? [{ key: 'finanzas', label: 'Finanzas', icon: 'money' }] : []),
-    ...(has('visitas') ? [{ key: 'visitas', label: 'Visitas', icon: 'qr' }] : []),
-    ...(has('amenidades') ? [{ key: 'amenidades', label: 'Reservas', icon: 'calendar' }] : []),
-    ...(has('incidentes') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert' }] : []),
-    ...(has('mantenimientos') ? [{ key: 'mantenimientos', label: 'Mantenimientos', icon: 'tools' }] : []),
-    ...(has('comunicados') || has('encuestas') ? [{ key: 'comunicados', label: 'Comunicados', icon: 'megaphone' }] : []),
+    ...(has('finanzas') ? [{ key: 'finanzas', label: 'Finanzas', icon: 'money', count: porModulo.finanzas }] : []),
+    ...(has('visitas') ? [{ key: 'visitas', label: 'Visitas', icon: 'qr', count: porModulo.visitas }] : []),
+    ...(has('amenidades') ? [{ key: 'amenidades', label: 'Reservas', icon: 'calendar', count: porModulo.amenidades }] : []),
+    ...(has('incidentes') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert', count: porModulo.incidentes }] : []),
+    ...(has('mantenimientos') ? [{ key: 'mantenimientos', label: 'Mantenimientos', icon: 'tools', count: porModulo.mantenimientos }] : []),
+    ...(has('comunicados') || has('encuestas') ? [{ key: 'comunicados', label: 'Comunicados', icon: 'megaphone', count: porModulo.comunicados }] : []),
     ...(has('chat') ? [{ key: 'chat', label: 'Chat', icon: 'chat', count: chatSinLeer }] : []),
-    ...(has('mascotas') ? [{ key: 'mascotas', label: 'Mascotas', icon: 'paw' }] : []),
+    ...(has('mascotas') ? [{ key: 'mascotas', label: 'Mascotas', icon: 'paw', count: porModulo.mascotas }] : []),
   ];
   // «chat/CASETA» abre el chat en ese canal (campana o notificación push)
   const [base, sub] = cur.split('/');
   const actual = nav.some((n) => n.key === base) ? base : 'inicio';
+  // Al entrar a un módulo, sus avisos quedan leídos (se quita su número).
+  const pendientesAqui = actual !== 'inicio' ? (porModulo[actual] ?? 0) : 0;
+  useEffect(() => {
+    if (pendientesAqui) leerModulo(actual);
+  }, [actual, pendientesAqui, leerModulo]);
   const props = { perfil, go, has };
 
   return (

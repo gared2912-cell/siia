@@ -1,6 +1,8 @@
 import { all, db } from '../api';
 import { ErrorBox, Icon, Loading, PageHead, money, hoy, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
+import { BarraCategorias } from './Fondos';
+import { categoriasDe, diaIngreso, partesDePago } from '../../../amplify/functions/shared/finanzas';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
@@ -29,6 +31,11 @@ export function Panel({ go }: { go: (k: string) => void }) {
     const pagado = delMes.filter((c) => c.estado === 'PAGADO');
     const revision = delMes.filter((c) => c.estado === 'PENDIENTE' && enRevision.has(c.id));
     const sinPago = delMes.filter((c) => c.estado === 'PENDIENTE' && !enRevision.has(c.id));
+    // Ingresos aprobados del mes por categoría (cuota corriente, recuperación de cartera, multas, amenidades…).
+    const porCat = new Map<string, number>();
+    const cargosPorId = new Map(cargos.map((c) => [c.id, c]));
+    for (const p of pagos.filter((x) => x.estado === 'VALIDADO' && diaIngreso(x).slice(0, 7) === periodo))
+      for (const x of partesDePago(p, cargosPorId)) porCat.set(x.categoria, (porCat.get(x.categoria) ?? 0) + x.monto);
     // Cartera vencida: todo lo pendiente cuya fecha límite ya pasó (de cualquier mes).
     const vencidos = cargos.filter((c) => c.estado === 'PENDIENTE' && c.vence && c.vence < h);
     return {
@@ -46,6 +53,7 @@ export function Panel({ go }: { go: (k: string) => void }) {
       },
       vencido: suma(vencidos),
       unidadesVencidas: new Set(vencidos.map((c) => c.unidadId)).size,
+      porCategoria: Object.fromEntries(porCat),
       incidentes: incidentes.filter((i) => i.estado !== 'CERRADO' && i.estado !== 'RESUELTO').length,
       reservas: reservas.filter((r) => r.estado === 'SOLICITADA').length,
       mascotas: mascotas.filter((m) => m.estado === 'PENDIENTE').length,
@@ -89,6 +97,7 @@ export function Panel({ go }: { go: (k: string) => void }) {
           onFinanzas={() => go('finanzas')}
         />
       )}
+      {puede('finanzas') && <IngresosPorCategoria porCategoria={d.porCategoria} onFinanzas={() => go('finanzas')} />}
       {puede('usuarios') && (
         <button className="tile tile-acceso" onClick={() => go('residentes')}>
           <Icon name="users" />
@@ -121,6 +130,44 @@ export function Panel({ go }: { go: (k: string) => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Ingresos aprobados del mes separados por categoría, con el % de cuota corriente contra recuperación de cartera. */
+function IngresosPorCategoria({ porCategoria, onFinanzas }: { porCategoria: Record<string, number>; onFinanzas: () => void }) {
+  const { condo } = useAdmin();
+  const items = categoriasDe(condo).map((c) => ({ ...c, monto: Math.round((porCategoria[c.key] ?? 0) * 100) / 100 }));
+  const total = items.reduce((s, c) => s + c.monto, 0);
+  const corriente = porCategoria.CORRIENTE ?? 0;
+  const recuperacion = porCategoria.RECUPERACION ?? 0;
+  const cuotas = corriente + recuperacion;
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2 style={{ fontSize: '1.1rem' }}>Ingresos del mes por categoría</h2>
+        <button className="linklike" onClick={onFinanzas}>
+          Ver balance
+        </button>
+      </div>
+      {total ? (
+        <>
+          {cuotas > 0 && (
+            <p style={{ margin: '0 0 10px' }}>
+              De las cuotas cobradas: <strong>{Math.round((corriente / cuotas) * 100)}% cuota corriente</strong> ·{' '}
+              <strong>{Math.round((recuperacion / cuotas) * 100)}% recuperación de cartera vencida</strong>
+            </p>
+          )}
+          <BarraCategorias items={items} total={total} />
+          <p className="small muted" style={{ margin: '8px 0 0' }}>
+            Total aprobado en el mes: {money(total)}
+          </p>
+        </>
+      ) : (
+        <p className="small muted" style={{ margin: 0 }}>
+          Aún no hay pagos aprobados este mes.
+        </p>
+      )}
+    </section>
   );
 }
 

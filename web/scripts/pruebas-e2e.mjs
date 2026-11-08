@@ -1219,8 +1219,8 @@ try {
     esperar(r.vigilante === 'chat,accesos', `vigilante: ${r.vigilante}`);
     esperar(r.contadora === 'pagos,chat', `contadora: ${r.contadora}`);
     esperar(r.operacion === 'chat,incidentes,reservas,mascotas', `operación: ${r.operacion}`);
-    esperar(r.general === 'pagos,chat,incidentes,reservas,mascotas', `general: ${r.general}`);
-    return 'residente 5 · vigilante 2 · contadora 2 · operación 4 · general 5';
+    esperar(r.general === 'pagos,chat,incidentes,reservas,mascotas,asistencia', `general: ${r.general}`);
+    return 'residente 5 · vigilante 2 · contadora 2 · operación 4 · general 6 (con asistencia técnica)';
   });
   await prueba('Preferencias: apagar un tipo (ignora tipos que no le corresponden)', async () => {
     const r = await ok(r2.portal('notificaciones.preferencias', { apagadas: ['caseta', 'incidentes', 'inventado'] }));

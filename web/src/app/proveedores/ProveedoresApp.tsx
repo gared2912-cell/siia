@@ -1,5 +1,6 @@
-// /proveedores — bitácora de trabajo de los proveedores (jardinería, alberca, fumigación…). Dos secciones:
-// «Levantar reporte» (para la administración o para los residentes: son reportes independientes) y «Ver reportes».
+// /proveedores — bitácora de trabajo de los proveedores (jardinería, alberca, fumigación…). Tres secciones:
+// «Check-in» (al llegar y al irse, con foto: avisa a residentes y administración), «Levantar reporte» (para la
+// administración o para los residentes: son reportes independientes) y «Ver reportes».
 // Enviar = guardar: un reporte enviado ya no se modifica. El acceso lo valida la Lambda portal-api (rol PROVEEDOR,
 // sus condominios y solo los mantenimientos que le asignó la administración).
 import { useState } from 'react';
@@ -7,10 +8,10 @@ import { portal } from '../api';
 import { Acceso, Shell, useHashNav } from '../Shell';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { TarjetaReporteFotos } from '../FotosReporte';
-import { Badge, Empty, ErrorBox, Field, Icon, Loading, PageHead, Seg, ToastProvider, fechaHora, hoy, useLoad, useToast } from '../ui';
+import { Badge, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, ToastProvider, fechaHora, hoy, useLoad, useToast } from '../ui';
 import { ETIQUETA_DESTINO, MAX_FOTOS_REPORTE, OTRO_SERVICIO, servicioDe, type DestinoReporte, type ReporteProveedor } from '../../../amplify/functions/shared/proveedores';
 
-type Inicio = { nombre: string | null; email: string; empresa: string | null; servicios: string[]; condominios: { id: string; nombre: string }[] };
+type Inicio = { nombre: string | null; email: string; empresa: string | null; nombrePublico?: string | null; servicios: string[]; condominios: { id: string; nombre: string }[] };
 type Reporte = ReporteProveedor & { tipoOtro?: string | null };
 
 export default function ProveedoresApp() {
@@ -25,7 +26,7 @@ export default function ProveedoresApp() {
 
 function Proveedor() {
   const { data, error, loading, reload } = useLoad(() => portal<Inicio>('proveedor.inicio'));
-  const [cur, go] = useHashNav('levantar');
+  const [cur, go] = useHashNav('checkin');
   // Reporte que se empieza ya con condominio, destino y tipo (después de enviar el otro reporte del mismo trabajo)
   const [siguiente, setSiguiente] = useState<Borrador | null>(null);
   const [n, setN] = useState(0);
@@ -47,11 +48,12 @@ function Proveedor() {
       </div>
     );
   const yo = data!;
-  const actual = cur === 'reportes' ? 'reportes' : 'levantar';
+  const actual = cur === 'reportes' ? 'reportes' : cur === 'levantar' ? 'levantar' : 'checkin';
   return (
     <Shell
       api="portal"
       nav={[
+        { key: 'checkin', label: 'Check-in', icon: 'login' },
         { key: 'levantar', label: 'Levantar reporte', icon: 'plus' },
         { key: 'reportes', label: 'Ver reportes', icon: 'file' },
       ]}
@@ -63,6 +65,8 @@ function Proveedor() {
     >
       {!yo.condominios.length ? (
         <div className="alert">Aún no tienes condominios asignados. Comunícate con la administración.</div>
+      ) : actual === 'checkin' ? (
+        <CheckIn yo={yo} onReporte={() => go('levantar')} />
       ) : actual === 'levantar' ? (
         <Levantar
           key={siguiente ? `sig-${siguiente.destino}-${n}` : `nuevo-${n}`}
@@ -364,5 +368,197 @@ function NuevoReporte({
         </button>
       </form>
     </div>
+  );
+}
+
+// ---------- Check-in / check-out ----------
+type Asistencia = {
+  id: string;
+  condominioId: string;
+  condominio: string;
+  estado: 'DENTRO' | 'SALIO';
+  entradaEn: string;
+  entradaDescripcion?: string | null;
+  salidaEn?: string | null;
+  salidaDescripcion?: string | null;
+};
+type EstadoAsistencia = { nombrePublico: string; abiertas: Asistencia[]; recientes: Asistencia[] };
+
+const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+
+/** Sube la foto a la carpeta del proveedor en el condominio y devuelve su ruta. */
+async function subirFoto(condominioId: string, file: File) {
+  const nombre = /\.\w+$/.test(file.name) ? file.name : `${file.name || 'foto'}.jpg`;
+  const s = await portal<{ url: string; path: string; contentType: string }>('proveedor.subirFoto', { condominioId, nombre, tamano: file.size });
+  const r = await fetch(s.url, { method: 'PUT', headers: { 'Content-Type': s.contentType }, body: file });
+  if (!r.ok) throw new Error('No se pudo subir la foto. Revisa tu conexión e intenta de nuevo.');
+  return s.path;
+}
+
+/**
+ * Al llegar: botón rojo «Check-in» → foto, qué va a hacer y la hora; a los residentes les llega «Llegó Jardinería SIIA
+ * a las 10:35» y a la administración también. Al irse: «Check-out» con otra foto. Es su asistencia, independiente de
+ * los reportes de trabajo.
+ */
+function CheckIn({ yo, onReporte }: { yo: Inicio; onReporte: () => void }) {
+  const { data, error, loading, reload } = useLoad(() => portal<EstadoAsistencia>('proveedor.asistencia'));
+  const [modo, setModo] = useState<{ tipo: 'in' } | { tipo: 'out'; a: Asistencia } | null>(null);
+  if (loading && !data) return <Loading />;
+  if (error && !data) return <ErrorBox error={error} retry={reload} />;
+  const d = data!;
+  const abiertos = new Set(d.abiertas.map((a) => a.condominioId));
+  const libres = yo.condominios.filter((c) => !abiertos.has(c.id));
+  return (
+    <div className="stack">
+      <PageHead icon="login" title="Check-in" sub={`Registra tu llegada y tu salida con una foto. Los residentes te ven como «${d.nombrePublico}».`} />
+      {d.abiertas.map((a) => (
+        <section key={a.id} className="panel checkin-abierto">
+          <div className="checkin-estado">
+            <span className="checkin-punto" />
+            <div>
+              <strong>En servicio en {a.condominio}</strong>
+              <span className="small muted">
+                Llegaste a las {hora(a.entradaEn)}
+                {a.entradaDescripcion ? ` · ${a.entradaDescripcion}` : ''}
+              </span>
+            </div>
+          </div>
+          <div className="row-actions">
+            <button className="btn-checkout" onClick={() => setModo({ tipo: 'out', a })}>
+              <Icon name="logout" />
+              Check-out
+            </button>
+            <button className="btn-app secondary" onClick={onReporte}>
+              <Icon name="plus" />
+              Levantar reporte
+            </button>
+          </div>
+        </section>
+      ))}
+      {libres.length > 0 && (
+        <section className="panel" style={{ textAlign: 'center', padding: 28 }}>
+          <p className="muted" style={{ marginTop: 0 }}>
+            {d.abiertas.length ? '¿Llegaste a otro condominio?' : 'Al llegar al condominio, presiona el botón y toma una foto.'}
+          </p>
+          <button className="btn-checkin" onClick={() => setModo({ tipo: 'in' })}>
+            <Icon name="login" />
+            Check-in
+          </button>
+        </section>
+      )}
+      <section className="panel">
+        <h2 style={{ fontSize: '1.05rem', marginTop: 0 }}>Últimos registros</h2>
+        {d.recientes.length ? (
+          <ul className="list">
+            {d.recientes.map((a) => (
+              <li key={a.id}>
+                <span className="list-main">
+                  <strong>{a.condominio}</strong>
+                  <span className="list-sub">
+                    Entrada {fechaHora(a.entradaEn)}
+                    {a.salidaEn ? ` · Salida ${hora(a.salidaEn)}` : ''}
+                  </span>
+                </span>
+                <Badge estado={a.estado === 'DENTRO' ? 'EN_PROCESO' : 'TERMINADO'}>{a.estado === 'DENTRO' ? 'En servicio' : 'Terminado'}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Empty icon="clock">Aún no tienes registros.</Empty>
+        )}
+      </section>
+      {modo && (
+        <RegistrarAsistencia
+          modo={modo}
+          condominios={libres}
+          onClose={() => setModo(null)}
+          onDone={() => {
+            setModo(null);
+            reload(true);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function RegistrarAsistencia({
+  modo,
+  condominios,
+  onClose,
+  onDone,
+}: {
+  modo: { tipo: 'in' } | { tipo: 'out'; a: Asistencia };
+  condominios: { id: string; nombre: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const entrada = modo.tipo === 'in';
+  const [condominioId, setCondominioId] = useState(entrada ? (condominios.length === 1 ? condominios[0].id : '') : modo.a.condominioId);
+  const [file, setFile] = useState<File | null>(null);
+  const [descripcion, setDescripcion] = useState('');
+  const [estado, setEstado] = useState('');
+  const [error, setError] = useState('');
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (!condominioId) return setError('Elige el condominio.');
+    if (!file) return setError('Toma la foto.');
+    if (entrada && !descripcion.trim()) return setError('Escribe qué vas a hacer.');
+    try {
+      setEstado('Subiendo foto…');
+      const fotoPath = await subirFoto(condominioId, file);
+      setEstado(entrada ? 'Registrando llegada…' : 'Registrando salida…');
+      if (entrada) await portal('proveedor.checkin', { condominioId, fotoPath, descripcion });
+      else await portal('proveedor.checkout', { id: modo.a.id, fotoPath, descripcion });
+      toast(entrada ? 'Check-in registrado: se avisó a los residentes y a la administración' : 'Check-out registrado');
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEstado('');
+    }
+  }
+  const ocupado = !!estado;
+  return (
+    <Modal title={entrada ? 'Check-in · llegada' : `Check-out · ${modo.a.condominio}`} onClose={onClose}>
+      <form className="form" onSubmit={enviar}>
+        {entrada && condominios.length > 1 && (
+          <Field label="Condominio">
+            <select required value={condominioId} onChange={(e) => setCondominioId(e.target.value)} disabled={ocupado}>
+              <option value="">Elige el condominio…</option>
+              {condominios.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <Field grupo label={entrada ? 'Foto al llegar' : 'Foto al terminar'} hint={entrada ? 'Por ejemplo, tú en la entrada o el área donde vas a trabajar.' : 'Por ejemplo, el área terminada.'}>
+          <ElegirArchivo disabled={ocupado} value={file} onChange={(fs) => setFile(fs[0] ?? null)} />
+        </Field>
+        <Field label={entrada ? '¿Qué vas a hacer?' : 'Nota de salida (opcional)'}>
+          <textarea
+            rows={2}
+            maxLength={500}
+            required={entrada}
+            value={descripcion}
+            onChange={(e) => setDescripcion(e.target.value)}
+            disabled={ocupado}
+            placeholder={entrada ? 'Ej. Poda de jardineras del andador principal' : 'Ej. Terminé la poda; mañana regreso por las ramas'}
+          />
+        </Field>
+        <p className="small muted" style={{ margin: 0 }}>
+          Se registra la hora automáticamente{entrada ? ' y se avisa a los residentes y a la administración.' : '.'}
+        </p>
+        {error && <div className="alert error">{error}</div>}
+        <button className={entrada ? 'btn-checkin block' : 'btn-checkout block'} disabled={ocupado}>
+          <Icon name={entrada ? 'login' : 'logout'} />
+          {estado || (entrada ? 'Hacer check-in' : 'Hacer check-out')}
+        </button>
+      </form>
+    </Modal>
   );
 }

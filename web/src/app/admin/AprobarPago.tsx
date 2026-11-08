@@ -6,6 +6,7 @@ import { adminCall, type Schema } from '../api';
 import { Archivo, Field, Icon, Modal, money, useAction } from '../ui';
 import { useAdmin } from './AdminApp';
 import { ajusteDe, favorAUsar, r2, repartirPago, type Excedente, type Faltante } from '../../../amplify/functions/shared/pagos';
+import { QUE_PAGA_RESIDENTE, categoriasDe, etiquetaCategoria, partesDePago, type CategoriaIngreso } from '../../../amplify/functions/shared/finanzas';
 
 type Pago = Schema['Pago']['type'];
 type Cargo = Schema['Cargo']['type'];
@@ -22,7 +23,8 @@ export function otrosPendientes(unidadId: string, excluir: (string | null)[], ca
 }
 
 export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pago; cargos: Cargo[]; pagos: Pago[]; onClose: () => void; onDone: () => void }) {
-  const { etiqueta, unidades, reloadUnidades } = useAdmin();
+  const { etiqueta, unidades, reloadUnidades, condo } = useAdmin();
+  const cats = categoriasDe(condo);
   const cubre = cargosDelPago(pago, cargos);
   const otros = otrosPendientes(pago.unidadId, pago.cargoIds ?? [], cargos, pagos.filter((p) => p.id !== pago.id));
   const total = r2(cubre.reduce((s, c) => s + c.monto, 0));
@@ -34,6 +36,8 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
   const [nota, setNota] = useState('');
   // Si sobra, el sistema propone abonarlo a los otros cargos pendientes de la unidad (todos marcados).
   const [extras, setExtras] = useState<string[]>(otros.map((c) => c.id));
+  // Desglose por categoría: null = el automático (por los cargos que cubre y la fecha de pago).
+  const [desglose, setDesglose] = useState<{ categoria: string; monto: string }[] | null>(null);
   const { run, busy } = useAction();
 
   const recibido = r2(Number(monto) || 0);
@@ -59,9 +63,34 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
           ? `Sobran ${money(dif)}`
           : `Pago a cuenta de ${money(dif)}`;
 
+  // Cómo quedaría en el balance: por categoría según los cargos que se liquidan y la fecha de pago.
+  const abonados = sobra ? [...(pe?.pagados ?? []), ...(parcialExtra ? [parcialExtra.cargo] : [])].map((c) => c.id) : [];
+  const automatico = agrupar(
+    partesDePago({ ...pago, monto: recibido, desglose: null, cargoIds: [...cubre.map((c) => c.id), ...abonados] }, new Map(cargos.map((c) => [c.id, c]))),
+  );
+  const sumaDesglose = r2((desglose ?? []).reduce((s, d) => s + (Number(d.monto) || 0), 0));
+  const desgloseOk = !desglose || Math.abs(sumaDesglose - recibido) < 0.01;
+  const abrirDesglose = () =>
+    setDesglose(
+      automatico.length
+        ? automatico.map((x) => ({ categoria: x.categoria, monto: String(x.monto) }))
+        : [{ categoria: pago.categoriaResidente || 'CORRIENTE', monto: String(recibido) }],
+    );
+
   async function aprobar(e: React.FormEvent) {
     e.preventDefault();
-    const datos = { pagoId: pago.id, aprobar: true, montoRecibido: recibido, usarSaldoFavor: usar, faltante, excedente, nota, cargosExtra: sobra ? extras : [] };
+    if (!desgloseOk) return alert(`El desglose suma ${money(sumaDesglose)} y lo recibido es ${money(recibido)}: deben coincidir.`);
+    const datos = {
+      pagoId: pago.id,
+      aprobar: true,
+      montoRecibido: recibido,
+      usarSaldoFavor: usar,
+      faltante,
+      excedente,
+      nota,
+      cargosExtra: sobra ? extras : [],
+      desglose: desglose ? desglose.map((d) => ({ categoria: d.categoria, monto: Number(d.monto) || 0 })).filter((d) => d.monto > 0) : null,
+    };
     if (await run(() => adminCall('validarPago', datos), 'Pago aprobado y recibo emitido; se notificó al residente')) {
       reloadUnidades();
       onDone();
@@ -177,14 +206,141 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
           </fieldset>
         )}
 
+        <Categorias
+          cats={cats}
+          residente={pago.categoriaResidente}
+          automatico={automatico}
+          desglose={desglose}
+          setDesglose={setDesglose}
+          abrir={abrirDesglose}
+          recibido={recibido}
+          suma={sumaDesglose}
+        />
+
         <Field label={ajuste === 'CONDONADO' ? 'Motivo de la condonación (lo verá el residente)' : 'Nota para el residente (opcional)'}>
           <textarea rows={2} maxLength={500} required={ajuste === 'CONDONADO'} minLength={ajuste === 'CONDONADO' ? 5 : undefined} value={nota} onChange={(e) => setNota(e.target.value)} />
         </Field>
-        <button className="btn-app" disabled={busy || !(recibido > 0 || favorUsado > 0)}>
+        <button className="btn-app" disabled={busy || !(recibido > 0 || favorUsado > 0) || !desgloseOk}>
           <Icon name="check" />
           {busy ? 'Aprobando…' : 'Aprobar y emitir recibo'}
         </button>
       </form>
     </Modal>
+  );
+}
+
+/** Suma las partes de un pago por categoría. */
+function agrupar(partes: { categoria: string; monto: number }[]) {
+  const m = new Map<string, number>();
+  for (const x of partes) m.set(x.categoria, (m.get(x.categoria) ?? 0) + x.monto);
+  return [...m].map(([categoria, monto]) => ({ categoria, monto: r2(monto) })).filter((x) => x.monto > 0);
+}
+
+type FilaDesglose = { categoria: string; monto: string };
+
+/** Categoría del ingreso: la automática (cargos y fecha) o el desglose de la administración entre varias categorías. */
+function Categorias({
+  cats,
+  residente,
+  automatico,
+  desglose,
+  setDesglose,
+  abrir,
+  recibido,
+  suma,
+}: {
+  cats: CategoriaIngreso[];
+  residente?: string | null;
+  automatico: { categoria: string; monto: number }[];
+  desglose: FilaDesglose[] | null;
+  setDesglose: (d: FilaDesglose[] | null) => void;
+  abrir: () => void;
+  recibido: number;
+  suma: number;
+}) {
+  const indico = residente ? (QUE_PAGA_RESIDENTE.find((c) => c.key === residente)?.label ?? etiquetaCategoria(residente, cats)) : null;
+  const cambia = (i: number, x: Partial<FilaDesglose>) => setDesglose(desglose!.map((d, k) => (k === i ? { ...d, ...x } : d)));
+  const falta = r2(recibido - suma);
+  const color = (key: string) => cats.find((c) => c.key === key)?.color;
+  return (
+    <fieldset className="opciones-ajuste">
+      <legend>Categoría del ingreso</legend>
+      {indico && (
+        <p className="small" style={{ margin: 0 }}>
+          El residente indicó: <strong>{indico}</strong>
+        </p>
+      )}
+      {!desglose ? (
+        <>
+          <div className="cuadre info">
+            {automatico.length ? (
+              automatico.map((x) => (
+                <div key={x.categoria}>
+                  <span>
+                    <span className="punto-cat" style={{ background: color(x.categoria) }} />
+                    {etiquetaCategoria(x.categoria, cats)}
+                  </span>
+                  <span>{money(x.monto)}</span>
+                </div>
+              ))
+            ) : (
+              <div>
+                <span>Sin monto recibido</span>
+                <span>{money(0)}</span>
+              </div>
+            )}
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>
+            Automático: la cuota del mes es cuota corriente y la de un mes ya pasado, recuperación de cartera vencida. Si un solo depósito cubre varias cosas (p. ej.
+            cuota del mes + meses atrasados), desglósalo.
+          </p>
+          <div>
+            <button type="button" className="btn-app sm secondary" onClick={abrir}>
+              <Icon name="chart" />
+              Desglosar
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {desglose.map((d, i) => (
+            <div key={i} className="fila-desglose">
+              <span className="punto-cat" style={{ background: color(d.categoria) }} />
+              <select value={d.categoria} onChange={(e) => cambia(i, { categoria: e.target.value })} aria-label="Categoría">
+                {cats.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <input type="number" min="0" step="0.01" inputMode="decimal" value={d.monto} onChange={(e) => cambia(i, { monto: e.target.value })} aria-label="Monto" />
+              <button type="button" className="icon-btn" aria-label="Quitar" disabled={desglose.length === 1} onClick={() => setDesglose(desglose.filter((_, k) => k !== i))}>
+                <Icon name="x" />
+              </button>
+            </div>
+          ))}
+          <div className="row-actions" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="linklike small"
+              onClick={() =>
+                setDesglose([...desglose, { categoria: cats.find((c) => !desglose.some((d) => d.categoria === c.key))?.key ?? 'OTRO', monto: falta > 0 ? String(falta) : '' }])
+              }
+            >
+              <Icon name="plus" /> Agregar categoría
+            </button>
+            <span className="small" style={{ color: Math.abs(falta) < 0.01 ? 'var(--teal-dark)' : 'var(--danger)', fontWeight: 600 }}>
+              Suma {money(suma)} de {money(recibido)}
+              {Math.abs(falta) >= 0.01 && ` · ${falta > 0 ? `faltan ${money(falta)}` : `sobran ${money(-falta)}`}`}
+            </span>
+          </div>
+          <div>
+            <button type="button" className="linklike small" onClick={() => setDesglose(null)}>
+              Volver a la categoría automática
+            </button>
+          </div>
+        </>
+      )}
+    </fieldset>
   );
 }

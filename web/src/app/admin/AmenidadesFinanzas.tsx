@@ -319,7 +319,7 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
       {gasto && (
         <EditarEgreso
           e={gasto}
-          fondo
+          fondo={FONDO_AMENIDADES}
           onClose={() => setGasto(null)}
           onDone={(f) => {
             setGasto(null);

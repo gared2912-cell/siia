@@ -91,7 +91,7 @@ export function initLeadForms() {
           }
           if (!res.ok) throw new Error(String(res.status));
           form.reset();
-          showStatus('¡Gracias! Recibimos tu solicitud y un asesor de SIIA te contactará muy pronto.');
+          showStatus(form.dataset.gracias ?? '¡Gracias! Recibimos tu solicitud y un asesor de SIIA te contactará muy pronto.');
           return;
         } catch {
           // Si el envío falla (sin conexión o error del servidor), se ofrece WhatsApp o correo como respaldo.

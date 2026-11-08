@@ -16,7 +16,9 @@ import { FinanzasAdmin } from './FinanzasAdmin';
 import { ComunicadosAdmin, EncuestasAdmin, ChatAdmin } from './Comunicacion';
 import { IncidentesAdmin, MantenimientosAdmin, AmenidadesAdmin, VisitasAdmin, MascotasAdmin } from './Operacion';
 import { ResidentesRapido } from './ResidentesRapido';
-import { CampanaAdmin } from './CampanaAdmin';
+import { CampanaAdmin, usePendientesAdmin } from './CampanaAdmin';
+import { Semaforo } from './Semaforo';
+import { AsistenciaAdmin } from './Asistencia';
 import { Actividad } from './Actividad';
 import { AvisoSuspendido } from './EstadoCondominio';
 import { ProveedoresAdmin } from './Proveedores';
@@ -101,6 +103,8 @@ const SECCIONES: (NavItem & { global?: boolean; soloSuper?: boolean; soloDesarro
   { key: 'administradores', label: 'Administradores', icon: 'shield', global: true, soloSuper: true },
   { key: 'condominios', label: 'Condominios', icon: 'building', global: true },
   { key: 'cotizaciones', label: 'Cotizaciones', icon: 'inbox', global: true },
+  // Solicitudes de «Pide ayuda» de residentes sin acceso: las atiende quien gestiona residentes.
+  { key: 'asistencia', label: 'Asistencia técnica', icon: 'help', global: true },
   { key: 'finanzas', label: 'Finanzas', icon: 'money' },
   { key: 'comunicados', label: 'Comunicados', icon: 'megaphone' },
   { key: 'encuestas', label: 'Encuestas', icon: 'vote' },
@@ -122,7 +126,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
   const puede = (seccion: string, nivel: Nivel = 'ver') => mios.superadmin || alcanza(mios.permisos.secciones[seccion], nivel);
   const tiene = (extra: string) => mios.superadmin || mios.permisos.extras.includes(extra);
   // Condominios incluye a sus residentes: lo ve quien tenga acceso a condominios o a usuarios.
-  const visible = (k: string) => k === 'panel' || puede(k) || (k === 'condominios' && puede('usuarios'));
+  const visible = (k: string) => k === 'panel' || (k === 'asistencia' ? puede('usuarios') : puede(k)) || (k === 'condominios' && puede('usuarios'));
   // El desarrollador (Gared) atiende los reportes y no ve el botón flotante; los demás administradores sí.
   const desarrollador = esDesarrollador(mios.email);
   const secciones = SECCIONES.filter((s) => (s.soloDesarrollador ? desarrollador : s.soloSuper ? mios.superadmin : visible(s.key)));
@@ -198,8 +202,19 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
     [condo?.id, veChat],
   );
   usePoll(() => mensajes.reload(true), 30000, veChat);
-  const chatPorResponder = useMemo(() => porResponder(mensajes.data ?? [], 'ADMIN'), [mensajes.data]);
-  const nav = secciones.map((s) => (s.key === 'chat' ? { ...s, count: chatPorResponder } : s));
+  // Pendientes por módulo: el número en rojo de cada sección del menú, la campana y el semáforo.
+  const pend = usePendientesAdmin({
+    condo,
+    bloqueado,
+    superadmin: mios.superadmin,
+    reporta: !desarrollador,
+    puede,
+    tiene,
+    etiqueta: ctx.etiqueta,
+    go,
+    mensajes: veChat ? (mensajes.data ?? []) : [],
+  });
+  const nav = secciones.map((s) => ({ ...s, count: pend.conteos[s.key] || undefined }));
 
   // «sección/subsección» abre una parte concreta (p. ej. condominios/residentes, acceso directo desde el Panel).
   const [base, sub] = cur.split('/');
@@ -219,7 +234,14 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
         title="Administración SIIA"
         subtitle={condo?.nombre ?? 'Sin condominio seleccionado'}
         user={`${yo} · ${mios.rol}`}
-        actions={((condo && !bloqueado) || puede('cotizaciones')) && <CampanaAdmin go={go} mensajes={veChat ? (mensajes.data ?? []) : []} />}
+        actions={
+          ((condo && !bloqueado) || puede('cotizaciones') || puede('usuarios')) && (
+            <>
+              <Semaforo total={pend.total} conteos={pend.conteos} go={go} />
+              <CampanaAdmin pend={pend} />
+            </>
+          )
+        }
       >
         {condos.error && <ErrorBox error={condos.error} retry={condos.reload} />}
         {!sec.global && lista.length > 0 && (
@@ -274,8 +296,9 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
             {actual === 'amenidades' && <AmenidadesAdmin />}
             {actual === 'visitas' && <VisitasAdmin />}
             {actual === 'mascotas' && <MascotasAdmin />}
-            {actual === 'proveedores' && <ProveedoresAdmin />}
+            {actual === 'proveedores' && <ProveedoresAdmin key={cur} inicio={sub === 'asistencia' ? 'asistencia' : undefined} />}
             {actual === 'cotizaciones' && <CotizacionesAdmin key={cur} abrir={sub} />}
+            {actual === 'asistencia' && <AsistenciaAdmin key={cur} abrir={sub} onCambio={pend.recargar} />}
           </>
         )}
         {!desarrollador && <BotonReporte seccion={sec.label} />}

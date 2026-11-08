@@ -37,7 +37,21 @@ import { crearCuotas } from '../shared/cuotas';
 import { cancelarCargoReserva, choqueAprobado, confirmarReserva } from '../shared/reservas';
 import { MAX_ACCESOS, TIPOS_ACCESO, accesosDe, claveCodigo, estadoDeAcceso } from '../shared/accesos';
 import { MIN_CUOTAS_DEFECTO, jsonCorte, type AccesoCorte, type Corte, type CriterioCorte, type EstadoCorte, type FilaCorte, type ResumenCorte } from '../shared/cortes';
-import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, TIPOS_CARGO_MANUAL, tipoDeCargo } from '../shared/finanzas';
+import {
+  CATEGORIAS_EGRESO,
+  MAX_APARTADOS,
+  MAX_CATEGORIAS_PROPIAS,
+  MAX_EVIDENCIAS_EGRESO,
+  TIPOS_CARGO_MANUAL,
+  apartadosDe,
+  categoriasDe,
+  categoriasPropias,
+  esCategoria,
+  fondoValido,
+  saldoApartado,
+  tipoDeCargo,
+  type Apartado,
+} from '../shared/finanzas';
 import { guardarActividad } from '../shared/actividad';
 import { SITIO_CORREO, enviarPlantilla, enviarVarios } from '../shared/correo';
 import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento, correoReporte, correoReporteResuelto } from '../shared/plantillas-correo';
@@ -66,6 +80,18 @@ type Rol = (typeof ROLES)[number];
 const ES_ADMIN = (rol?: string | null) => rol === 'ADMIN' || rol === 'SUPERADMIN';
 /** Huella de una contraseña generada (para confirmar que es la misma al enviarla por correo). */
 const huellaClave = (sal: string, password: string) => createHash('sha256').update(`${sal}:${password}`).digest('hex');
+/** Lista guardada como JSON (a veces como texto dos veces). */
+function jsonLista(v: unknown): any[] {
+  let x = v;
+  for (let k = 0; k < 2 && typeof x === 'string'; k++) {
+    try {
+      x = JSON.parse(x);
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(x) ? x : [];
+}
 
 // ---------- quién llama y qué puede hacer ----------
 type Yo = {
@@ -207,8 +233,8 @@ const REGLAS: Record<string, Regla> = {
     seccion: 'condominios',
     lecturaLibre: true,
     indices: {},
-    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
-    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
+    crear: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'mensajeComprobante', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
+    editar: ['nombre', 'tipo', 'tipoUnidad', 'direccion', 'telefonoCaseta', 'estacionamientoVisitas', 'serviciosCondominio', 'mensajeComprobante', 'modulos', 'activo', ...CAMPOS_PAGO, ...CAMPOS_AVISO],
     extras: {
       modulos: 'condominios.servicios',
       activo: 'condominios.servicios',
@@ -291,6 +317,16 @@ const REGLAS: Record<string, Regla> = {
 };
 
 const condoDe = (m: string, item: Item) => (m === 'Condominio' ? item.id : item.condominioId);
+
+/** Tipo de un cargo manual: uno de los del sistema o una categoría propia del condominio (si no, «Otros»). */
+async function tipoManual(tipo: unknown, condominioId: string) {
+  if ((TIPOS_CARGO_MANUAL as readonly string[]).includes(tipo as string)) return tipo as string;
+  if (typeof tipo === 'string' && tipo.startsWith('P-')) {
+    const c = await get('Condominio', { id: condominioId });
+    if (categoriasPropias(c?.categoriasIngreso).some((x) => x.key === tipo)) return tipo;
+  }
+  return 'OTRO';
+}
 
 /** Una sección pertenece a una amenidad completa del mismo condominio; no hay secciones de secciones. */
 async function validarParte(input: Item, condominioId: string, id?: string) {
@@ -440,7 +476,7 @@ async function db(p: Item, yo: Yo) {
     if (m === 'Amenidad') await validarParte(input, input.condominioId);
     if (m === 'Cargo') {
       input.estado = 'PENDIENTE';
-      input.tipo = (TIPOS_CARGO_MANUAL as readonly string[]).includes(input.tipo) ? input.tipo : 'OTRO';
+      input.tipo = await tipoManual(input.tipo, input.condominioId);
     }
     if (m === 'Mensaje') {
       // Foto de la administración: subida con chat.subirImagen a la carpeta del condominio.
@@ -731,9 +767,11 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     if (p.vence && !vence) fail('Fecha de vencimiento no válida.');
     const nuevos: Item = { monto, concepto, vence: vence ?? actual!.vence ?? null };
     // Las cuotas y recargos conservan su tipo; los cargos manuales pueden cambiarlo.
-    if (p.tipo !== undefined && actual!.tipo && (TIPOS_CARGO_MANUAL as readonly string[]).includes(actual!.tipo)) {
-      if (!(TIPOS_CARGO_MANUAL as readonly string[]).includes(p.tipo)) fail('Tipo de ingreso no válido.');
-      nuevos.tipo = p.tipo;
+    const esManual = (t?: string | null) => !!t && ((TIPOS_CARGO_MANUAL as readonly string[]).includes(t) || t.startsWith('P-'));
+    if (p.tipo !== undefined && esManual(actual!.tipo)) {
+      const tipo = await tipoManual(p.tipo, actual!.condominioId);
+      if (tipo !== p.tipo) fail('Tipo de ingreso no válido.');
+      nuevos.tipo = tipo;
     }
     // Un comprobante en revisión ya cubre este monto: primero se aprueba o rechaza.
     if (monto !== actual!.monto) {
@@ -808,8 +846,8 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
       formaPago: str(p.formaPago, 60) || null,
       monto,
       evidencias: JSON.stringify(evidencias),
-      // Gasto pagado con el fondo de amenidades (se descuenta del ahorro de amenidades)
-      fondo: p.fondo === FONDO_AMENIDADES ? FONDO_AMENIDADES : null,
+      // Salida de un fondo (amenidades, multas, ahorro…) o de un apartado: se descuenta de su saldo.
+      fondo: fondoValido(p.fondo, c),
     };
     if (actual) {
       exigirSinEdiciones(actual, yo, 'egreso');
@@ -1151,6 +1189,77 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     return out;
   },
 
+  // Categorías de ingreso propias del condominio (además de las del sistema): [{ key?, label, fondo }].
+  async 'finanzas.categorias'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const actuales = categoriasPropias(c.categoriasIngreso);
+    const lista: Item[] = Array.isArray(p.categorias) ? p.categorias.slice(0, MAX_CATEGORIAS_PROPIAS) : [];
+    const sistema = new Set(categoriasDe(null).map((x) => x.label.toLowerCase()));
+    const vistas = new Set<string>();
+    const nuevas = lista.map((x) => {
+      const label = str(x?.label, 60);
+      if (!label) fail('Escribe el nombre de cada categoría.');
+      const k = label.toLowerCase();
+      if (sistema.has(k) || vistas.has(k)) fail(`La categoría «${label}» ya existe.`);
+      vistas.add(k);
+      const previa = actuales.find((a) => a.key === x?.key);
+      return { key: previa?.key ?? `P-${randomUUID().replace(/-/g, '').slice(0, 8)}`, label, fondo: x?.fondo === true };
+    });
+    // Una categoría con cargos o pagos no se borra: se conserva (con su nombre) para no perder la clasificación.
+    const quitadas = actuales.filter((a) => !nuevas.some((n) => n.key === a.key));
+    if (quitadas.length) {
+      const [cargos, pagos] = await Promise.all([byIndex('Cargo', 'byCondominio', 'condominioId', c.id), byIndex('Pago', 'byCondominio', 'condominioId', c.id)]);
+      const usadas = new Set([...cargos.map((x) => x.tipo), ...pagos.flatMap((x) => [x.categoriaResidente, ...jsonLista(x.desglose).map((d: Item) => d.categoria)])]);
+      const enUso = quitadas.filter((q) => usadas.has(q.key));
+      if (enUso.length) fail(`No se puede quitar «${enUso[0].label}»: ya tiene cargos o pagos. Puedes cambiarle el nombre.`);
+    }
+    await update('Condominio', { id: c.id }, { categoriasIngreso: JSON.stringify(nuevas) });
+    anotar('Condominio', c, 'finanzas', 'Se actualizaron las categorías de ingreso');
+    return { categorias: nuevas };
+  },
+
+  // Apartados manuales del saldo (macromedidor, fondo de emergencia…): alta, cambio de nombre o archivar.
+  async 'apartados.guardar'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const lista = apartadosDe(c.apartados);
+    const nombre = str(p.nombre, 80);
+    if (!nombre) fail('Escribe el nombre del apartado.');
+    const id = str(p.id, 20);
+    let nuevos: Apartado[];
+    if (id) {
+      if (!lista.some((a) => a.id === id)) fail('Apartado no encontrado.');
+      nuevos = lista.map((a) => (a.id === id ? { ...a, nombre, descripcion: str(p.descripcion, 300) || null, activo: p.activo !== false } : a));
+    } else {
+      if (lista.length >= MAX_APARTADOS) fail(`Máximo ${MAX_APARTADOS} apartados por condominio.`);
+      nuevos = [...lista, { id: `A-${randomUUID().replace(/-/g, '').slice(0, 8)}`, nombre, descripcion: str(p.descripcion, 300) || null, activo: true, movimientos: [] }];
+    }
+    await update('Condominio', { id: c.id }, { apartados: JSON.stringify(nuevos) });
+    anotar('Condominio', c, 'finanzas', `Apartado «${nombre}» ${id ? 'actualizado' : 'creado'}`);
+    return { apartados: nuevos };
+  },
+
+  // Apartar (monto > 0) o liberar (monto < 0) dinero de un apartado, con fecha y nota.
+  async 'apartados.movimiento'(p, yo) {
+    const c = await condominioFinanzas(p, yo, 'editar');
+    const lista = apartadosDe(c.apartados);
+    const a = lista.find((x) => x.id === str(p.id, 20));
+    if (!a) fail('Apartado no encontrado.');
+    const monto = Math.round(Number(p.monto) * 100) / 100;
+    if (!monto || Math.abs(monto) > 100_000_000) fail('Indica el monto.');
+    const fecha = fechaValida(p.fecha) || hoyMX();
+    if (monto < 0) {
+      const { saldo } = saldoApartado(a!, (await byIndex('Egreso', 'byCondominio', 'condominioId', c.id)) as { fecha: string; monto: number; fondo?: string }[], '9999-12');
+      if (-monto > saldo + 0.004) fail(`El apartado solo tiene ${saldo.toFixed(2)} disponibles para liberar.`);
+    }
+    const nota = str(p.nota, 300);
+    if (!nota) fail('Escribe una nota (para qué se aparta o por qué se libera).');
+    const mov = { id: randomUUID().slice(0, 8), fecha, monto, nota, porNombre: yo.nombre, en: now() };
+    const nuevos = lista.map((x) => (x.id === a!.id ? { ...x, movimientos: [...x.movimientos, mov] } : x));
+    await update('Condominio', { id: c.id }, { apartados: JSON.stringify(nuevos) });
+    anotar('Condominio', c, 'finanzas', `${monto > 0 ? 'Se apartaron' : 'Se liberaron'} ${Math.abs(monto).toFixed(2)} en «${a!.nombre}»`);
+    return { apartados: nuevos };
+  },
+
   // Saldo inicial de un mes capturado a mano (saldoInicial = null lo quita y vuelve a arrastrarse del mes anterior).
   async 'saldos.inicial'(p, yo) {
     const c = await condominioFinanzas(p, yo, 'editar');
@@ -1410,6 +1519,7 @@ type Asignacion = {
   condominiosServicio?: string[];
   servicios?: string[];
   empresa?: string | null;
+  nombrePublico?: string | null;
 };
 
 /** Servicios que da un proveedor: los del catálogo y los que escriba la administración (máximo 25). */
@@ -1452,7 +1562,7 @@ async function validarAsignacion(p: Item, yo: Yo): Promise<Asignacion> {
     if (!condominiosServicio.length) fail('Asigna al menos un condominio que atiende.');
     const servicios = serviciosDe(p.servicios);
     if (!servicios.length) fail('Elige al menos un servicio que da.');
-    return { rol, ...vacio, condominiosServicio, servicios, empresa: str(p.empresa, 120) || null };
+    return { rol, ...vacio, condominiosServicio, servicios, empresa: str(p.empresa, 120) || null, nombrePublico: str(p.nombrePublico, 80) || null };
   }
   exigir(yo, 'usuarios', 'editar');
   const c = await get('Condominio', { id: str(p.condominioId, 64) });
@@ -2015,6 +2125,21 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const usar = p.usarSaldoFavor ?? pago!.usarSaldoFavor;
     const favorUsado = usar ? favorAUsar(unidad?.saldoFavor ?? 0, total, monto) : 0;
     if (!(monto > 0) && !(favorUsado > 0)) fail('Indica el monto recibido.');
+    // Desglose por categoría (botón «Desglosar»): reparte lo recibido entre categorías; debe sumar el monto recibido.
+    let desglose: { categoria: string; monto: number }[] | null = null;
+    if (Array.isArray(p.desglose) && p.desglose.length) {
+      const cats = categoriasDe(await get('Condominio', { id: pago!.condominioId }));
+      const partes = new Map<string, number>();
+      for (const d of p.desglose.slice(0, 20)) {
+        const m = r2(Number(d?.monto));
+        if (!(m > 0)) continue;
+        if (!esCategoria(d?.categoria, cats)) fail('Categoría de ingreso no válida en el desglose.');
+        partes.set(d.categoria, r2((partes.get(d.categoria) ?? 0) + m));
+      }
+      const suma = r2([...partes.values()].reduce((s, x) => s + x, 0));
+      if (partes.size && Math.abs(suma - monto) > 0.009) fail(`El desglose suma ${suma.toFixed(2)} y lo recibido es ${monto.toFixed(2)}: deben coincidir.`);
+      if (partes.size) desglose = [...partes].map(([categoria, m]) => ({ categoria, monto: m }));
+    }
     const plan = repartirPago(cargos, monto + favorUsado);
     // Lo que sobra puede abonarse a otros cargos pendientes de la unidad (p. ej. pagó cuota y multa en una sola
     // transferencia pero solo marcó la cuota): primero los que vencen antes; si el último no alcanza, se abona.
@@ -2069,6 +2194,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
         ajuste,
         diferencia: ajuste === 'COMPLETO' ? null : Math.abs(diferencia),
         abonoOtros: extra?.abonado ?? null,
+        desglose: desglose ? JSON.stringify(desglose) : null,
       });
     } catch (err) {
       if (favorUsado > 0) await moverSaldoFavor(pago!.unidadId, favorUsado);
@@ -2213,7 +2339,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const ids: string[] | null = Array.isArray(p.unidadIds) ? p.unidadIds.map((x: unknown) => str(x, 64)) : null;
     const destino = ids ? todas.filter((u) => ids.includes(u.id)) : todas;
     if (!destino.length) fail('El condominio no tiene unidades.');
-    const tipo = (TIPOS_CARGO_MANUAL as readonly string[]).includes(p.tipo) ? p.tipo : 'RECAUDACION';
+    const tipo = p.tipo ? await tipoManual(p.tipo, c!.id) : 'RECAUDACION';
     const grupo = randomUUID().slice(0, 8);
     for (let i = 0; i < destino.length; i += 25) {
       await Promise.all(
@@ -2354,7 +2480,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     const condominiosServicio = [...new Set([...ajenos, ...pedidos])];
     if (!condominiosServicio.length) fail('Debe quedar al menos un condominio asignado.');
     const r = await editarPersona(perfil, { nombre: p.nombre, telefono: p.telefono, email: p.email, enviarCorreo: p.enviarCorreo }, yo);
-    await update('Perfil', { userId: perfil.userId }, { empresa: str(p.empresa, 120) || null, servicios, condominiosServicio });
+    await update('Perfil', { userId: perfil.userId }, { empresa: str(p.empresa, 120) || null, nombrePublico: str(p.nombrePublico, 80) || null, servicios, condominiosServicio });
     return r;
   },
 
@@ -2380,11 +2506,37 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     );
   },
 
+  // Asistencia de proveedores (check-in y check-out con foto) de un mes (AAAA-MM) o de los últimos `dias` días.
+  async 'proveedores.asistencias'(p, yo) {
+    exigir(yo, 'proveedores', 'ver');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const dias = Math.min(31, Math.max(0, Number(p.dias) || 0));
+    const desde = dias ? new Date(Date.now() - dias * 86400000).toISOString() : '';
+    const mes = /^\d{4}-\d{2}$/.test(p.mes) ? p.mes : hoyMX().slice(0, 7);
+    const proveedorId = str(p.proveedorId, 64);
+    const items = (await byIndex('AsistenciaProveedor', 'byCondominio', 'condominioId', cid)).filter(
+      (a) => (dias ? a.entradaEn >= desde : hoyMX(new Date(a.entradaEn)).startsWith(mes)) && (!proveedorId || a.proveedorId === proveedorId),
+    );
+    const firmar = (k?: string) => (k ? getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: k }), { expiresIn: 3600 }) : Promise.resolve(null));
+    return Promise.all(
+      items
+        .sort((a, b) => String(b.entradaEn).localeCompare(String(a.entradaEn)))
+        .map(async ({ __typename, entradaFoto, salidaFoto, ...a }) => ({
+          ...a,
+          entradaFotoUrl: dias ? null : await firmar(entradaFoto),
+          salidaFotoUrl: dias ? null : await firmar(salidaFoto),
+        })),
+    );
+  },
+
   // ----- cotizaciones y mensajes del sitio público (Lambda siia-cotizaciones) -----
   // Todas, de la más reciente a la más antigua; no dependen de un condominio.
   async 'cotizaciones.lista'(_p, yo) {
     exigir(yo, 'cotizaciones', 'ver');
+    // Las solicitudes de ayuda de residentes (SOPORTE) van a Asistencia técnica, no a Cotizaciones.
     return (await scan('Cotizacion'))
+      .filter((c) => c.origen !== 'SOPORTE')
       .map(({ __typename, ipHash, respondidaPor, ...c }) => {
         // Quién la respondió: los administradores ven el nombre; el correo, solo el superadministrador.
         const por = jsonDe(respondidaPor);
@@ -2396,10 +2548,11 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
 
   // «Respondido al solicitante»: deja de estar pendiente para todos y queda quién y cuándo la respondió.
   async 'cotizaciones.responder'(p, yo) {
-    exigir(yo, 'cotizaciones', 'editar');
     const id = str(p.id, 64);
     const c = await get('Cotizacion', { id });
     if (!c) fail('Solicitud no encontrada.');
+    // Asistencia técnica la atiende quien gestiona residentes (reenviar accesos y contraseñas).
+    exigir(yo, c!.origen === 'SOPORTE' ? 'usuarios' : 'cotizaciones', 'editar');
     if (c!.estado === 'RESPONDIDA') fail(`Ya la marcó como respondida ${jsonDe(c!.respondidaPor)?.nombre ?? 'otro administrador'}.`);
     const respondidaPor = { id: yo.sub, nombre: yo.nombre, email: yo.email };
     await update(
@@ -2421,6 +2574,48 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     if (!(await get('Cotizacion', { id }))) fail('Solicitud no encontrada.');
     await update('Cotizacion', { id }, { estado: 'PENDIENTE', respondidaEn: null, respondidaPor: null, notaRespuesta: null });
     return { ok: true };
+  },
+
+  // ----- asistencia técnica: «Pide ayuda» del portal (residentes sin acceso, contraseñas) -----
+  // Todas las solicitudes (no dependen de un condominio: el residente escribe su condominio y su casa). Si el correo
+  // que escribió es de una cuenta que este administrador gestiona, se incluye para reenviarle el acceso directo.
+  async 'asistencia.lista'(_p, yo) {
+    exigir(yo, 'usuarios', 'ver');
+    const [solicitudes, perfiles, condominios] = await Promise.all([scan('Cotizacion'), perfilesVisibles(yo), scan('Condominio')]);
+    const nombreCondo = new Map(condominios.map((c) => [c.id as string, c.nombre as string]));
+    const porCorreo = new Map(perfiles.filter((x) => !ES_ADMIN(x.rol) && x.email).map((x) => [String(x.email).toLowerCase(), x]));
+    const unidades = new Map<string, string>();
+    const lista = solicitudes.filter((c) => c.origen === 'SOPORTE');
+    for (const c of lista) {
+      const x = c.correo ? porCorreo.get(String(c.correo).toLowerCase()) : undefined;
+      if (x?.unidadId && !unidades.has(x.unidadId)) unidades.set(x.unidadId, (await get('Unidad', { id: x.unidadId }))?.etiqueta ?? '');
+    }
+    return Promise.all(
+      lista
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+        .map(async ({ __typename, ipHash, respondidaPor, ...c }) => {
+          const por = jsonDe(respondidaPor);
+          if (por && !yo.superadmin) delete por.email;
+          const x = c.correo ? porCorreo.get(String(c.correo).toLowerCase()) : undefined;
+          const cuenta = x ? await cognito.send(new AdminGetUserCommand({ UserPoolId, Username: x.userId })).catch(() => undefined) : undefined;
+          return {
+            ...c,
+            respondidaPor: por,
+            cuenta: x
+              ? {
+                  userId: x.userId,
+                  nombre: x.nombre ?? null,
+                  email: x.email,
+                  rol: x.rol,
+                  estado: x.estado,
+                  condominio: (x.condominioId && nombreCondo.get(x.condominioId)) || null,
+                  unidad: (x.unidadId && unidades.get(x.unidadId)) || null,
+                  status: cuenta?.UserStatus ?? null,
+                }
+              : null,
+          } as Item;
+        }),
+    );
   },
 
   // ----- suspender, eliminar (papelera de 30 días) y restaurar condominios (solo superadministrador) -----

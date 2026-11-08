@@ -1,8 +1,9 @@
-// Panel › Proveedores: los proveedores que atienden el condominio (jardinería, alberca, fumigación…) y los reportes de su
-// bitácora de trabajo, por proveedor y por mes. Los proveedores entran en siia.casa/proveedores (ver shared/proveedores.ts).
+// Panel › Proveedores: los proveedores que atienden el condominio (jardinería, alberca, fumigación…), los reportes de su
+// bitácora de trabajo por proveedor y por mes, y su asistencia (check-in y check-out con foto y hora). Cada proveedor
+// tiene un nombre que ven los residentes (p. ej. «Jardinería SIIA») en lugar del nombre de la persona. Los proveedores entran en siia.casa/proveedores (ver shared/proveedores.ts).
 import { useState } from 'react';
 import { adminCall } from '../api';
-import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, hoy, useAction, useLoad } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Seg, Tarjeta, TarjetaIcono, Tarjetas, fechaHora, hoy, useAction, useLoad } from '../ui';
 import { useAdmin } from './AdminApp';
 import { BotonesAlta, Contrasena, avisoAlta, conCorreo } from './Residentes';
 import { TarjetaReporte } from '../proveedores/ProveedoresApp';
@@ -12,9 +13,9 @@ import type { Schema } from '../api';
 type Perfil = Schema['Perfil']['type'];
 type Proveedor = Perfil & { cuenta?: string | null };
 
-export function ProveedoresAdmin() {
+export function ProveedoresAdmin({ inicio }: { inicio?: 'asistencia' } = {}) {
   const { condo, puede } = useAdmin();
-  const [tab, setTab] = useState<'reportes' | 'proveedores'>('reportes');
+  const [tab, setTab] = useState<'reportes' | 'asistencia' | 'proveedores'>(inicio ?? 'reportes');
   const [crear, setCrear] = useState(false);
   const gestiona = puede('proveedores', 'editar');
   const lista = useLoad(() => adminCall<Proveedor[]>('proveedores.lista', { condominioId: condo!.id }), [condo!.id]);
@@ -34,6 +35,7 @@ export function ProveedoresAdmin() {
         onChange={setTab}
         options={[
           ['reportes', 'Reportes'],
+          ['asistencia', 'Asistencia (check-in)'],
           ['proveedores', `Proveedores${lista.data ? ` (${lista.data.length})` : ''}`],
         ]}
       />
@@ -43,6 +45,8 @@ export function ProveedoresAdmin() {
         <ErrorBox error={lista.error} retry={lista.reload} />
       ) : tab === 'reportes' ? (
         <Reportes proveedores={lista.data!} />
+      ) : tab === 'asistencia' ? (
+        <AsistenciaProveedores proveedores={lista.data!} />
       ) : (
         <ListaProveedores proveedores={lista.data!} gestiona={gestiona} recargar={() => lista.reload(true)} />
       )}
@@ -131,7 +135,7 @@ function ListaProveedores({ proveedores, gestiona, recargar }: { proveedores: Pr
               onClick={() => setFicha(p.userId)}
               media={<TarjetaIcono name="package" />}
               titulo={p.nombre || p.email}
-              sub={`${p.empresa || 'Personal propio'} · ${(p.servicios ?? []).filter(Boolean).join(' · ')}`}
+              sub={`${p.nombrePublico ? `Los residentes lo ven como «${p.nombrePublico}» · ` : ''}${p.empresa || 'Personal propio'} · ${(p.servicios ?? []).filter(Boolean).join(' · ')}`}
               lado={
                 <>
                   <Badge estado={p.estado === 'APROBADO' ? 'APROBADO' : 'SUSPENDIDO'}>{p.estado === 'APROBADO' ? 'Activo' : 'Suspendido'}</Badge>
@@ -153,6 +157,7 @@ function ListaProveedores({ proveedores, gestiona, recargar }: { proveedores: Pr
             </div>
             <Datos
               items={[
+                ['Lo ven los residentes como', fichaP.nombrePublico || fichaP.empresa || 'Sin nombre para residentes'],
                 ['Empresa', fichaP.empresa || 'Personal propio'],
                 ['Correo', fichaP.email],
                 ['Teléfono', fichaP.telefono],
@@ -196,7 +201,7 @@ function ListaProveedores({ proveedores, gestiona, recargar }: { proveedores: Pr
 
 function EditarProveedor({ p, onClose, onDone }: { p: Proveedor | null; onClose: () => void; onDone: () => void }) {
   const { condo, condos } = useAdmin();
-  const [f, setF] = useState({ nombre: p?.nombre ?? '', email: p?.email ?? '', telefono: p?.telefono ?? '', empresa: p?.empresa ?? '' });
+  const [f, setF] = useState({ nombre: p?.nombre ?? '', email: p?.email ?? '', telefono: p?.telefono ?? '', empresa: p?.empresa ?? '', nombrePublico: p?.nombrePublico ?? '' });
   const [servicios, setServicios] = useState<string[]>(((p?.servicios ?? []) as string[]).filter(Boolean));
   const [otro, setOtro] = useState('');
   // Condominios que atiende (solo se muestran los que administra quien edita)
@@ -238,10 +243,13 @@ function EditarProveedor({ p, onClose, onDone }: { p: Proveedor | null; onClose:
           <Field label="Nombre de la persona">
             <input required maxLength={120} value={f.nombre} onChange={set('nombre')} />
           </Field>
-          <Field label="Empresa" hint="Déjalo vacío si es personal propio del condominio.">
+          <Field label="Empresa" hint="Déjalo vacío si es personal propio (de SIIA o del condominio).">
             <input maxLength={120} value={f.empresa} onChange={set('empresa')} placeholder="Ej. Jardines QRO" />
           </Field>
         </div>
+        <Field label="Nombre que verán los residentes" hint="Así aparece en sus avisos de llegada y en los trabajos realizados, en lugar del nombre de la persona.">
+          <input required maxLength={80} value={f.nombrePublico} onChange={set('nombrePublico')} placeholder={`Ej. ${servicios[0] && servicios[0] !== OTRO_SERVICIO ? servicios[0].split(' ')[0] : 'Jardinería'} SIIA`} />
+        </Field>
         <div className="form-2">
           <Field label="Correo electrónico" hint="Es su usuario para entrar.">
             <input required type="email" value={f.email} onChange={set('email')} disabled={!!p && p.estado !== 'APROBADO'} />
@@ -301,5 +309,114 @@ function EditarProveedor({ p, onClose, onDone }: { p: Proveedor | null; onClose:
         )}
       </form>
     </Modal>
+  );
+}
+
+// ---------- Asistencia (check-in y check-out) ----------
+type AsistenciaAdmin = {
+  id: string;
+  proveedorId: string;
+  proveedorNombre?: string | null;
+  nombrePublico?: string | null;
+  estado: 'DENTRO' | 'SALIO';
+  entradaEn: string;
+  entradaDescripcion?: string | null;
+  entradaFotoUrl?: string | null;
+  salidaEn?: string | null;
+  salidaDescripcion?: string | null;
+  salidaFotoUrl?: string | null;
+};
+
+const duracion = (a: string, b?: string | null) => {
+  if (!b) return null;
+  const min = Math.round((Date.parse(b) - Date.parse(a)) / 60000);
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+};
+
+function AsistenciaProveedores({ proveedores }: { proveedores: Proveedor[] }) {
+  const { condo } = useAdmin();
+  const [mes, setMes] = useState(hoy().slice(0, 7));
+  const [proveedorId, setProveedorId] = useState('');
+  const [ficha, setFicha] = useState<AsistenciaAdmin | null>(null);
+  const { data, error, loading, reload } = useLoad(
+    () => adminCall<AsistenciaAdmin[]>('proveedores.asistencias', { condominioId: condo!.id, mes, proveedorId }),
+    [condo!.id, mes, proveedorId],
+  );
+  return (
+    <>
+      <section className="panel">
+        <div className="form-2">
+          <Field label="Proveedor">
+            <select value={proveedorId} onChange={(e) => setProveedorId(e.target.value)}>
+              <option value="">Todos los proveedores</option>
+              {proveedores.map((p) => (
+                <option key={p.userId} value={p.userId}>
+                  {p.nombre || p.email}
+                  {p.nombrePublico ? ` · ${p.nombrePublico}` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Mes">
+            <input type="month" value={mes} max={hoy().slice(0, 7)} onChange={(e) => e.target.value && setMes(e.target.value)} />
+          </Field>
+        </div>
+      </section>
+      {loading && !data ? (
+        <Loading />
+      ) : error ? (
+        <ErrorBox error={error} retry={reload} />
+      ) : data!.length ? (
+        <section className="panel">
+          <Tarjetas>
+            {data!.map((a) => (
+              <Tarjeta
+                key={a.id}
+                tono={a.estado === 'DENTRO' ? 'info' : 'ok'}
+                onClick={() => setFicha(a)}
+                media={a.entradaFotoUrl ? <img className="tarjeta-foto" src={a.entradaFotoUrl} alt="" loading="lazy" /> : <TarjetaIcono name="login" />}
+                titulo={`${a.nombrePublico || a.proveedorNombre || 'Proveedor'}${a.proveedorNombre && a.nombrePublico ? ` · ${a.proveedorNombre}` : ''}`}
+                sub={`Entrada ${fechaHora(a.entradaEn)}${a.salidaEn ? ` · Salida ${fechaHora(a.salidaEn)}` : ''}${a.entradaDescripcion ? ` · ${a.entradaDescripcion}` : ''}`}
+                lado={
+                  <>
+                    <Badge estado={a.estado === 'DENTRO' ? 'EN_PROCESO' : 'TERMINADO'}>{a.estado === 'DENTRO' ? 'En servicio' : 'Terminado'}</Badge>
+                    {duracion(a.entradaEn, a.salidaEn) && <span className="small muted">{duracion(a.entradaEn, a.salidaEn)}</span>}
+                  </>
+                }
+              />
+            ))}
+          </Tarjetas>
+        </section>
+      ) : (
+        <section className="panel">
+          <Empty icon="clock">Sin check-ins en ese mes. Los proveedores lo hacen desde siia.casa/proveedores al llegar.</Empty>
+        </section>
+      )}
+      {ficha && (
+        <Modal title={ficha.nombrePublico || ficha.proveedorNombre || 'Asistencia'} onClose={() => setFicha(null)} wide>
+          <div className="stack">
+            <Datos
+              items={[
+                ['Persona', ficha.proveedorNombre],
+                ['Lo ven los residentes como', ficha.nombrePublico],
+                ['Duración', duracion(ficha.entradaEn, ficha.salidaEn) ?? 'Sigue en servicio'],
+              ]}
+            />
+            <div className="grid-2">
+              <div className="stack" style={{ gap: 6 }}>
+                <strong>Check-in · {fechaHora(ficha.entradaEn)}</strong>
+                {ficha.entradaFotoUrl && <img className="foto-asistencia" src={ficha.entradaFotoUrl} alt="Foto al llegar" />}
+                {ficha.entradaDescripcion && <span className="small">{ficha.entradaDescripcion}</span>}
+              </div>
+              <div className="stack" style={{ gap: 6 }}>
+                <strong>Check-out · {ficha.salidaEn ? fechaHora(ficha.salidaEn) : 'pendiente'}</strong>
+                {ficha.salidaFotoUrl && <img className="foto-asistencia" src={ficha.salidaFotoUrl} alt="Foto al salir" />}
+                {ficha.salidaDescripcion && <span className="small">{ficha.salidaDescripcion}</span>}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

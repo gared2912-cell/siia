@@ -1,0 +1,132 @@
+---
+// «Pide ayuda»: residentes que no pueden entrar al portal (no recibieron sus accesos, vencieron u olvidaron su
+// contraseña). Se guarda como solicitud SOPORTE y llega al panel en Asistencia técnica (no en Cotizaciones), donde la
+// administración le reenvía el acceso o le asigna una contraseña.
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+import { photo } from '../data/images';
+import { endpointFormularios } from '../data/formularios';
+import { site } from '../data/site';
+
+const problemas = ['No recibí mis accesos', 'Olvidé mi contraseña', 'Mis accesos vencieron', 'No puedo entrar (otro problema)', 'Otro'];
+---
+
+<Base title="Pide ayuda" description="¿No puedes entrar al portal de residentes de tu condominio? Pide ayuda y la administración te reenvía tu acceso.">
+  <PageHero
+    crumb="Pide ayuda"
+    title="¿No puedes entrar al portal?"
+    lead="Déjanos tus datos y la administración de tu condominio te reenviará tu acceso o te asignará una contraseña nueva."
+    image={photo('atencion-clientes')}
+  />
+
+  <section class="section">
+    <div class="container ayuda">
+      <div class="card ayuda__info">
+        <h2 class="h-small">Antes de escribirnos</h2>
+        <ul>
+          <li>Tu usuario es el <strong>correo</strong> con el que la administración te dio de alta.</li>
+          <li>Revisa tu bandeja de <strong>correo no deseado</strong>: ahí suele llegar el mensaje con tu contraseña temporal.</li>
+          <li>La contraseña temporal vence a los 7 días. Si ya venció, pide aquí que te la reenviemos.</li>
+          <li>Si olvidaste tu contraseña, también puedes usar «¿Olvidaste tu contraseña?» en la pantalla de acceso.</li>
+        </ul>
+        <a class="btn btn--ghost" href="/portal/">Ir al portal <Icon name="arrow" /></a>
+      </div>
+
+      <form
+        class="card form"
+        data-lead-form
+        data-origen="SOPORTE"
+        data-endpoint={endpointFormularios}
+        data-subject="Necesito ayuda para entrar al portal de residentes"
+        data-gracias="¡Listo! Recibimos tu solicitud. La administración revisará tus datos y te enviará tu acceso al correo que nos diste."
+        data-whatsapp={site.mostrarWhatsapp ? site.whatsapp : undefined}
+      >
+        <h2 class="h-small">Solicitud de ayuda</h2>
+        <div class="field">
+          <label for="a-motivo">¿Qué pasó? *</label>
+          <select id="a-motivo" name="motivo" required>
+            <option value="" disabled selected>Selecciona una opción</option>
+            {problemas.map((r) => <option>{r}</option>)}
+          </select>
+          <span class="error" aria-live="polite"></span>
+        </div>
+        <div class="field">
+          <label for="a-nombre">Nombre completo *</label>
+          <input id="a-nombre" name="nombre" type="text" autocomplete="name" required />
+          <span class="error" aria-live="polite"></span>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="a-condominio">Condominio *</label>
+            <input id="a-condominio" name="condominio" type="text" autocomplete="organization" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="a-unidad">Casa o departamento *</label>
+            <input id="a-unidad" name="unidad" type="text" required placeholder="Ej. Casa 12, Depto 202" />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label for="a-correo">Correo de tu cuenta *</label>
+            <input id="a-correo" name="correo" type="email" autocomplete="email" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+          <div class="field">
+            <label for="a-telefono">Teléfono / WhatsApp *</label>
+            <input id="a-telefono" name="telefono" type="tel" autocomplete="tel" inputmode="tel" pattern="[0-9 +()-]{10,}" required />
+            <span class="error" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="a-mensaje">Cuéntanos más (opcional)</label>
+          <textarea id="a-mensaje" name="mensaje"></textarea>
+        </div>
+        <label class="consent">
+          <input type="checkbox" name="consentimiento" required />
+          <span>
+            {site.mostrarAviso
+              ? <>Acepto el <a href="/aviso-de-privacidad/" target="_blank">aviso de privacidad</a>.</>
+              : 'Autorizo que SIIA use mis datos para atender mi solicitud.'}
+          </span>
+        </label>
+        <div class="trampa" aria-hidden="true"><label>Sitio web <input name="sitio_web" type="text" tabindex="-1" autocomplete="off" /></label></div>
+        <button class="btn" type="submit">Enviar solicitud <Icon name="arrow" /></button>
+        <p class="form-status" role="status" hidden data-status></p>
+      </form>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { initLeadForms } from '../scripts/lead-form';
+  initLeadForms();
+</script>
+
+<style>
+  .ayuda {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .ayuda {
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+  }
+  .ayuda__info ul {
+    margin: 0 0 20px;
+    padding-left: 20px;
+    display: grid;
+    gap: 10px;
+  }
+  .h-small {
+    font-size: 1.4rem;
+  }
+  .form .btn {
+    justify-self: start;
+  }
+</style>

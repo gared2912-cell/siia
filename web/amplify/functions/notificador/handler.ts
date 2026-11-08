@@ -152,7 +152,28 @@ async function procesar(modelo: string, r: Item): Promise<number> {
       });
     }
 
+    case 'AsistenciaProveedor': {
+      const condo = await nombreCondo(r.condominioId);
+      const quien = r.nombrePublico || r.proveedorNombre || 'Proveedor';
+      const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' });
+      const salio = r.estado === 'SALIO';
+      return enviar(await administradores(r.condominioId, 'proveedores'), 'proveedores', {
+        title: salio ? `${quien} terminó su servicio · ${hora(r.salidaEn)}` : `Llegó ${quien} · ${hora(r.entradaEn)}`,
+        body: `${condo}${r.proveedorNombre ? ` · ${r.proveedorNombre}` : ''}${!salio && r.entradaDescripcion ? ` · ${corto(r.entradaDescripcion, 80)}` : ''}`,
+        url: panel(r.condominioId, 'proveedores/asistencia'),
+        tag: `asistencia-prov-${r.id}`,
+      });
+    }
+
     case 'Cotizacion': {
+      if (r.origen === 'SOPORTE') {
+        return enviar(await administradores(null, 'asistencia'), 'asistencia', {
+          title: `Asistencia técnica: ${corto(r.nombre ?? '', 50)}`,
+          body: [r.motivo, r.desarrollo, r.unidad].filter(Boolean).join(' · ') || 'Un residente pide ayuda para entrar',
+          url: `/admin/#/asistencia/${r.id}`,
+          tag: `asistencia-${r.id}`,
+        });
+      }
       const contacto = r.origen === 'CONTACTO';
       return enviar(await administradores(null, 'cotizaciones'), 'cotizaciones', {
         title: contacto ? `Mensaje del sitio web: ${corto(r.nombre ?? '', 50)}` : `Solicitud de cotización: ${corto(r.nombre ?? '', 50)}`,
@@ -167,8 +188,14 @@ async function procesar(modelo: string, r: Item): Promise<number> {
 
 export const handler = async (event: DynamoDBStreamEvent) => {
   for (const rec of event.Records) {
-    if (rec.eventName !== 'INSERT' || !rec.dynamodb?.NewImage) continue;
+    if (!rec.dynamodb?.NewImage) continue;
     const modelo = rec.eventSourceARN?.split(':table/')[1]?.split('-')[0] ?? '';
+    // Solo registros nuevos; de la asistencia de proveedores, también el check-out (pasa de DENTRO a SALIO).
+    if (rec.eventName !== 'INSERT') {
+      const antes = rec.dynamodb.OldImage ? (unmarshall(rec.dynamodb.OldImage as any) as Item) : undefined;
+      const despues = unmarshall(rec.dynamodb.NewImage as any) as Item;
+      if (!(rec.eventName === 'MODIFY' && modelo === 'AsistenciaProveedor' && antes?.estado === 'DENTRO' && despues.estado === 'SALIO')) continue;
+    }
     try {
       const item = unmarshall(rec.dynamodb.NewImage as any) as Item;
       const n = await procesar(modelo, item);

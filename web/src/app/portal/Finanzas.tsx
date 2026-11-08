@@ -6,8 +6,9 @@ import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading,
 import type { ModProps } from './PortalApp';
 import { useAvisos } from './Notificaciones';
 import { AJUSTES_PAGO, favorAUsar, r2, type AjustePago } from '../../../amplify/functions/shared/pagos';
+import { QUE_PAGA_RESIDENTE } from '../../../amplify/functions/shared/finanzas';
 
-type Cargo = { id: string; concepto: string; periodo?: string; monto: number; vence?: string; estado: string };
+type Cargo = { id: string; concepto: string; periodo?: string; monto: number; vence?: string; estado: string; tipo?: string };
 type Pago = { id: string; monto: number; fecha?: string; referencia?: string; estado: string; folio?: string; nota?: string; comprobantePath?: string; createdAt: string; cargoIds?: string[]; validadoEn?: string;
   ajuste?: string; diferencia?: number; saldoFavorUsado?: number; montoDeclarado?: number };
 type Estado = {
@@ -20,7 +21,7 @@ type Estado = {
   titular?: { condominio: string; direccion: string | null; unidad: string; residente: string };
 };
 
-export function Finanzas(_: ModProps) {
+export function Finanzas({ perfil }: ModProps) {
   const { data, error, loading, reload } = useLoad(() => portal<Estado>('finanzas.estadoCuenta'));
   const [pagar, setPagar] = useState(false);
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
@@ -159,6 +160,7 @@ export function Finanzas(_: ModProps) {
       {pagar && (
         <RegistrarPago
           pendientes={pendientes}
+          condo={perfil.condominio!}
           saldoFavor={r.saldoFavor}
           onClose={() => setPagar(false)}
           onDone={() => {
@@ -205,8 +207,20 @@ export function Finanzas(_: ModProps) {
   );
 }
 
-function RegistrarPago({ pendientes, saldoFavor, onClose, onDone }: { pendientes: Cargo[]; saldoFavor: number; onClose: () => void; onDone: () => void }) {
+/** Lo que más probablemente está pagando (el residente lo confirma): cartera vencida si hay cargos vencidos, si no su cuota. */
+function categoriaProbable(cargos: Cargo[]) {
+  const h = hoy();
+  if (cargos.some((c) => c.vence && c.vence < h && (c.periodo ?? '') < h.slice(0, 7))) return 'RECUPERACION';
+  if (cargos.length && cargos.every((c) => c.id.startsWith('reserva#'))) return 'AMENIDADES';
+  return cargos.length ? 'CORRIENTE' : '';
+}
+
+type CondoPago = { mensajeComprobante?: string | null; categoriasPropias?: { key: string; label: string }[] };
+
+function RegistrarPago({ pendientes, condo, saldoFavor, onClose, onDone }: { pendientes: Cargo[]; condo: CondoPago; saldoFavor: number; onClose: () => void; onDone: () => void }) {
   const [sel, setSel] = useState<string[]>(pendientes.map((c) => c.id));
+  const [categoria, setCategoria] = useState(() => categoriaProbable(pendientes));
+  const opciones = [...QUE_PAGA_RESIDENTE.filter((c) => c.key !== 'OTRO'), ...(condo.categoriasPropias ?? []), QUE_PAGA_RESIDENTE.find((c) => c.key === 'OTRO')!];
   const [usarFavor, setUsarFavor] = useState(saldoFavor > 0);
   const totalDe = (ids: string[]) => r2(pendientes.filter((c) => ids.includes(c.id)).reduce((s, c) => s + c.monto, 0));
   // Monto sugerido: el total de los cargos menos el saldo a favor que se descuenta.
@@ -225,6 +239,7 @@ function RegistrarPago({ pendientes, saldoFavor, onClose, onDone }: { pendientes
   const toggle = (id: string) => {
     const next = sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id];
     setSel(next);
+    setCategoria(categoriaProbable(pendientes.filter((c) => next.includes(c.id))) || categoria);
     setMonto(sugerido(next, usarFavor));
   };
   const pagado = r2(Number(monto) || 0);
@@ -239,7 +254,7 @@ function RegistrarPago({ pendientes, saldoFavor, onClose, onDone }: { pendientes
     const okk = await run(async () => {
       if (!file) throw new Error('Adjunta tu comprobante de pago.');
       const comprobantePath = await subirArchivo(file, 'comprobantes');
-      await portal('finanzas.registrarPago', { monto: Number(monto), fecha: fechaPago, referencia, comprobantePath, cargoIds: sel, usarSaldoFavor: usarFavor && favor > 0 });
+      await portal('finanzas.registrarPago', { monto: Number(monto), fecha: fechaPago, referencia, comprobantePath, cargoIds: sel, usarSaldoFavor: usarFavor && favor > 0, categoria });
     });
     if (okk) {
       refrescar(); // trae el aviso «Comprobante de pago recibido» y lo muestra al momento
@@ -318,12 +333,27 @@ function RegistrarPago({ pendientes, saldoFavor, onClose, onDone }: { pendientes
             {dif < 0 ? 'cuánto queda pendiente.' : 'cuánto tienes a favor; se descuenta de tus próximos pagos.'}
           </p>
         )}
+        <Field label="¿Qué estás pagando?" hint="Ayuda a la administración a registrar tu pago donde corresponde.">
+          <select required value={categoria} onChange={(e) => setCategoria(e.target.value)}>
+            <option value="">Selecciona…</option>
+            {opciones.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Referencia o clave de rastreo (opcional)">
           <input maxLength={120} value={referencia} onChange={(e) => setRef(e.target.value)} />
         </Field>
         <Field grupo label="Comprobante" hint="Foto o PDF, máximo 8 MB.">
           <ElegirArchivo pdf value={file} onChange={(fs) => setFile(fs[0] ?? null)} />
         </Field>
+        {condo.mensajeComprobante && (
+          <p className="small muted" style={{ margin: 0 }}>
+            <Icon name="clock" /> {condo.mensajeComprobante}
+          </p>
+        )}
         <button className="btn-app block" disabled={busy}>
           {busy ? 'Subiendo comprobante…' : 'Enviar comprobante'}
         </button>

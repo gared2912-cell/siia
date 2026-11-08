@@ -215,6 +215,16 @@ for (const fn of [backend.adminApi, backend.portalApi, backend.notificador]) fn.
 backend.addOutput({ custom: { ambiente: AMBIENTE, sitio: SITIO, vapidPublica: VAPID_PUBLICA, cotizacionesUrl: urlCotizaciones.url } });
 
 // ---------- notificaciones push ----------
+// Asistencia de proveedores: el check-in (alta) y el check-out (cambio) avisan a la administración.
+backend.notificador.resources.lambda.addEventSource(
+  new DynamoEventSource(tables.AsistenciaProveedor, {
+    startingPosition: StartingPosition.LATEST,
+    batchSize: 25,
+    retryAttempts: 2,
+    bisectBatchOnError: true,
+    filters: [FilterCriteria.filter({ eventName: FilterRule.or('INSERT', 'MODIFY') })],
+  }),
+);
 // El notificador escucha los registros nuevos de estas tablas (los streams ya existen en las tablas de Amplify).
 for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Mascota', 'Cotizacion']) {
   backend.notificador.resources.lambda.addEventSource(

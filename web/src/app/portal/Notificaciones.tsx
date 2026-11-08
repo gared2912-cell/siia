@@ -15,10 +15,31 @@ export type Aviso = { id: string; titulo: string; texto?: string; tipo?: string;
 export type ChatSinLeer = { ADMIN: number; CASETA: number };
 type Estado = { sinLeer: number; avisos: Aviso[]; chat: ChatSinLeer };
 /** `total`: avisos sin leer + mensajes de chat sin leer (campana e icono de la app). */
-type Ctx = Estado & { total: number; chatSinLeer: number; refrescar: () => void; leerTodo: () => Promise<void>; abrir: (a: Aviso) => void };
+type Ctx = Estado & {
+  total: number;
+  chatSinLeer: number;
+  refrescar: () => void;
+  leerTodo: () => Promise<void>;
+  abrir: (a: Aviso) => void;
+  /** Avisos sin leer por módulo del menú (finanzas, visitas, amenidades…): el número en rojo junto a cada módulo. */
+  porModulo: Record<string, number>;
+  /** Al entrar a un módulo, sus avisos quedan leídos. */
+  leerModulo: (modulo: string) => void;
+};
 
 const SIN_CHAT: ChatSinLeer = { ADMIN: 0, CASETA: 0 };
-const AvisosCtx = createContext<Ctx>({ sinLeer: 0, avisos: [], chat: SIN_CHAT, total: 0, chatSinLeer: 0, refrescar: () => {}, leerTodo: async () => {}, abrir: () => {} });
+const AvisosCtx = createContext<Ctx>({
+  sinLeer: 0,
+  avisos: [],
+  chat: SIN_CHAT,
+  total: 0,
+  chatSinLeer: 0,
+  refrescar: () => {},
+  leerTodo: async () => {},
+  abrir: () => {},
+  porModulo: {},
+  leerModulo: () => {},
+});
 export const useAvisos = () => useContext(AvisosCtx);
 
 /** Sección del portal donde se atiende cada tipo de aviso. Sin sección, el aviso se muestra completo. */
@@ -45,10 +66,14 @@ export const ICONO_AVISO: Record<string, string> = {
   INCIDENTE: 'alert',
   MANTENIMIENTO: 'tools',
   TRABAJO: 'tools',
+  PROVEEDOR: 'login',
   MASCOTA: 'paw',
   COMUNICADO: 'megaphone',
   ENCUESTA: 'vote',
 };
+
+/** Módulo del menú al que pertenece un aviso (para su contador). */
+const moduloDe = (a: Aviso) => (DESTINO[a.tipo ?? '']?.key ?? '').split('/')[0];
 
 const avisoDeHash = () => decodeURIComponent(location.hash.match(/aviso\/([^/?]+)/)?.[1] ?? '');
 
@@ -108,6 +133,23 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
     if (avisoDeHash()) location.hash = '/inicio';
   }, []);
 
+  const leerModulo = useCallback((modulo: string) => {
+    let leidos: Aviso[] = [];
+    setEstado((e) => {
+      leidos = e.avisos.filter((a) => !a.leido && moduloDe(a) === modulo);
+      if (!leidos.length) return e;
+      const ids = new Set(leidos.map((a) => a.id));
+      return { ...e, sinLeer: Math.max(0, e.sinLeer - leidos.length), avisos: e.avisos.map((a) => (ids.has(a.id) ? { ...a, leido: true } : a)) };
+    });
+    // Fuera del actualizador de estado (en modo estricto React lo llama dos veces).
+    setTimeout(() => {
+      for (const a of leidos) {
+        portal('inicio.leerAviso', { id: a.id }).catch(() => undefined);
+        cerrarNotificaciones((tag) => tag === `aviso-${a.id}`);
+      }
+    }, 0);
+  }, []);
+
   useEffect(() => {
     refrescar();
   }, [refrescar]);
@@ -133,9 +175,14 @@ export function AvisosProvider({ children }: { children: ReactNode }) {
   const chatSinLeer = estado.chat.ADMIN + estado.chat.CASETA;
   const total = estado.sinLeer + chatSinLeer;
   useInsigniaApp(total);
+  const porModulo: Record<string, number> = {};
+  for (const a of estado.avisos) {
+    const m = moduloDe(a);
+    if (!a.leido && m) porModulo[m] = (porModulo[m] ?? 0) + 1;
+  }
 
   return (
-    <AvisosCtx.Provider value={{ ...estado, total, chatSinLeer, refrescar, leerTodo, abrir }}>
+    <AvisosCtx.Provider value={{ ...estado, total, chatSinLeer, refrescar, leerTodo, abrir, porModulo, leerModulo }}>
       {children}
       {abierto && <AvisoCompleto aviso={abierto} onClose={() => setAbierto(null)} />}
     </AvisosCtx.Provider>

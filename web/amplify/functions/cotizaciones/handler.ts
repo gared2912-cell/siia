@@ -1,4 +1,5 @@
-// Formularios del sitio público: «Cotizar» (solicitud de cotización) y «Contacto». Sin sesión: se llama por la URL
+// Formularios del sitio público: «Cotizar» (solicitud de cotización), «Contacto» y «Pide ayuda» (SOPORTE: residentes
+// que no pueden entrar al portal; en el panel llegan a Asistencia técnica, no a Cotizaciones). Sin sesión: se llama por la URL
 // pública de la función (CORS solo para el dominio del sitio). Guarda la solicitud en Cotizacion, que el panel muestra
 // en Cotizaciones (y en la campana hasta que alguien la marque «Respondido al solicitante»), con notificación push.
 // Si dejó su correo, le llega un acuse automático con el diseño de SIIA (shared/plantillas-correo.ts).
@@ -36,13 +37,19 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   // Campo oculto que solo llenan los robots: se responde como si se hubiera guardado.
   if (texto(b.sitio_web, 200)) return responder(200, { ok: true });
 
-  const origen = b.origen === 'CONTACTO' ? 'CONTACTO' : 'COTIZACION';
+  const origen = b.origen === 'CONTACTO' ? 'CONTACTO' : b.origen === 'SOPORTE' ? 'SOPORTE' : 'COTIZACION';
   const nombre = texto(b.nombre, 120);
   const telefono = texto(b.telefono, 30);
   const correo = texto(b.correo, 160).toLowerCase();
   if (!nombre) return responder(400, { error: 'Escribe tu nombre.' });
   if ((telefono.match(/\d/g) ?? []).length < 10) return responder(400, { error: 'Escribe un teléfono de al menos 10 dígitos.' });
   if (correo && !correoValido(correo)) return responder(400, { error: 'El correo electrónico no es válido.' });
+  // Asistencia técnica: con el condominio, la casa o departamento y el correo de la cuenta se le puede reenviar el acceso.
+  if (origen === 'SOPORTE') {
+    if (!texto(b.condominio, 160)) return responder(400, { error: 'Escribe el nombre de tu condominio.' });
+    if (!texto(b.unidad, 60)) return responder(400, { error: 'Escribe tu número de casa o departamento.' });
+    if (!correo) return responder(400, { error: 'Escribe el correo con el que te dieron de alta.' });
+  }
   const unidades = Number.parseInt(String(b.unidades ?? ''), 10);
   const servicios = texto(b.servicios, 600)
     .split(',')
@@ -76,6 +83,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     tipoDesarrollo: texto(b.tipo, 80) || null,
     unidades: Number.isFinite(unidades) && unidades > 0 ? Math.min(unidades, 100000) : null,
     desarrollo: texto(b.desarrollo, 160) || texto(b.condominio, 160) || null,
+    unidad: texto(b.unidad, 60) || null,
     ubicacion: texto(b.ubicacion, 120) || null,
     administracionActual: texto(b.administracion_actual, 60) || null,
     servicios: servicios.length ? servicios : null,

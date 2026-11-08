@@ -3269,3 +3269,507 @@ table.tbl {
   gap: 8px;
   font-weight: 700;
 }
+
+/* ==========================================================================
+   Junta 7 nov: categorías de ingreso, fondos, semáforo con beagle, asistencia y check-in de proveedores
+   ========================================================================== */
+
+/* Contadores del menú en rojo (pendientes por módulo) */
+.nav-count {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Punto de color de una categoría de ingreso */
+.punto-cat {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 3px;
+  vertical-align: -1px;
+  flex: none;
+  background: var(--muted);
+}
+/* Fila del desglose de un pago (categoría + monto) y de categorías propias */
+.fila-desglose {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fila-desglose select,
+.fila-desglose input {
+  min-width: 0;
+}
+.fila-desglose select {
+  flex: 1 1 auto;
+}
+.fila-desglose input[type='number'] {
+  flex: 0 0 130px;
+}
+.fila-desglose > input:not([type]) {
+  flex: 1 1 auto;
+}
+@media (max-width: 480px) {
+  .fila-desglose {
+    flex-wrap: wrap;
+  }
+  .fila-desglose input[type='number'] {
+    flex: 1 1 100px;
+  }
+}
+
+/* Barra de distribución del ingreso por categoría */
+.barra-cat-barra {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-soft);
+}
+.barra-cat-barra > span {
+  display: block;
+  min-width: 3px;
+}
+.barra-cat-barra > span + span {
+  border-left: 2px solid #fff;
+}
+.barra-cat-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.88rem;
+}
+.barra-cat-leyenda li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.barra-cat-leyenda strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Disponible para ejecutar: recuadro resaltado */
+.stat.stat-disponible {
+  background: var(--teal-dark);
+  border-color: var(--teal-dark);
+}
+.stat.stat-disponible .stat-label,
+.stat.stat-disponible .small {
+  color: #cff3ef;
+}
+.stat.stat-disponible .stat-value {
+  color: #fff;
+}
+
+/* Botón con menú (Balance: mensual / general acumulado) */
+.menu-boton {
+  position: relative;
+}
+.menu-lista {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: grid;
+  width: min(320px, calc(100vw - 32px));
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.menu-lista button {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+}
+.menu-lista button:hover,
+.menu-lista button:focus-visible {
+  background: var(--mint-wash);
+}
+.menu-lista span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ---------- Semáforo de pendientes y beagle ---------- */
+.semaforo-wrap {
+  position: relative;
+  margin-right: 4px;
+}
+.semaforo-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+}
+.semaforo-btn:hover,
+.semaforo-btn:focus-visible {
+  background: var(--bg-soft);
+}
+.semaforo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #2f3446;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+.foco {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  opacity: 0.22;
+}
+.foco.rojo {
+  background: #ef4444;
+  color: #ef4444;
+}
+.foco.amarillo {
+  background: #facc15;
+  color: #facc15;
+}
+.foco.verde {
+  background: #22c55e;
+  color: #22c55e;
+}
+.foco.on {
+  opacity: 1;
+  box-shadow: 0 0 6px 1px currentColor;
+}
+.foco.rojo.on {
+  animation: foco-pulso 1.2s ease-in-out infinite;
+}
+@keyframes foco-pulso {
+  50% {
+    opacity: 0.55;
+  }
+}
+.semaforo-beagle {
+  display: flex;
+}
+/* En el celular solo va el semáforo */
+@media (max-width: 640px) {
+  .semaforo-beagle {
+    display: none;
+  }
+  .semaforo-btn {
+    padding: 2px 4px;
+  }
+}
+.beagle {
+  overflow: visible;
+}
+.beagle .beagle-cuerpo,
+.beagle .oreja {
+  transform-box: fill-box;
+}
+.b-feliz .beagle-cuerpo {
+  transform-origin: 50% 100%;
+  animation: beagle-baila 1.1s ease-in-out infinite;
+}
+.b-feliz .oreja-izq {
+  transform-origin: 80% 10%;
+  animation: oreja-izq 0.55s ease-in-out infinite alternate;
+}
+.b-feliz .oreja-der {
+  transform-origin: 20% 10%;
+  animation: oreja-der 0.55s ease-in-out infinite alternate;
+}
+.b-feliz .beagle-notas {
+  animation: notas 1.1s ease-in-out infinite;
+}
+.b-triste .beagle-cuerpo {
+  animation: beagle-suspiro 3.2s ease-in-out infinite;
+}
+.b-triste .oreja-izq {
+  transform-origin: 80% 10%;
+  transform: rotate(10deg);
+}
+.b-triste .oreja-der {
+  transform-origin: 20% 10%;
+  transform: rotate(-10deg);
+}
+.b-triste .beagle-lagrima {
+  animation: lagrima 2.4s ease-in infinite;
+}
+.b-enojado .beagle-cuerpo {
+  animation: beagle-tiembla 0.22s linear infinite;
+}
+.b-enojado .beagle-vapor {
+  animation: vapor 1s ease-out infinite;
+}
+@keyframes beagle-baila {
+  0%,
+  100% {
+    transform: rotate(-9deg) translateY(0);
+  }
+  25% {
+    transform: rotate(0deg) translateY(-3px);
+  }
+  50% {
+    transform: rotate(9deg) translateY(0);
+  }
+  75% {
+    transform: rotate(0deg) translateY(-3px);
+  }
+}
+@keyframes oreja-izq {
+  to {
+    transform: rotate(-14deg);
+  }
+}
+@keyframes oreja-der {
+  to {
+    transform: rotate(14deg);
+  }
+}
+@keyframes notas {
+  50% {
+    transform: translateY(-3px);
+    opacity: 0.5;
+  }
+}
+@keyframes beagle-suspiro {
+  50% {
+    transform: translateY(1.5px);
+  }
+}
+@keyframes lagrima {
+  0%,
+  30% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(9px);
+    opacity: 0;
+  }
+}
+@keyframes beagle-tiembla {
+  25% {
+    transform: translateX(-0.8px);
+  }
+  75% {
+    transform: translateX(0.8px);
+  }
+}
+@keyframes vapor {
+  0% {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+  40% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .beagle *,
+  .foco.on {
+    animation: none !important;
+  }
+}
+/* Globo del recordatorio y panel de pendientes por módulo */
+.beagle-globo {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 41;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: #2f3446;
+  color: #fff;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  animation: globo 0.25s ease-out;
+}
+.beagle-globo::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 22px;
+  border: 6px solid transparent;
+  border-top: 0;
+  border-bottom-color: #2f3446;
+}
+@keyframes globo {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+}
+.luz-amarillo .beagle-globo {
+  background: #8a6100;
+}
+.luz-amarillo .beagle-globo::before {
+  border-bottom-color: #8a6100;
+}
+.luz-rojo .beagle-globo {
+  background: var(--danger);
+}
+.luz-rojo .beagle-globo::before {
+  border-bottom-color: var(--danger);
+}
+.semaforo-panel {
+  position: absolute;
+  right: -90px;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+@media (max-width: 640px) {
+  .semaforo-panel,
+  .beagle-globo {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 64px;
+    width: auto;
+    max-width: none;
+  }
+  .beagle-globo::before {
+    display: none;
+  }
+}
+.semaforo-panel-cab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.semaforo-panel-cab p {
+  margin: 0;
+  font-weight: 600;
+}
+.luz-verde .semaforo-panel-cab {
+  background: #e9f9ef;
+}
+.luz-amarillo .semaforo-panel-cab {
+  background: #fff4d6;
+}
+.luz-rojo .semaforo-panel-cab {
+  background: #fdecea;
+}
+.semaforo-panel .list > li {
+  padding: 0;
+}
+.semaforo-leyenda {
+  margin: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- Check-in de proveedores ---------- */
+.btn-checkin,
+.btn-checkout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px 34px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  font: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-checkin {
+  background: #dc2626;
+  box-shadow:
+    0 3px 0 #991b1b,
+    0 8px 18px -6px rgb(220 38 38 / 0.6);
+}
+.btn-checkout {
+  padding: 12px 24px;
+  font-size: 1rem;
+  background: #2f3446;
+  box-shadow: 0 3px 0 #11131a;
+}
+.btn-checkin:active,
+.btn-checkout:active {
+  transform: translateY(2px);
+}
+.btn-checkin:disabled,
+.btn-checkout:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.btn-checkin.block,
+.btn-checkout.block {
+  width: 100%;
+}
+.btn-checkin .ico,
+.btn-checkout .ico {
+  width: 24px;
+  height: 24px;
+}
+.checkin-abierto {
+  display: grid;
+  gap: 12px;
+  border-left: 5px solid #22c55e;
+}
+.checkin-estado {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.checkin-estado > div {
+  display: grid;
+}
+.checkin-punto {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgb(34 197 94 / 0.2);
+  animation: foco-pulso 1.6s ease-in-out infinite;
+}
+.tarjeta-foto {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex: none;
+}
+.foto-asistencia {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 10px;
+}

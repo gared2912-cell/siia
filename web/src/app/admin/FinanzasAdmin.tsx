@@ -9,7 +9,18 @@ import { ModuloInactivo, useAdmin } from './AdminApp';
 import { BalanceMensual, EgresosAdmin } from './Egresos';
 import { fechaIngreso } from './balance';
 import { AmenidadesFinanzas, reservasPorAprobar, type ReservaFin } from './AmenidadesFinanzas';
-import { TIPOS_CARGO_MANUAL, etiquetaIngreso, tipoDeCargo } from '../../../amplify/functions/shared/finanzas';
+import {
+  QUE_PAGA_RESIDENTE,
+  TIPOS_CARGO_MANUAL,
+  categoriasDe,
+  categoriasPropias,
+  desgloseDe,
+  etiquetaCategoria,
+  etiquetaIngreso,
+  partesDePago,
+  tipoDeCargo,
+} from '../../../amplify/functions/shared/finanzas';
+import { FondosAdmin } from './Fondos';
 import { edicionesDe } from '../../../amplify/functions/shared/ediciones';
 import { AprobarPago, cargosDelPago, otrosPendientes } from './AprobarPago';
 import { AJUSTES_PAGO, type AjustePago } from '../../../amplify/functions/shared/pagos';
@@ -39,7 +50,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
     ]);
     return { pagos, cargos, egresos, saldos, reservas };
   }, [id]);
-  const [vista, setVista] = useState<'ingresos' | 'egresos' | 'balance'>('ingresos');
+  const [vista, setVista] = useState<'ingresos' | 'egresos' | 'fondos' | 'balance'>('ingresos');
   const [tab, setTab] = useState<'residentes' | 'revision' | 'pagos' | 'cargos' | 'saldos' | 'amenidades'>(inicio ?? 'residentes');
   const [generar, setGenerar] = useState(false);
   const [cobranza, setCobranza] = useState(false);
@@ -59,6 +70,21 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   if (loading && !data) return <Loading />;
   if (error) return <ErrorBox error={error} retry={reload} />;
   const { pagos, cargos } = data!;
+  // Categorías propias y apartados del condominio para el balance y los fondos.
+  const datos = { ...data!, condo };
+  const cats = categoriasDe(condo);
+  /** Etiqueta del tipo de un cargo (también las categorías propias del condominio). */
+  const tipoTxt = (c: Cargo) => {
+    const t = tipoDeCargo(c);
+    return t.startsWith('P-') ? etiquetaCategoria(t, cats) : etiquetaIngreso(t);
+  };
+  const categoriasPago = (p: Pago) => {
+    if (p.estado !== 'VALIDADO') return null;
+    const m = new Map<string, number>();
+    for (const x of partesDePago(p, new Map(cargos.map((c) => [c.id, c])))) m.set(x.categoria, (m.get(x.categoria) ?? 0) + x.monto);
+    const txt = [...m].filter(([, v]) => v > 0.004).map(([k, v]) => `${etiquetaCategoria(k, cats)} ${money(v)}`).join(' · ');
+    return txt ? `${txt}${desgloseDe(p.desglose).length ? ' (desglosado)' : ''}` : null;
+  };
   const hoyStr = hoy();
   const amenidadesPend = reservasPorAprobar(data!.reservas, pagos).length;
   const revision = pagos.filter((p) => p.estado === 'EN_REVISION').sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -156,6 +182,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
           [
             ['ingresos', 'Ingresos', 'money'],
             ['egresos', 'Egresos', 'file'],
+            ['fondos', 'Fondos y apartados', 'shield'],
             ['balance', 'Balance mensual', 'chart'],
           ] as const
         ).map(([k, label, icon]) => (
@@ -167,8 +194,9 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
         ))}
       </div>
 
-      {vista === 'egresos' && <EgresosAdmin datos={data!} reload={() => reload(true)} />}
-      {vista === 'balance' && <BalanceMensual datos={data!} reload={() => reload(true)} />}
+      {vista === 'egresos' && <EgresosAdmin datos={datos} reload={() => reload(true)} />}
+      {vista === 'fondos' && <FondosAdmin datos={datos} reload={() => reload(true)} onAmenidades={() => (setVista('ingresos'), setTab('amenidades'))} />}
+      {vista === 'balance' && <BalanceMensual datos={datos} reload={() => reload(true)} />}
 
       {vista === 'ingresos' && (
       <Seg
@@ -186,7 +214,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       )}
 
       {vista === 'ingresos' && tab === 'residentes' && <ResidentesFinanzas pagos={pagos} cargos={cargos} />}
-      {vista === 'ingresos' && tab === 'amenidades' && <AmenidadesFinanzas datos={data!} reservas={data!.reservas} reload={() => reload(true)} />}
+      {vista === 'ingresos' && tab === 'amenidades' && <AmenidadesFinanzas datos={datos} reservas={data!.reservas} reload={() => reload(true)} />}
 
       {vista === 'ingresos' && tab === 'revision' && valida && favorPorAplicar.length > 0 && (
         <section className="panel">
@@ -294,7 +322,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                     tono={vencido ? 'mal' : tonoDe(c.estado)}
                     onClick={() => setFichaCargo(c)}
                     titulo={`${etiqueta(c.unidadId)} · ${c.concepto}`}
-                    sub={`${etiquetaIngreso(tipoDeCargo(c))} · Vence ${fecha(c.vence)}`}
+                    sub={`${tipoTxt(c)} · Vence ${fecha(c.vence)}`}
                     lado={
                       <>
                         <strong>{money(c.monto)}</strong>
@@ -368,6 +396,8 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                 ['Enviado', fecha(fichaPago.createdAt)],
                 ['Referencia', fichaPago.referencia],
                 ['Cubre', cubre(fichaPago)],
+                ['El residente indicó que paga', fichaPago.categoriaResidente ? (QUE_PAGA_RESIDENTE.find((c) => c.key === fichaPago.categoriaResidente)?.label ?? etiquetaCategoria(fichaPago.categoriaResidente, cats)) : null],
+                ['Categoría del ingreso', categoriasPago(fichaPago)],
                 ['El residente indicó', fichaPago.montoDeclarado != null ? money(fichaPago.montoDeclarado) : null],
                 ['Saldo a favor usado', fichaPago.saldoFavorUsado ? money(fichaPago.saldoFavorUsado) : null],
                 ['Resultado', resultadoPago(fichaPago)],
@@ -412,7 +442,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             </div>
             <Datos
               items={[
-                ['Tipo', etiquetaIngreso(tipoDeCargo(fichaCargo))],
+                ['Tipo', tipoTxt(fichaCargo)],
                 ['Periodo', fichaCargo.periodo],
                 ['Vence', fecha(fichaCargo.vence)],
               ]}
@@ -604,7 +634,7 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
 /** Editar un cargo pendiente: monto, concepto, vencimiento y tipo (solo cargos manuales), con su motivo. */
 function EditarCargo({ c, onClose, onDone }: { c: Cargo; onClose: () => void; onDone: () => void }) {
   const { etiqueta } = useAdmin();
-  const manual = !!c.tipo && (TIPOS_CARGO_MANUAL as readonly string[]).includes(c.tipo);
+  const manual = !!c.tipo && ((TIPOS_CARGO_MANUAL as readonly string[]).includes(c.tipo) || c.tipo.startsWith('P-'));
   const [f, setF] = useState({ concepto: c.concepto, monto: String(c.monto), vence: c.vence ?? '', tipo: c.tipo ?? 'OTRO' });
   const [m, setM] = useState<Motivo>(motivoVacio);
   const { run, busy } = useAction();
@@ -643,12 +673,19 @@ function EditarCargo({ c, onClose, onDone }: { c: Cargo; onClose: () => void; on
 
 /** Tipo de ingreso del cargo: con él se separan los ingresos en el balance mensual. */
 export function TipoIngreso({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { condo } = useAdmin();
+  const propias = categoriasPropias(condo?.categoriasIngreso);
   return (
-    <Field label="Tipo de ingreso" hint="Así se separa en el balance mensual.">
+    <Field label="Tipo de ingreso" hint="Así se separa en el balance mensual. «Adeudo anterior» es la cartera vencida heredada de un condominio que se recibe.">
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {TIPOS_CARGO_MANUAL.map((t) => (
           <option key={t} value={t}>
             {etiquetaIngreso(t)}
+          </option>
+        ))}
+        {propias.map((c) => (
+          <option key={c.key} value={c.key}>
+            {c.label}
           </option>
         ))}
       </select>

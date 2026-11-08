@@ -6,7 +6,8 @@ import { Firma } from './Firma';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
 import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
-import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO } from '../../../amplify/functions/shared/finanzas';
+import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, apartadosDe, categoriasDe, nombreFondo } from '../../../amplify/functions/shared/finanzas';
+import { BarraCategorias } from './Fondos';
 import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
 
 type Egreso = Schema['Egreso']['type'];
@@ -52,7 +53,7 @@ export function VerEvidencia({ egresoId, ev }: { egresoId: string; ev: Evidencia
 
 // ---------- Egresos ----------
 export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: () => void }) {
-  const { puede } = useAdmin();
+  const { puede, condo } = useAdmin();
   const gestiona = puede('finanzas', 'editar');
   const [mes, setMes] = useState(periodoActual());
   const [editar, setEditar] = useState<Partial<Egreso> | null>(null);
@@ -91,7 +92,7 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
                   lado={
                     <>
                       <strong>{money(e.monto)}</strong>
-                      {e.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
+                      {e.fondo && <span className="badge">{nombreFondo(e.fondo, condo)}</span>}
                     </>
                   }
                 />
@@ -112,7 +113,7 @@ export function EgresosAdmin({ datos, reload }: { datos: DatosFinanzas; reload: 
           <div className="stack">
             <div className="row-actions">
               <strong>{money(fichaE.monto)}</strong>
-              {fichaE.fondo === FONDO_AMENIDADES && <span className="badge">Fondo de amenidades</span>}
+              {fichaE.fondo && <span className="badge">{nombreFondo(fichaE.fondo, condo)}</span>}
             </div>
             <Datos
               items={[
@@ -177,7 +178,7 @@ type Archivo = { ev?: Evidencia; file?: File };
 export function EliminarEgreso({ e, onClose, onDone }: { e: Egreso; onClose: () => void; onDone: () => void }) {
   return (
     <PedirMotivo
-      titulo={e.fondo === FONDO_AMENIDADES ? 'Eliminar gasto del fondo' : 'Eliminar egreso'}
+      titulo={e.fondo ? 'Eliminar salida del fondo' : 'Eliminar egreso'}
       texto={
         <>
           Se elimina <strong>{e.concepto}</strong> por {money(e.monto)}. El motivo queda en el registro de actividad con tu nombre.
@@ -194,10 +195,22 @@ export function EliminarEgreso({ e, onClose, onDone }: { e: Egreso; onClose: () 
   );
 }
 
-/** Alta o edición de un egreso. Con `fondo`, es un gasto pagado con el fondo de amenidades. */
-export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>; fondo?: boolean; onClose: () => void; onDone: (fecha: string) => void }) {
-  const delFondo = fondo || e.fondo === FONDO_AMENIDADES;
-  const { condoId } = useAdmin();
+/**
+ * Alta o edición de un egreso. Con `fondo` (clave de un fondo o apartado), es una salida de ese fondo: se descuenta de
+ * su saldo y también cuenta como egreso del condominio. Sin `fondo`, la administración elige si se paga del saldo general
+ * o de un fondo o apartado.
+ */
+export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>; fondo?: string; onClose: () => void; onDone: (fecha: string) => void }) {
+  const { condoId, condo } = useAdmin();
+  const [deFondo, setDeFondo] = useState<string>(fondo ?? e.fondo ?? '');
+  const fijo = !!fondo;
+  const delFondo = !!deFondo;
+  const opcionesFondo = [
+    ...categoriasDe(condo).filter((c) => c.fondo).map((c) => ({ key: c.key, label: nombreFondo(c.key, condo)! })),
+    ...apartadosDe(condo?.apartados)
+      .filter((a) => a.activo || a.id === e.fondo)
+      .map((a) => ({ key: a.id, label: `Apartado: ${a.nombre}` })),
+  ];
   const [f, setF] = useState({
     fecha: e.fecha ?? hoy(),
     categoria: e.categoria ?? '',
@@ -235,18 +248,35 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
         if (!put.ok) throw new Error(`No se pudo subir ${file.name}. Intenta de nuevo.`);
         evidencias.push({ path: r.path, nombre: file.name || nombre });
       }
-      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias, fondo: delFondo ? FONDO_AMENIDADES : null, ...(e.id ? m : {}) });
+      await adminCall('egresos.guardar', { condominioId: condoId, id: e.id, ...f, monto: Number(f.monto), evidencias, fondo: deFondo || null, ...(e.id ? m : {}) });
     }, e.id ? 'Egreso actualizado' : 'Egreso registrado');
     if (okk) onDone(f.fecha);
   }
 
   return (
-    <Modal title={delFondo ? (e.id ? 'Editar gasto del fondo de amenidades' : 'Gasto del fondo de amenidades') : e.id ? 'Editar egreso' : 'Registrar egreso'} onClose={onClose} wide>
+    <Modal
+      title={fijo ? `${e.id ? 'Editar salida' : 'Salida'} · ${nombreFondo(deFondo, condo)}` : e.id ? 'Editar egreso' : 'Registrar egreso'}
+      onClose={onClose}
+      wide
+    >
       <form className="form" onSubmit={guardar}>
+        {!fijo && opcionesFondo.length > 0 && (
+          <Field label="Se paga con" hint="Si se paga con un fondo (multas, amenidades, ahorro…) o un apartado, se descuenta de su saldo.">
+            <select value={deFondo} onChange={(x) => setDeFondo(x.target.value)}>
+              <option value="">Saldo general del condominio</option>
+              {opcionesFondo.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         {delFondo && (
           <p className="small muted" style={{ margin: 0 }}>
-            En qué se usó el ahorro de amenidades. Se descuenta del fondo, también cuenta como egreso del condominio y los residentes lo ven en su
-            portal con su evidencia.
+            {deFondo === FONDO_AMENIDADES
+              ? 'En qué se usó el ahorro de amenidades. Se descuenta del fondo, también cuenta como egreso del condominio y los residentes lo ven en su portal con su evidencia.'
+              : 'Salida con monto cerrado y comprobante: se descuenta del saldo del fondo o apartado y también cuenta como egreso del condominio.'}
           </p>
         )}
         <div className="form-2">
@@ -325,22 +355,46 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
   const { run, busy } = useAction();
   const b = calcularBalance(datos, mes);
 
+  const [menu, setMenu] = useState(false);
   // El reporte (ExcelJS, logotipo y gráficas) se carga solo al descargarlo.
   const excel = () =>
     run(async () => {
+      setMenu(false);
       const { descargarReporteFinanzas } = await import('./reporteFinanzas');
       await descargarReporteFinanzas({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy(), generadoPor: firmaReporte });
-    }, 'Estado financiero descargado');
+    }, 'Balance mensual descargado');
+  // Balance general acumulado: un solo PDF de enero al mes elegido.
+  const general = () =>
+    run(async () => {
+      setMenu(false);
+      const { descargarBalanceGeneral } = await import('./balanceGeneral');
+      await descargarBalanceGeneral({ condominio: condo!.nombre, direccion: condo!.direccion, hasta: mes, datos, generadoPor: firmaReporte });
+    }, 'Balance general acumulado descargado');
+  const cuotas = b.pctCorriente + b.pctRecuperacion > 0;
 
   return (
     <>
       <section className="panel">
         <div className="panel-head">
           <h2>Balance de {nombreMes(mes)}</h2>
-          <button className="btn-app secondary" disabled={busy} onClick={excel}>
-            <Icon name="download" />
-            {busy ? 'Generando…' : 'Estado financiero (Excel)'}
-          </button>
+          <div className="menu-boton">
+            <button className="btn-app secondary" disabled={busy} onClick={() => setMenu(!menu)} aria-expanded={menu}>
+              <Icon name="download" />
+              {busy ? 'Generando…' : 'Balance'} ▾
+            </button>
+            {menu && (
+              <div className="menu-lista" role="menu">
+                <button role="menuitem" onClick={excel}>
+                  <strong>Mensual</strong>
+                  <span>Estado financiero de {nombreMes(mes).toLowerCase()} (Excel)</span>
+                </button>
+                <button role="menuitem" onClick={general}>
+                  <strong>General / acumulado</strong>
+                  <span>Enero a {nombreMes(mes).toLowerCase()} en un solo documento (PDF)</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <Mes value={mes} onChange={setMes} />
         <div className="grid-cards" style={{ marginTop: 14 }}>
@@ -358,7 +412,9 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
             <div className="stat-label">Ingresos</div>
             <div className="stat-value is-ok">{money(b.totalIngresos)}</div>
             <div className="small muted">
-              Ordinarios {money(b.totalOrdinarios)} · Amenidades {money(b.totalAmenidades)}
+              {cuotas
+                ? `Cuota corriente ${Math.round(b.pctCorriente * 100)}% · Recuperación ${Math.round(b.pctRecuperacion * 100)}%`
+                : `Ordinarios ${money(b.totalOrdinarios)} · Amenidades ${money(b.totalAmenidades)}`}
             </div>
           </div>
           <div className="stat">
@@ -368,8 +424,19 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
           <div className="stat">
             <div className="stat-label">Saldo final</div>
             <div className={`stat-value ${b.saldoFinal < 0 ? 'is-alert' : ''}`}>{money(b.saldoFinal)}</div>
+            {b.totalReservado > 0 && <div className="small muted">Fondos y apartados {money(b.totalReservado)}</div>}
+          </div>
+          <div className="stat stat-disponible">
+            <div className="stat-label">Disponible para ejecutar</div>
+            <div className="stat-value">{money(b.disponible)}</div>
+            <div className="small">Saldo final menos fondos y apartados</div>
           </div>
         </div>
+        {b.totalIngresos > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <BarraCategorias items={b.categorias} total={b.totalIngresos} />
+          </div>
+        )}
       </section>
 
 
@@ -383,17 +450,21 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
             <tbody>
               <tr>
                 <td colSpan={2} className="small" style={{ color: 'var(--teal-dark)', fontWeight: 700 }}>
-                  Ingresos ordinarios
+                  Ingresos por categoría
                 </td>
               </tr>
               {b.ordinarios.map((x) => (
                 <tr key={x.tipo}>
-                  <td>{x.label}</td>
+                  <td>
+                    <span className="punto-cat" style={{ background: x.color }} />
+                    {x.label}
+                    {x.fondo && <span className="small muted"> · fondo</span>}
+                  </td>
                   <td className="num">{money(x.monto)}</td>
                 </tr>
               ))}
               <tr>
-                <td>Subtotal ordinarios</td>
+                <td>Subtotal sin amenidades</td>
                 <td className="num">{money(b.totalOrdinarios)}</td>
               </tr>
               <tr>
@@ -464,6 +535,68 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
           </table>
         </section>
       </div>
+      {(b.fondos.some((f) => f.saldo || f.ingresos || f.gastos) || b.apartados.length > 0) && (
+        <section className="panel">
+          <h2 style={{ fontSize: '1.1rem', marginTop: 0 }}>Fondos y apartados al cierre de {nombreMes(mes).toLowerCase()}</h2>
+          <p className="small muted" style={{ marginTop: -6 }}>
+            Se acumulan mes con mes y no cuentan como disponible para el gasto del mes. Se administran en Finanzas › Fondos y apartados.
+          </p>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Fondo o apartado</th>
+                <th className="num">Entró en el mes</th>
+                <th className="num">Salió en el mes</th>
+                <th className="num">Saldo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {b.fondos.map((f) => (
+                <tr key={f.key}>
+                  <td>
+                    <span className="punto-cat" style={{ background: f.color }} />
+                    {f.label}
+                  </td>
+                  <td className="num">{money(f.ingresos)}</td>
+                  <td className="num">{money(f.gastos)}</td>
+                  <td className="num">{money(f.saldo)}</td>
+                </tr>
+              ))}
+              {b.apartados.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    Apartado: {a.nombre}
+                    {!a.activo && <span className="small muted"> · archivado</span>}
+                  </td>
+                  <td className="num">—</td>
+                  <td className="num">—</td>
+                  <td className="num">{money(a.saldo)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>
+                  <strong>Total reservado</strong>
+                </td>
+                <td />
+                <td />
+                <td className="num">
+                  <strong>{money(b.totalReservado)}</strong>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Disponible para ejecutar</strong> <span className="small muted">(saldo final {money(b.saldoFinal)} − reservado)</span>
+                </td>
+                <td />
+                <td />
+                <td className="num">
+                  <strong>{money(b.disponible)}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      )}
       {saldo && <EditarSaldo periodo={mes} actual={b.saldoInicial} capturado={b.saldoCapturado} nota={b.saldoCapturado?.nota} onClose={() => setSaldo(false)} onDone={() => (setSaldo(false), reload())} />}
     </>
   );

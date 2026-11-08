@@ -28,6 +28,8 @@ export const CATEGORIAS_ADMIN: (Categoria & { seccion: string; nivel: 'ver' | 'e
   { key: 'reservas', label: 'Reservas por aprobar', desc: 'Solicitud de reserva de una amenidad.', seccion: 'amenidades', nivel: 'editar' },
   { key: 'mascotas', label: 'Mascotas por validar', desc: 'Un residente registra una mascota.', seccion: 'mascotas', nivel: 'editar' },
   { key: 'cotizaciones', label: 'Cotizaciones del sitio web', desc: 'Alguien pide una cotización o escribe desde el sitio.', seccion: 'cotizaciones', nivel: 'ver' },
+  { key: 'asistencia', label: 'Asistencia técnica', desc: 'Un residente pide ayuda para entrar (accesos o contraseña).', seccion: 'usuarios', nivel: 'editar' },
+  { key: 'proveedores', label: 'Llegada de proveedores', desc: 'Un proveedor hace check-in o check-out en el condominio.', seccion: 'proveedores', nivel: 'ver' },
 ];
 
 /** Categoría de residente de cada tipo de aviso (los avisos son lo que aparece en la campana del portal). */
@@ -46,6 +48,7 @@ export function categoriaDeAviso(tipo?: string | null): string {
       return 'tramites';
     case 'MANTENIMIENTO':
     case 'TRABAJO':
+    case 'PROVEEDOR':
       return 'mantenimientos';
     default:
       return 'comunicados';

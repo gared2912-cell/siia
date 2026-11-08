@@ -72,6 +72,12 @@ const schema = a
         estacionamientoVisitas: a.integer(),
         // Servicios que entran al condominio (basura, gas, agua…): la caseta avisa a todos los residentes cuando llegan
         serviciosCondominio: a.string().array(),
+        // Mensaje automático que recibe el residente al subir un comprobante (vacío = el mensaje de siempre).
+        mensajeComprobante: a.string(),
+        // Finanzas (shared/finanzas.ts): categorías de ingreso propias del condominio [{ key, label, fondo }] y apartados
+        // manuales del saldo [{ id, nombre, descripcion, activo, movimientos: [{ id, fecha, monto, nota, porNombre, en }] }].
+        categoriasIngreso: a.json(),
+        apartados: a.json(),
         folioSeq: a.integer(),
         // Solo el SUPERADMIN suspende o elimina un condominio (admin-api condominios.*; ver shared/condominios.ts).
         // Suspendido: nadie de ese condominio entra (residentes, caseta ni sus administradores) y no corren cuotas ni recargos.
@@ -135,6 +141,8 @@ const schema = a
         claveEnvio: a.json(),
         // Solo PROVEEDOR (ver shared/proveedores.ts): empresa (vacío = personal propio), servicios que da y condominios que atiende
         empresa: a.string(),
+        // Nombre con el que lo ven los residentes (p. ej. «Jardinería SIIA»), en lugar del nombre de la persona.
+        nombrePublico: a.string(),
         servicios: a.string().array(),
         condominiosServicio: a.string().array(),
       })
@@ -199,6 +207,11 @@ const schema = a
         diferencia: a.float(),
         cargoPendienteId: a.string(),
         abonoOtros: a.float(), // excedente abonado a otros cargos pendientes de la unidad (ya incluidos en cargoIds)
+        // Categoría de ingreso (shared/finanzas.ts): la que eligió el residente al subir el comprobante y, si la
+        // administración lo desglosó al aprobar, el reparto [{ categoria, monto }] (suma = monto). Sin desglose, la
+        // categoría sale de los cargos que cubre y de la fecha de pago (cuota del mes o recuperación de cartera).
+        categoriaResidente: a.string(),
+        desglose: a.json(),
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('pagosPorUnidad'),
@@ -563,6 +576,7 @@ const schema = a
         descripcion: a.string(),
         fecha: a.date().required(),
         fotos: a.json(), // [{ path, descripcion }]
+        nombrePublico: a.string(), // como lo ven los residentes
       })
       .secondaryIndexes((i) => [
         i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('reportesProveedorPorCondominio'),
@@ -570,11 +584,34 @@ const schema = a
       ])
       .authorization(admin),
 
+    // Asistencia de un proveedor: check-in al llegar y check-out al irse, cada uno con foto, hora y descripción. Avisa a
+    // los residentes y a la administración. Lo crea portal-api (proveedor.checkin / proveedor.checkout).
+    AsistenciaProveedor: a
+      .model({
+        condominioId: a.id().required(),
+        proveedorId: a.id().required(),
+        proveedorNombre: a.string(),
+        nombrePublico: a.string(),
+        empresa: a.string(),
+        estado: a.string().required(), // DENTRO | SALIO
+        entradaEn: a.datetime().required(),
+        entradaFoto: a.string().required(),
+        entradaDescripcion: a.string(),
+        salidaEn: a.datetime(),
+        salidaFoto: a.string(),
+        salidaDescripcion: a.string(),
+      })
+      .secondaryIndexes((i) => [
+        i('condominioId').sortKeys(['entradaEn']).name('byCondominio').queryField('asistenciasPorCondominio'),
+        i('proveedorId').sortKeys(['entradaEn']).name('byProveedor').queryField('asistenciasPorProveedor'),
+      ])
+      .authorization(admin),
+
     // Solicitudes de cotización y mensajes de contacto del sitio público (Lambda siia-cotizaciones).
     // Siguen pendientes hasta que un administrador marca «Respondido al solicitante».
     Cotizacion: a
       .model({
-        origen: a.string().required(), // COTIZACION | CONTACTO
+        origen: a.string().required(), // COTIZACION | CONTACTO | SOPORTE (asistencia técnica: «Pide ayuda» del portal)
         estado: a.string().required(), // PENDIENTE | RESPONDIDA
         nombre: a.string().required(),
         telefono: a.string(),
@@ -583,6 +620,7 @@ const schema = a
         tipoDesarrollo: a.string(),
         unidades: a.integer(),
         desarrollo: a.string(),
+        unidad: a.string(), // SOPORTE: casa o departamento que escribió el residente
         ubicacion: a.string(),
         administracionActual: a.string(),
         servicios: a.string().array(),

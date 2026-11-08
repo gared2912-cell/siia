@@ -23,7 +23,7 @@ import {
 import { sinFirmas } from '../shared/firma';
 import { emailDe } from '../shared/cognito';
 import { enviarAUsuario } from '../shared/push';
-import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../shared/finanzas';
+import { QUE_PAGA_RESIDENTE, FONDO_AMENIDADES, calcularFondoAmenidades, categoriasPropias } from '../shared/finanzas';
 import { IMAGENES_SERVICIO, imagenServicio } from '../shared/servicios';
 import { accionNotificaciones } from '../shared/push';
 import { CATEGORIAS_RESIDENTE, CATEGORIAS_VIGILANTE } from '../shared/notificaciones';
@@ -51,6 +51,9 @@ const pub = (c: Item) => ({
   datosPago: c.datosPago,
   telefonoCaseta: c.telefonoCaseta,
   serviciosCondominio: (c.serviciosCondominio ?? []).filter(Boolean),
+  // Mensaje que ve el residente al subir un comprobante (Condominios › Datos generales) y sus categorías propias.
+  mensajeComprobante: c.mensajeComprobante || null,
+  categoriasPropias: categoriasPropias(c.categoriasIngreso).map(({ key, label }) => ({ key, label })),
   // Suspendido por SIIA o en la papelera: el portal muestra un aviso en lugar de los servicios.
   suspendido: !operando(c),
 });
@@ -259,6 +262,11 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       cargoIds,
       // Pide descontar su saldo a favor; la administración lo confirma al aprobar.
       usarSaldoFavor: p.usarSaldoFavor === true && (unidad!.saldoFavor ?? 0) > 0 ? true : null,
+      // «¿Qué estás pagando?»: la administración la confirma (o la desglosa) al aprobar.
+      categoriaResidente:
+        QUE_PAGA_RESIDENTE.some((x) => x.key === p.categoria) || categoriasPropias(condominio.categoriasIngreso).some((x) => x.key === p.categoria)
+          ? p.categoria
+          : null,
       estado: 'EN_REVISION',
     });
     // Confirmación en la sesión del residente: comprobante recibido (el segundo aviso llega al aprobarse).
@@ -268,7 +276,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       unidad!.id,
       'PAGO',
       'Comprobante de pago recibido',
-      `Recibimos tu comprobante por ${mxn}. La administración lo revisará y te avisaremos cuando tu pago sea aprobado.`,
+      // Mensaje automático del condominio (p. ej. «tu pago se validará en los próximos 10 días hábiles…»).
+      `Recibimos tu comprobante por ${mxn}. ${str(condominio.mensajeComprobante, 600) || 'La administración lo revisará y te avisaremos cuando tu pago sea aprobado.'}`,
     );
     return sinPrivados(pago);
   },
@@ -406,7 +415,8 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         createdAt: r.createdAt,
         servicio: servicioDe(r.tipo, r.tipoOtro),
         descripcion: r.descripcion ?? null,
-        proveedor: r.empresa || r.proveedorNombre || 'Proveedor',
+        // Los residentes ven el nombre que puso la administración (p. ej. «Jardinería SIIA»), no el de la persona.
+        proveedor: r.nombrePublico || r.empresa || 'Proveedor',
         fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await fotoUrl(f.path) }))),
       })),
     );
@@ -1121,6 +1131,29 @@ async function condominioDelProveedor(perfil: Item, id: unknown) {
   if (!c) fail('Elige uno de los condominios que atiendes.');
   return c!;
 }
+/** Cómo lo ven los residentes: el nombre que puso la administración, o su servicio con «SIIA» si es personal propio. */
+const nombrePublico = (perfil: Item): string =>
+  str(perfil.nombrePublico, 80) || str(perfil.empresa, 120) || `${servicioDe((perfil.servicios ?? []).find((s: string) => s !== OTRO_SERVICIO) ?? 'Mantenimiento', null)} SIIA`;
+const horaMX = (iso: string) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' });
+
+/** Foto del check-in o check-out: subida con proveedor.subirFoto a su carpeta del condominio. */
+async function fotoAsistencia(path: unknown, condominioId: string, sub: string) {
+  const f = str(path, 400);
+  if (!f) fail('Toma la foto.');
+  if (!f.startsWith(`condominios/${condominioId}/proveedores/${sub}/`)) fail('La foto no es válida. Vuelve a tomarla.');
+  const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: f })).catch(() => undefined);
+  if (!h) fail('No encontramos la foto. Vuelve a tomarla.');
+  return f;
+}
+
+/** Aviso a todas las unidades del condominio (campana y notificación en la app). */
+async function avisarUnidades(condominioId: string, tipo: string, titulo: string, texto: string) {
+  const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', condominioId);
+  for (let i = 0; i < unidades.length; i += 25) {
+    await Promise.all(unidades.slice(i, i + 25).map((u) => put('Aviso', { condominioId, unidadId: u.id, tipo, titulo: titulo.slice(0, 140), texto: texto.slice(0, 1000), leido: false })));
+  }
+}
+
 const TIPOS_FOTO_REPORTE: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 
 const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
@@ -1129,6 +1162,7 @@ const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
       nombre: perfil.nombre ?? null,
       email: perfil.email,
       empresa: perfil.empresa ?? null,
+      nombrePublico: perfil.nombrePublico ?? null,
       servicios: perfil.servicios ?? [],
       condominios: (await condominiosProveedor(perfil)).map((c) => ({ id: c.id, nombre: c.nombre })),
     };
@@ -1172,6 +1206,7 @@ const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
       proveedorId: sub,
       proveedorNombre: perfil.nombre || perfil.email,
       empresa: perfil.empresa || null,
+      nombrePublico: nombrePublico(perfil),
       destino,
       tipo,
       tipoOtro: tipoOtro || null,
@@ -1183,12 +1218,62 @@ const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
     if (destino === 'RESIDENTES' && (c.modulos ?? []).includes('mantenimientos')) {
       const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', c.id);
       const titulo = `Trabajo realizado: ${servicioDe(tipo, tipoOtro)}`.slice(0, 140);
-      const texto = `${descripcion.slice(0, 600)}${perfil.empresa ? ` · ${perfil.empresa}` : ''}`;
+      const texto = `${descripcion.slice(0, 600)} · ${nombrePublico(perfil)}`;
       for (let i = 0; i < unidades.length; i += 25) {
         await Promise.all(unidades.slice(i, i + 25).map((u) => put('Aviso', { condominioId: c.id, unidadId: u.id, tipo: 'TRABAJO', titulo, texto, leido: false })));
       }
     }
     return { id: reporte.id, fecha: reporte.fecha, destino };
+  },
+
+  // Check-in / check-out: servicios abiertos (llegó y aún no sale) y los últimos registros.
+  async 'proveedor.asistencia'({ sub, perfil }) {
+    const nombres = new Map((await condominiosProveedor(perfil)).map((c) => [c.id, c.nombre]));
+    const items = (await byIndex('AsistenciaProveedor', 'byProveedor', 'proveedorId', sub)).sort((a, b) => String(b.entradaEn).localeCompare(String(a.entradaEn)));
+    const limpio = ({ __typename, entradaFoto, salidaFoto, ...a }: Item) => ({ ...a, condominio: nombres.get(a.condominioId) ?? 'Condominio' });
+    return {
+      nombrePublico: nombrePublico(perfil),
+      abiertas: items.filter((a) => a.estado === 'DENTRO').map(limpio),
+      recientes: items.slice(0, 15).map(limpio),
+    };
+  },
+
+  // Llegada: foto, qué va a hacer y la hora. Avisa a los residentes y a la administración (notificador).
+  async 'proveedor.checkin'({ sub, perfil, p }) {
+    const c = await condominioDelProveedor(perfil, p.condominioId);
+    const abiertas = (await byIndex('AsistenciaProveedor', 'byProveedor', 'proveedorId', sub)).filter((a) => a.estado === 'DENTRO' && a.condominioId === c.id);
+    if (abiertas.length) fail('Ya tienes un check-in abierto en este condominio. Haz check-out al terminar.');
+    const entradaFoto = await fotoAsistencia(p.fotoPath, c.id, sub);
+    const descripcion = str(p.descripcion, 500);
+    if (!descripcion) fail('Escribe brevemente qué vas a hacer.');
+    const nombre = nombrePublico(perfil);
+    const entradaEn = now();
+    const a = await put('AsistenciaProveedor', {
+      condominioId: c.id,
+      proveedorId: sub,
+      proveedorNombre: perfil.nombre || perfil.email,
+      nombrePublico: nombre,
+      empresa: perfil.empresa || null,
+      estado: 'DENTRO',
+      entradaEn,
+      entradaFoto,
+      entradaDescripcion: descripcion,
+    });
+    await avisarUnidades(c.id, 'PROVEEDOR', `Llegó ${nombre} · ${horaMX(entradaEn)}`, descripcion);
+    return { id: a.id, entradaEn };
+  },
+
+  // Salida: foto, nota opcional y la hora.
+  async 'proveedor.checkout'({ sub, p }) {
+    const a = await get('AsistenciaProveedor', { id: str(p.id, 64) });
+    if (!a || a.proveedorId !== sub) fail('Registro no encontrado.');
+    if (a!.estado !== 'DENTRO') fail('Ya hiciste check-out de este servicio.');
+    const salidaFoto = await fotoAsistencia(p.fotoPath, a!.condominioId, sub);
+    const salidaEn = now();
+    const salidaDescripcion = str(p.descripcion, 500) || null;
+    await update('AsistenciaProveedor', { id: a!.id }, { estado: 'SALIO', salidaEn, salidaFoto, salidaDescripcion }, { estado: 'DENTRO' });
+    await avisarUnidades(a!.condominioId, 'PROVEEDOR', `${a!.nombrePublico || 'El proveedor'} terminó su servicio · ${horaMX(salidaEn)}`, salidaDescripcion ?? `Llegó a las ${horaMX(a!.entradaEn)}.`);
+    return { ok: true, salidaEn };
   },
 
   // Su bitácora: reportes de un mes (AAAA-MM) con sus fotos.

@@ -194,6 +194,7 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
     telefonoCaseta: c.telefonoCaseta ?? '',
     estacionamientoVisitas: c.estacionamientoVisitas ? String(c.estacionamientoVisitas) : '',
     serviciosCondominio: (c.serviciosCondominio ?? []).filter(Boolean) as string[],
+    mensajeComprobante: c.mensajeComprobante ?? '',
     cuotaMensual: c.cuotaMensual != null ? String(c.cuotaMensual) : '',
     diaVencimiento: String(c.diaVencimiento ?? 10),
     recargoActivo: !!c.recargoActivo,
@@ -231,6 +232,7 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
       telefonoCaseta: f.telefonoCaseta,
       estacionamientoVisitas: f.estacionamientoVisitas === '' ? null : Math.max(0, Math.floor(Number(f.estacionamientoVisitas))),
       serviciosCondominio: f.serviciosCondominio,
+      mensajeComprobante: f.mensajeComprobante.trim() || null,
     };
     const pago = {
       cuotaMensual: f.cuotaMensual === '' ? null : Number(f.cuotaMensual),
@@ -324,6 +326,19 @@ function DatosCondominio({ c, seccion, onCreado }: { c: Partial<Condominio>; sec
               <textarea rows={2} maxLength={300} value={f.direccion} onChange={set('direccion')} disabled={!puedeGeneral} placeholder="Calle, número, colonia, municipio, estado, C.P." />
             </Field>
             <ServiciosCondominio valor={f.serviciosCondominio} onChange={(serviciosCondominio) => setF({ ...f, serviciosCondominio })} disabled={!puedeGeneral} />
+            <Field
+              label="Mensaje automático al subir un comprobante"
+              hint="Lo recibe el residente en cuanto sube su comprobante de pago. Vacío: «La administración lo revisará y te avisaremos cuando tu pago sea aprobado»."
+            >
+              <textarea
+                rows={2}
+                maxLength={600}
+                value={f.mensajeComprobante}
+                onChange={set('mensajeComprobante')}
+                disabled={!puedeGeneral}
+                placeholder="Ej. Tu pago se validará en los próximos 10 días hábiles; no es necesario reportarlo."
+              />
+            </Field>
           </div>
         </section>
       )}

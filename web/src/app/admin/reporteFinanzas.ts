@@ -4,7 +4,7 @@
 // insertan como imagen (se ven igual en Excel, Google Sheets y al imprimir).
 import type { Workbook, Worksheet, Cell } from 'exceljs';
 import type { Schema } from '../api';
-import { etiquetaIngreso, tipoDeCargo, amenidadDeConcepto } from '../../../amplify/functions/shared/finanzas';
+import { etiquetaIngreso, tipoDeCargo, amenidadDeConcepto, categoriasDe, etiquetaCategoria } from '../../../amplify/functions/shared/finanzas';
 import { calcularBalance, desglosePago, evidenciasDe, fechaIngreso, fechaMX, mesAnterior, mesCorto, nombreMes, redondear, type Balance, type DatosFinanzas } from './balance';
 
 type Unidad = Schema['Unidad']['type'];
@@ -349,6 +349,13 @@ function hojaResumen(wb: Workbook, o: OpcionesReporte, b: Balance, img: Imagenes
     ['(+) Ingresos por amenidades', b.totalAmenidades],
     ['(−) Egresos', -b.totalEgresos],
     ['(=) Saldo final', b.saldoFinal, true],
+    // Fondos (multas, amenidades, ahorro…) y apartados manuales: no están disponibles para el gasto del mes.
+    ...(b.totalReservado
+      ? ([
+          ['(−) Fondos y apartados', -b.totalReservado],
+          ['(=) Disponible para ejecutar', b.disponible, true],
+        ] as [string, number, boolean?][])
+      : []),
   ];
   filasRes.forEach(([t, v, total], k) => {
     fila(ws, r + 1 + k, 2, t, v, null, total ? { b: true, fill: C.tealOscuro, color: C.blanco, size: 11 } : {});
@@ -549,8 +556,8 @@ export async function construirReporte(o: OpcionesReporte, img: Imagenes) {
         k ? null : p.validadoEn ? fechaXls(fechaMX(p.validadoEn)) : null,
         k ? '' : (p.referencia ?? ''),
         x.concepto,
-        x.tipo === 'RESERVA' ? 'Ingresos por amenidades' : 'Ingresos ordinarios',
-        tipoLegible(x.tipo, x.concepto),
+        x.categoria === 'AMENIDADES' ? 'Ingresos por amenidades' : 'Ingresos ordinarios',
+        x.reserva ? tipoLegible(x.tipo, x.concepto) : etiquetaCategoria(x.categoria, categoriasDe(o.datos.condo)),
         redondear(x.monto),
       ]),
     );
@@ -568,7 +575,7 @@ export async function construirReporte(o: OpcionesReporte, img: Imagenes) {
       { header: 'Referencia', width: 16 },
       { header: 'Concepto', width: 40, wrap: true },
       { header: 'Grupo', width: 22 },
-      { header: 'Tipo', width: 30, wrap: true },
+      { header: 'Categoría', width: 30, wrap: true },
       { header: 'Monto', width: 14, fmt: PESOS },
     ],
     filasIng,
