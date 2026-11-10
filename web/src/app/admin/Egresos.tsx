@@ -363,13 +363,26 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
       const { descargarReporteFinanzas } = await import('./reporteFinanzas');
       await descargarReporteFinanzas({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy(), generadoPor: firmaReporte });
     }, 'Balance mensual descargado');
-  // Balance general acumulado: un solo PDF de enero al mes elegido.
-  const general = () =>
+  // Proyección anual: Excel de enero a diciembre (real hasta el mes elegido, proyectado después).
+  const proyeccion = () =>
     run(async () => {
       setMenu(false);
-      const { descargarBalanceGeneral } = await import('./balanceGeneral');
-      await descargarBalanceGeneral({ condominio: condo!.nombre, direccion: condo!.direccion, hasta: mes, datos, generadoPor: firmaReporte });
-    }, 'Balance general acumulado descargado');
+      const [{ descargarProyeccionAnual }, contactos] = await Promise.all([
+        import('./proyeccionAnual'),
+        adminCall<Record<string, { nombre: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }).catch(() => ({})),
+      ]);
+      await descargarProyeccionAnual({
+        condominio: condo!.nombre,
+        hasta: mes,
+        datos,
+        cuotaMensual: condo!.cuotaMensual ?? 0,
+        unidades,
+        contactos,
+        hoy: hoy(),
+        tipoUnidad: condo!.tipoUnidad === 'DEPARTAMENTO' ? 'departamentos' : condo!.tipoUnidad ? 'casas' : undefined,
+        generadoPor: firmaReporte,
+      });
+    }, 'Proyección anual descargada');
   const cuotas = b.pctCorriente + b.pctRecuperacion > 0;
 
   return (
@@ -388,9 +401,9 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
                   <strong>Mensual</strong>
                   <span>Estado financiero de {nombreMes(mes).toLowerCase()} (Excel)</span>
                 </button>
-                <button role="menuitem" onClick={general}>
-                  <strong>General / acumulado</strong>
-                  <span>Enero a {nombreMes(mes).toLowerCase()} en un solo documento (PDF)</span>
+                <button role="menuitem" onClick={proyeccion}>
+                  <strong>Proyección anual</strong>
+                  <span>Enero a diciembre de {mes.slice(0, 4)}: real hasta {nombreMes(mes).toLowerCase()} y proyectado (Excel)</span>
                 </button>
               </div>
             )}

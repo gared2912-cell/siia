@@ -30,6 +30,7 @@ import { ModuloInactivo, useAdmin } from './AdminApp';
 import { Documentos } from './Documentos';
 import { TarjetaTurno, type Turno } from '../caseta/Vigilancia';
 import { SLOTS_AMENIDADES } from '../../../amplify/functions/shared/documentos';
+import { DIAS_RECHAZADA, fechaBorradoMascota, rechazadaDesde } from '../../../amplify/functions/shared/mascotas';
 import { ElegirArchivo } from '../ElegirArchivo';
 
 type Incidente = Schema['Incidente']['type'];
@@ -247,16 +248,20 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
         : 'Una vez guardada, esta etapa ya no se podrá modificar. ¿Continuar?';
     if (!confirm(aviso)) return;
     const okk = await run(async () => {
-      if (!foto) throw new Error('Sube la foto o el PDF de evidencia.');
-      const nombre = foto.name || 'evidencia.jpg';
-      const r = await adminCall<{ url: string; path: string; contentType: string }>('incidentes.subirEvidencia', {
-        incidenteId: i.id,
-        nombre: /\.[a-z0-9]+$/i.test(nombre) ? nombre : `${nombre}.jpg`,
-        tamano: foto.size,
-      });
-      const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: foto });
-      if (!put.ok) throw new Error('No se pudo subir la evidencia. Intenta de nuevo.');
-      await adminCall('incidentes.atender', { incidenteId: i.id, estado, respuesta, fotoPath: r.path });
+      // La evidencia es opcional para la administración (la del residente al reportar sí es obligatoria).
+      let fotoPath: string | undefined;
+      if (foto) {
+        const nombre = foto.name || 'evidencia.jpg';
+        const r = await adminCall<{ url: string; path: string; contentType: string }>('incidentes.subirEvidencia', {
+          incidenteId: i.id,
+          nombre: /\.[a-z0-9]+$/i.test(nombre) ? nombre : `${nombre}.jpg`,
+          tamano: foto.size,
+        });
+        const put = await fetch(r.url, { method: 'PUT', headers: { 'Content-Type': r.contentType }, body: foto });
+        if (!put.ok) throw new Error('No se pudo subir la evidencia. Intenta de nuevo.');
+        fotoPath = r.path;
+      }
+      await adminCall('incidentes.atender', { incidenteId: i.id, estado, respuesta, fotoPath });
     }, estado === 'CERRADO' ? 'Incidente cerrado; se avisó al residente.' : 'Etapa guardada; se avisó al residente.');
     if (okk) onDone();
   }
@@ -273,7 +278,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
         </Field>
         <Field
           grupo
-          label="Evidencia (obligatoria)"
+          label="Evidencia (opcional)"
           hint={estado === 'CERRADO' ? 'Foto o PDF que muestre por qué se cierra el incidente. Máximo 10 MB.' : 'Foto o PDF que muestre el avance. Máximo 10 MB.'}
         >
           <ElegirArchivo pdf value={foto} onChange={(fs) => setFoto(fs[0] ?? null)} />
@@ -285,7 +290,7 @@ function SiguienteEtapa({ i, superadmin, onDone, onCancel }: { i: Incidente; sup
           {etiquetaEstado(estado)} por {yoNombre}
         </p>
         <div className="row-actions">
-          <button className="btn-app" disabled={busy || !foto || !respuesta.trim()}>
+          <button className="btn-app" disabled={busy || !respuesta.trim()}>
             {busy ? 'Guardando…' : estado === 'CERRADO' && !superadmin ? 'Guardar y cerrar incidente' : 'Guardar etapa'}
           </button>
           {onCancel && (
@@ -951,15 +956,92 @@ export function MascotasAdmin() {
       estado === 'APROBADA' ? 'Mascota aprobada' : 'Registro rechazado',
     );
   };
-  const lista = [...(data ?? [])].sort((a, b) => (a.estado === 'PENDIENTE' ? -1 : 0) - (b.estado === 'PENDIENTE' ? -1 : 0) || porFecha(a, b));
+  // Las rechazadas van aparte («Rechazadas»), con su motivo, hasta que se borran (a mano o solas a los 30 días).
+  const [vista, setVista] = useState<'registro' | 'rechazadas'>('registro');
+  const [marcadas, setMarcadas] = useState<string[]>([]);
+  const puedeBorrar = puede('mascotas', 'editar');
+  const lista = (data ?? []).filter((m) => m.estado !== 'RECHAZADA').sort((a, b) => (a.estado === 'PENDIENTE' ? -1 : 0) - (b.estado === 'PENDIENTE' ? -1 : 0) || porFecha(a, b));
+  const rechazadas = (data ?? []).filter((m) => m.estado === 'RECHAZADA').sort((a, b) => rechazadaDesde(b).localeCompare(rechazadaDesde(a)));
+  const elegidas = rechazadas.filter((m) => marcadas.includes(m.id));
+  const marcar = (id: string) => setMarcadas(marcadas.includes(id) ? marcadas.filter((x) => x !== id) : [...marcadas, id]);
+  const diasRestantes = (m: Mascota) => Math.max(0, Math.ceil((Date.parse(fechaBorradoMascota(m)) - Date.now()) / 86_400_000));
+  const borrar = (ms: Mascota[]) =>
+    ms.length &&
+    confirm(ms.length === 1 ? `¿Borrar el registro rechazado de ${ms[0].nombre}? No se puede deshacer.` : `¿Borrar ${ms.length} registros rechazados? No se puede deshacer.`) &&
+    run(
+      async () => {
+        for (const m of ms) ok(await db.models.Mascota.delete({ id: m.id }));
+        setMarcadas([]);
+        setAbierta(null);
+        reload(true);
+      },
+      ms.length === 1 ? 'Registro borrado' : 'Registros borrados',
+    );
   return (
     <div className="stack">
       <ModuloInactivo modulo="mascotas" />
       <PageHead icon="paw" title="Mascota segura" sub="Valida el registro de mascotas de los residentes." />
+      {data && (
+        <Seg
+          value={vista}
+          onChange={(v) => (setVista(v), setMarcadas([]))}
+          options={[
+            ['registro', `Mascotas (${lista.length})`],
+            ['rechazadas', `Rechazadas (${rechazadas.length})`],
+          ]}
+        />
+      )}
       {loading && !data ? (
         <Loading />
       ) : error ? (
         <ErrorBox error={error} retry={reload} />
+      ) : vista === 'rechazadas' ? (
+        <section className="panel">
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Aquí quedan los registros rechazados con su motivo. Se borran solos {DIAS_RECHAZADA} días después del rechazo.
+          </p>
+          {rechazadas.length ? (
+            <>
+              {puedeBorrar && (
+                <div className="row-actions" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={elegidas.length === rechazadas.length}
+                      onChange={(e) => setMarcadas(e.target.checked ? rechazadas.map((m) => m.id) : [])}
+                    />
+                    Seleccionar todas
+                  </label>
+                  <button className="btn-app sm danger" disabled={!elegidas.length || busy} onClick={() => borrar(elegidas)}>
+                    <Icon name="trash" />
+                    Borrar{elegidas.length ? ` (${elegidas.length})` : ''}
+                  </button>
+                </div>
+              )}
+              <Tarjetas>
+                {rechazadas.map((m) => {
+                  const sel = marcadas.includes(m.id);
+                  return (
+                    <Tarjeta
+                      key={m.id}
+                      tono="mal"
+                      onClick={() => (puedeBorrar ? marcar(m.id) : setAbierta(m))}
+                      label={puedeBorrar ? `${sel ? 'Quitar de la selección' : 'Seleccionar'}: ${m.nombre}` : undefined}
+                      media={puedeBorrar ? <span className={`marca-sel${sel ? ' on' : ''}`}>{sel && <Icon name="check" />}</span> : <TarjetaIcono name="paw" />}
+                      titulo={m.nombre}
+                      sub={`${etiqueta(m.unidadId)} · rechazada el ${fecha(rechazadaDesde(m).slice(0, 10))}`}
+                      lado={<span className="small muted">{diasRestantes(m) ? `Se borra en ${diasRestantes(m)} día${diasRestantes(m) === 1 ? '' : 's'}` : 'Se borra hoy'}</span>}
+                    >
+                      <span className="small">Motivo: {m.notas || 'sin motivo registrado'}</span>
+                    </Tarjeta>
+                  );
+                })}
+              </Tarjetas>
+            </>
+          ) : (
+            <Empty icon="paw">Sin registros rechazados.</Empty>
+          )}
+        </section>
       ) : (
         <section className="panel">
           {lista.length ? (

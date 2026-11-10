@@ -23,6 +23,7 @@ import { Actividad } from './Actividad';
 import { AvisoSuspendido } from './EstadoCondominio';
 import { ProveedoresAdmin } from './Proveedores';
 import { CotizacionesAdmin } from './Cotizaciones';
+import { chatsPorResponder } from '../chatPendiente';
 
 export type Condominio = Schema['Condominio']['type'];
 export type Unidad = Schema['Unidad']['type'];
@@ -311,13 +312,7 @@ type Mensaje = Schema['Mensaje']['type'];
 
 /** Hilos de un canal cuyo último mensaje es de un residente (pendientes de respuesta). */
 export function porResponder(mensajes: { unidadId: string; canal?: string | null; autorRol?: string | null; createdAt: string }[], canal: string) {
-  const ultimo = new Map<string, { autorRol?: string | null; createdAt: string }>();
-  for (const m of mensajes) {
-    if (m.canal !== canal) continue;
-    const u = ultimo.get(m.unidadId);
-    if (!u || m.createdAt > u.createdAt) ultimo.set(m.unidadId, m);
-  }
-  return [...ultimo.values()].filter((m) => m.autorRol === 'RESIDENTE').length;
+  return chatsPorResponder(mensajes, canal).length;
 }
 
 /** Aviso de que un módulo no está habilitado para el condominio seleccionado. */

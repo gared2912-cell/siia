@@ -281,7 +281,7 @@ const REGLAS: Record<string, Regla> = {
     indices: { mensajesPorCondominio: 'condominioId', mensajesPorHilo: 'hilo' },
     crear: ['condominioId', 'unidadId', 'canal', 'hilo', 'autorNombre', 'autorRol', 'autorId', 'texto', 'imagenPath'],
   },
-  // Se atiende con la acción incidentes.atender (foto de evidencia obligatoria y bitácora).
+  // Se atiende con la acción incidentes.atender (foto de evidencia opcional y bitácora).
   Incidente: { seccion: 'incidentes', indices: { incidentesPorCondominio: 'condominioId' } },
   Mantenimiento: {
     seccion: 'mantenimientos',
@@ -313,7 +313,8 @@ const REGLAS: Record<string, Regla> = {
   Visita: { seccion: 'visitas', indices: { visitasPorCondominio: 'condominioId' } },
   // Registro de vigilancia (cambios de turno): la administración solo consulta.
   TurnoVigilancia: { seccion: 'visitas', indices: { turnosPorCondominio: 'condominioId' } },
-  Mascota: { seccion: 'mascotas', indices: { mascotasPorCondominio: 'condominioId' }, editar: ['estado', 'notas'] },
+  // Los rechazados se pueden borrar (los demás no; ver op delete) y se borran solos a los 30 días (siia-papelera).
+  Mascota: { seccion: 'mascotas', indices: { mascotasPorCondominio: 'condominioId' }, editar: ['estado', 'notas'], borrar: true },
 };
 
 const condoDe = (m: string, item: Item) => (m === 'Condominio' ? item.id : item.condominioId);
@@ -518,8 +519,11 @@ async function db(p: Item, yo: Yo) {
     if (op === 'delete') {
       exigir(yo, regla!.seccion, 'editar');
       if (!regla!.borrar) fail('Operación no permitida.');
+      // Mascotas: solo se borran los registros rechazados (los aprobados y pendientes se quedan).
+      if (m === 'Mascota' && actual!.estado !== 'RECHAZADA') fail('Solo se pueden borrar registros rechazados.');
       const borrado = resultado(await M.delete({ id }));
       registrarCambio(m, 'baja', actual, undefined);
+      if (m === 'Mascota' && actual!.fotoPath) await enviarAPapelera({ accion: 'borrarArchivos', paths: [actual!.fotoPath] }).catch((e) => console.error('foto mascota', e));
       return borrado;
     }
     if (!regla!.editar) fail('Operación no permitida.');
@@ -555,6 +559,8 @@ async function db(p: Item, yo: Yo) {
       return actualizar({ id: actual!.id, ...(nota !== undefined ? { nota } : {}) });
     }
     if (m === 'Reserva' && (input.estado === 'RECHAZADA' || input.estado === 'CANCELADA')) await cancelarCargoReserva(actual!.id);
+    // Mascota rechazada: desde cuándo cuenta su plazo antes de borrarse sola (shared/mascotas.ts).
+    if (m === 'Mascota' && cambian.includes('estado')) input.rechazadaEn = input.estado === 'RECHAZADA' ? now() : null;
     const r = await actualizar(input);
     // Nueva fecha, o se pidió avisar por correo de un mantenimiento importante que antes no lo tenía.
     const pideCorreo = cambian.includes('correoResidentes') && input.correoResidentes === true && (input.importante ?? actual!.importante);
@@ -1398,7 +1404,6 @@ const accionesEncuestas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> =
 // Etapas que registra el administrador. Cada etapa guardada queda fija; el administrador elige libremente la que
 // corresponde (puede repetirla: seguimiento, seguimiento, proceso… y al final cerrar).
 const ESTADOS_INCIDENTE = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
-const CON_EVIDENCIA = ['EN_SEGUIMIENTO', 'EN_PROCESO', 'CERRADO'];
 const TIPOS_FOTO: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', heic: 'image/heic' };
 type Paso = { estado: string; respuesta?: string | null; fotoPath?: string | null; por?: string; porNombre?: string | null; en: string; reabierto?: boolean };
 
@@ -1447,7 +1452,7 @@ const accionesIncidentes: Record<string, (p: Item, yo: Yo) => Promise<unknown>> 
     const respuesta = str(p.respuesta, 2000) || null;
     const fotoPath = str(p.fotoPath, 400) || null;
     if (!respuesta) fail('Escribe la descripción de la etapa.');
-    if (CON_EVIDENCIA.includes(estado) && !fotoPath) fail('Sube la foto de evidencia.');
+    // La evidencia de la administración es opcional (la del residente al reportar sí es obligatoria).
     if (fotoPath) {
       if (!fotoPath.startsWith(`condominios/${i.condominioId}/incidentes/${i.id}/`)) fail('Foto no válida.');
       const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: fotoPath })).catch(() => undefined);

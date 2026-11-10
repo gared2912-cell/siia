@@ -507,6 +507,7 @@ const schema = a
         fotoPath: a.string(),
         vacunaAntirrabica: a.date(),
         estado: a.enum(['PENDIENTE', 'APROBADA', 'RECHAZADA']),
+        rechazadaEn: a.datetime(), // al rechazar; se borra sola DIAS_RECHAZADA días después (shared/mascotas.ts)
         extraviada: a.boolean(),
         notas: a.string(),
       })

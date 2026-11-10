@@ -6,6 +6,7 @@
 //   Excepción: cotizaciones y asistencia técnica siguen en la campana hasta que alguien las marca como respondidas.
 // - El semáforo (y el beagle) suma todos los pendientes: hasta 5 verde, más de 5 amarillo, más de 10 rojo.
 import { useMemo } from 'react';
+import { chatsPorResponder } from '../chatPendiente';
 import { adminCall, all, db, type Schema } from '../api';
 import { fechaHora, money, useLoad, usePoll } from '../ui';
 import { Campana, useVistos, type ItemCampana } from '../Campana';
@@ -48,11 +49,6 @@ type Opciones = {
 };
 
 /** Hilos de chat cuyo último mensaje es de un residente (por responder). */
-function chatsPorResponder(mensajes: Mensaje[]) {
-  const ultimo = new Map<string, Mensaje>();
-  for (const m of mensajes) if (m.canal === 'ADMIN' && (!ultimo.has(m.unidadId) || m.createdAt > ultimo.get(m.unidadId)!.createdAt)) ultimo.set(m.unidadId, m);
-  return [...ultimo.values()].filter((m) => m.autorRol === 'RESIDENTE');
-}
 
 export function usePendientesAdmin({ condo, bloqueado, superadmin, reporta, puede, tiene, etiqueta, go, mensajes }: Opciones): PendientesAdmin {
   const vistos = useVistos(VISTOS_ADMIN);
@@ -90,8 +86,9 @@ export function usePendientesAdmin({ condo, bloqueado, superadmin, reporta, pued
         pend.push({ seccion: 'amenidades', id: `reserva-${x.id}`, icono: 'calendar', titulo: 'Reserva por aprobar', texto: `${etiqueta(x.unidadId)} · ${x.fecha} ${x.horaInicio}–${x.horaFin}`, fecha: x.createdAt, nuevo: true, abrir: () => go('amenidades') });
       for (const m of d.mascotas.filter((y) => y.estado === 'PENDIENTE'))
         pend.push({ seccion: 'mascotas', id: `mascota-${m.id}`, icono: 'paw', titulo: `Mascota por validar: ${m.nombre}`, texto: etiqueta(m.unidadId), fecha: m.createdAt, nuevo: true, abrir: () => go('mascotas') });
-      for (const i of d.incidentes.filter((y) => y.estado === 'ABIERTO'))
-        pend.push({ seccion: 'incidentes', id: `incidente-${i.id}`, icono: 'alert', titulo: `Incidente nuevo: ${i.titulo}`, texto: etiqueta(i.unidadId), fecha: i.createdAt, nuevo: true, abrir: () => go('incidentes') });
+      // Incidentes: cuentan hasta que se cierran (con solución), no al abrirlos ni al pasar a seguimiento.
+      for (const i of d.incidentes.filter((y) => y.estado !== 'CERRADO'))
+        pend.push({ seccion: 'incidentes', id: `incidente-${i.id}`, icono: 'alert', titulo: `${i.estado === 'ABIERTO' ? 'Incidente nuevo' : 'Incidente en curso'}: ${i.titulo}`, texto: etiqueta(i.unidadId), fecha: i.createdAt, nuevo: true, abrir: () => go('incidentes') });
       for (const p of d.perfiles.filter((y) => y.estado === 'PENDIENTE' && y.condominioId === id))
         pend.push({ seccion: 'condominios', id: `perfil-${p.userId}`, icono: 'users', titulo: `Solicitud de acceso: ${p.nombre || p.email}`, texto: p.unidadSolicitada ?? undefined, fecha: p.createdAt, nuevo: true, abrir: () => go('condominios/residentes') });
     }

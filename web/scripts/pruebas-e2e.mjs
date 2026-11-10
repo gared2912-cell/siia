@@ -912,6 +912,7 @@ try {
     X.incidente = i.id;
     esperar(i.estado === 'ABIERTO', i.estado);
   });
+  await prueba('Residente no puede reportar un incidente sin evidencia', () => bloqueado(r1.portal('incidentes.crear', { titulo: 'Sin foto' })));
   // Etapa con foto de evidencia (como en el panel): URL firmada, subir la foto y registrar la etapa.
   const etapa = async (estado, respuesta, contenido) => {
     const s = await ok(ag.admin('incidentes.subirEvidencia', { incidenteId: X.incidente, id: X.incidente, nombre: `evidencia-e2e-${estado}.jpg`, tamano: contenido.length }));
@@ -1268,7 +1269,8 @@ try {
   await prueba('Incidente en Los Robles llega al administrador general y no a Operación de Torre', async () => {
     await registrar(ag);
     await registrar(op);
-    await ok(r1.portal('incidentes.crear', { titulo: 'Prueba de notificación de incidente' }));
+    const fotoAviso = await r1.subir('incidentes', 'aviso.jpg', 'jpg', 'image/jpeg');
+    await ok(r1.portal('incidentes.crear', { titulo: 'Prueba de notificación de incidente', fotoPath: fotoAviso }));
     esperar(await notificado(ag), 'sin envío al administrador general');
     esperar((await dispositivos(op)) === 1, 'se notificó a un administrador de otro condominio');
     return 'solo a quien atiende el condominio';
@@ -1289,7 +1291,8 @@ try {
   await prueba('Servicio no contratado no está disponible (Torre sin amenidades)', () => bloqueado(r3.portal('amenidades.lista')));
   await prueba('Residente de Torre usa sus servicios', async () => {
     const i = await ok(r3.portal('inicio.resumen'));
-    await ok(r3.portal('incidentes.crear', { titulo: 'Elevador detenido', categoria: 'Elevador' }));
+    const fotoElevador = await r3.subir('incidentes', 'elevador.jpg', 'jpg', 'image/jpeg');
+    await ok(r3.portal('incidentes.crear', { titulo: 'Elevador detenido', categoria: 'Elevador', fotoPath: fotoElevador }));
     return `avisos sin leer: ${i.avisosSinLeer}`;
   });
   await prueba('Portal desactivado bloquea a los residentes de esa propiedad', async () => {

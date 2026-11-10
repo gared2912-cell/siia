@@ -31,4 +31,5 @@ export function jsonDe<T = Item>(v: unknown): T | null {
 export type OrdenPapelera =
   | { accion: 'desactivar'; condominioId: string }
   | { accion: 'reactivar'; condominioId: string; cuentas: string[] }
-  | { accion: 'purgar'; condominioId: string };
+  | { accion: 'purgar'; condominioId: string }
+  | { accion: 'borrarArchivos'; paths: string[] };

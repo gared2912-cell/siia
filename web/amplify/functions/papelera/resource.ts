@@ -2,6 +2,7 @@ import { defineFunction } from '@aws-amplify/backend';
 
 // Papelera de condominios: desactiva o reactiva sus cuentas (admin-api la invoca al eliminar o restaurar) y, cada
 // hora, borra definitivamente los que cumplieron 30 días en la papelera o cuyo borrado inmediato quedó pendiente.
+// Cada hora también borra las mascotas rechazadas hace más de 30 días (con su foto).
 export const papelera = defineFunction({
   name: 'siia-papelera',
   entry: './handler.ts',

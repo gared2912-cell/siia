@@ -266,7 +266,9 @@ function NuevoIncidente({ onClose, onDone }: { onClose: () => void; onDone: () =
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
     const okk = await run(async () => {
-      const fotoPath = foto ? await subirArchivo(foto, 'incidentes') : undefined;
+      // La evidencia del residente es obligatoria (la de la administración al atender, opcional).
+      if (!foto) throw new Error('Sube una foto o PDF como evidencia de lo que reportas.');
+      const fotoPath = await subirArchivo(foto, 'incidentes');
       await portal('incidentes.crear', { ...f, fotoPath });
     }, 'Reporte enviado a la administración');
     if (okk) onDone();
@@ -293,10 +295,10 @@ function NuevoIncidente({ onClose, onDone }: { onClose: () => void; onDone: () =
         <Field label="Detalles (opcional)">
           <textarea maxLength={3000} value={f.descripcion} onChange={set('descripcion')} />
         </Field>
-        <Field grupo label="Foto o evidencia (opcional)" hint="Imagen o PDF, máximo 8 MB.">
+        <Field grupo label="Foto o evidencia (obligatoria)" hint="Imagen o PDF de lo que reportas, máximo 8 MB.">
           <ElegirArchivo pdf value={foto} onChange={(fs) => setFoto(fs[0] ?? null)} />
         </Field>
-        <button className="btn-app block" disabled={busy}>
+        <button className="btn-app block" disabled={busy || !foto}>
           {busy ? 'Enviando…' : 'Enviar reporte'}
         </button>
       </form>

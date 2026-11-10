@@ -4,6 +4,8 @@
 // - reactivar: al restaurarlo, vuelve a habilitar esas cuentas.
 // - purgar (y cada hora): borra el condominio con TODOS sus datos: registros de cada tabla, cuentas de Cognito,
 //   archivos en S3 (con sus versiones anteriores) y su asignación a administradores. No hay vuelta atrás.
+// - borrarArchivos: borra archivos sueltos (p. ej. la foto de una mascota rechazada que la administración borró).
+// - Cada hora, además: borra las mascotas rechazadas que cumplieron 30 días (shared/mascotas.ts).
 import {
   AdminDeleteUserCommand,
   AdminDisableUserCommand,
@@ -15,6 +17,7 @@ import { BatchWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { cognito } from '../shared/cognito';
 import { byIndex, ddb, get, now, put, scan, table, type Item } from '../shared/db';
 import { fechaBorrado, jsonDe, type OrdenPapelera } from '../shared/condominios';
+import { fechaBorradoMascota } from '../shared/mascotas';
 
 const UserPoolId = process.env.USER_POOL_ID!;
 const Bucket = process.env.BUCKET!;
@@ -121,6 +124,21 @@ async function borrarCarpeta(Prefix: string) {
   return n;
 }
 
+/** Borra archivos sueltos (con sus versiones anteriores); solo dentro de las carpetas que esta Lambda puede tocar. */
+async function borrarArchivos(paths: string[]) {
+  let n = 0;
+  for (const Key of paths) {
+    if (!/^(residentes|condominios)\/[^\s]+$/.test(Key) || Key.includes('..')) continue;
+    const r = await s3.send(new ListObjectVersionsCommand({ Bucket, Prefix: Key }));
+    const objetos = [...(r.Versions ?? []), ...(r.DeleteMarkers ?? [])].filter((v) => v.Key === Key).map((v) => ({ Key, VersionId: v.VersionId }));
+    if (objetos.length) {
+      await s3.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: objetos, Quiet: true } }));
+      n += objetos.length;
+    }
+  }
+  return n;
+}
+
 async function purgar(condominioId: string) {
   const c = await get('Condominio', { id: condominioId });
   // Solo se borra lo que está en la papelera.
@@ -205,9 +223,21 @@ export const handler = async (event: Partial<OrdenPapelera> & Item) => {
   if (event?.accion === 'desactivar') return desactivar(String(event.condominioId));
   if (event?.accion === 'reactivar') return reactivar(Array.isArray(event.cuentas) ? event.cuentas.map(String) : []);
   if (event?.accion === 'purgar') return purgar(String(event.condominioId));
+  if (event?.accion === 'borrarArchivos') return { archivos: await borrarArchivos(Array.isArray(event.paths) ? event.paths.map(String) : []) };
+
+  const ahora = new Date().toISOString();
+  // Cada hora: mascotas rechazadas que cumplieron su plazo (shared/mascotas.ts), con su foto.
+  try {
+    const mascotas = (await scan('Mascota')).filter((m) => m.estado === 'RECHAZADA' && fechaBorradoMascota(m) <= ahora);
+    if (mascotas.length) {
+      await borrarRegistros('Mascota', mascotas);
+      await borrarArchivos(mascotas.map((m) => m.fotoPath).filter(Boolean));
+    }
+  } catch (err) {
+    console.error('mascotas rechazadas', err);
+  }
 
   // Cada hora: los que cumplieron su plazo en la papelera y los de borrado inmediato que no terminaron.
-  const ahora = new Date().toISOString();
   const vencidos = (await scan('Condominio')).filter((c) => c.eliminadoEn && (fechaBorrado(c.eliminadoEn) <= ahora || jsonDe(c.eliminacion)?.purgando));
   for (const c of vencidos) {
     try {

@@ -389,7 +389,9 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
   async 'incidentes.crear'({ condominio, unidad, sub, p }) {
     const titulo = str(p.titulo, 140);
     if (!titulo) fail('Describe brevemente el incidente.');
-    const fotoPath = p.fotoPath ? await archivoPropio(p.fotoPath, sub, 'incidentes') : undefined;
+    // La evidencia del residente es obligatoria (la de la administración al atender, opcional).
+    if (!p.fotoPath) fail('Sube una foto o PDF como evidencia de lo que reportas.');
+    const fotoPath = await archivoPropio(p.fotoPath, sub, 'incidentes');
     const inc = await put('Incidente', {
       condominioId: condominio.id,
       unidadId: unidad!.id,

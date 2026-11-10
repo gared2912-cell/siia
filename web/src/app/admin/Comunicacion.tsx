@@ -9,6 +9,7 @@ import { Firma, leerFirma } from './Firma';
 import { ModuloInactivo, useAdmin } from './AdminApp';
 import { descargarReporteEncuesta } from './excel';
 import { marcarVisto } from '../Campana';
+import { chatsPorResponder } from '../chatPendiente';
 import { VISTOS_ADMIN } from './CampanaAdmin';
 
 type Comunicado = Schema['Comunicado']['type'];
@@ -505,6 +506,8 @@ export function ChatAdmin({ onCambio, inicial }: { onCambio?: () => void; inicia
       .forEach((x) => !m.has(x.unidadId) && m.set(x.unidadId, x));
     return [...m.values()];
   }, [hilos.data]);
+  // Conversaciones que esperan respuesta (mensaje nuevo, no la continuación de una ya respondida; ver chatPendiente.ts).
+  const pendientes = useMemo(() => new Set(chatsPorResponder(hilos.data ?? []).map((x) => x.unidadId)), [hilos.data]);
 
   return (
     <div className="stack">
@@ -528,11 +531,11 @@ export function ChatAdmin({ onCambio, inicial }: { onCambio?: () => void; inicia
               {recientes.map((m) => (
                 <Tarjeta
                   key={m.unidadId}
-                  tono={m.autorRol === 'RESIDENTE' ? 'warn' : m.unidadId === unidadId ? 'info' : 'neutro'}
+                  tono={pendientes.has(m.unidadId) ? 'warn' : m.unidadId === unidadId ? 'info' : 'neutro'}
                   onClick={() => setUnidadId(m.unidadId)}
                   titulo={etiqueta(m.unidadId)}
                   sub={`${m.texto.slice(0, 70)} · ${fechaHora(m.createdAt)}`}
-                  lado={m.autorRol === 'RESIDENTE' ? <Badge estado="PENDIENTE">Por responder</Badge> : undefined}
+                  lado={pendientes.has(m.unidadId) ? <Badge estado="PENDIENTE">Por responder</Badge> : undefined}
                 />
               ))}
             </Tarjetas>
