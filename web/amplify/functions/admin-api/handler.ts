@@ -45,6 +45,7 @@ import {
   TIPOS_CARGO_MANUAL,
   apartadosDe,
   categoriasDe,
+  cargoProporcional,
   categoriasPropias,
   esCategoria,
   fondoValido,
@@ -61,6 +62,8 @@ import { listaJson, type FotoReporte } from '../shared/proveedores';
 import { MODELOS_FIRMADOS, anotar, firmanteActual, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { MOTIVOS_EDICION, edicionesDe, type Edicion } from '../shared/ediciones';
 import { ajusteDe, conceptoPendiente, favorAUsar, r2, repartirPago, type Excedente, type Faltante } from '../shared/pagos';
+import { configBeagle } from '../shared/beagle';
+import { MAX_FILAS_ESTADO_CUENTA, conciliar, leerEstadoCuenta, type ConciliacionPago } from '../shared/conciliacion';
 import { ApiError, byIndex, ddb, fail, get, hoyMX, now, parsePayload, put, remove, scan, str, table, update, type Item } from '../shared/db';
 import {
   EXTRAS,
@@ -755,6 +758,99 @@ async function moverSaldoFavor(unidadId: string, delta: number) {
   }
 }
 
+// ----- Match automático con el estado de cuenta (shared/conciliacion.ts) -----
+/** Filas del Excel tal como las lee el panel (SheetJS, header: 1): solo texto y números, recortados. */
+function filasEstadoCuenta(v: unknown): unknown[][] {
+  if (!Array.isArray(v) || !v.length) fail('Sube el estado de cuenta.');
+  if ((v as unknown[]).length > MAX_FILAS_ESTADO_CUENTA + 50) fail(`El estado de cuenta tiene más de ${MAX_FILAS_ESTADO_CUENTA} filas: descarga un periodo más corto.`);
+  return (v as unknown[]).map((r) =>
+    Array.isArray(r) ? r.slice(0, 30).map((c) => (typeof c === 'number' ? c : typeof c === 'string' ? c.slice(0, 1500) : c == null ? '' : String(c).slice(0, 1500))) : [],
+  );
+}
+
+/** Cruza el estado de cuenta con los comprobantes por aprobar del condominio (datos frescos de la base). */
+async function analizarEstadoCuenta(p: Item, yo: Yo) {
+  exigirExtra(yo, 'finanzas.validarPagos');
+  const c = await condominioFinanzas(p, yo, 'ver');
+  let lectura;
+  try {
+    lectura = leerEstadoCuenta(filasEstadoCuenta(p.filas));
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    fail(err instanceof Error ? err.message : 'No se pudo leer el estado de cuenta.');
+  }
+  if (!lectura!.movimientos.length) fail('El archivo no tiene depósitos (abonos).');
+  const [pagos, unidades, perfiles, cargos] = await Promise.all([
+    byIndex('Pago', 'byCondominio', 'condominioId', c.id),
+    byIndex('Unidad', 'byCondominio', 'condominioId', c.id),
+    byIndex('Perfil', 'byCondominio', 'condominioId', c.id),
+    byIndex('Cargo', 'byCondominio', 'condominioId', c.id),
+  ]);
+  const resultado = conciliar({
+    lectura: lectura!,
+    pagos: pagos as any,
+    unidades: unidades as any,
+    perfiles: perfiles.filter((x) => x.rol === 'RESIDENTE' && x.estado === 'APROBADO') as any,
+    cargos: cargos as any,
+    nombreCondominio: c.nombre,
+  });
+  return { condominio: c, resultado };
+}
+
+const accionesConciliacion: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
+  // Lee el estado de cuenta y propone qué comprobantes coinciden. No cambia nada.
+  async 'finanzas.conciliar'(p, yo) {
+    return (await analizarEstadoCuenta(p, yo)).resultado;
+  },
+
+  // Aprueba los comprobantes elegidos. El cruce se vuelve a hacer aquí con los datos actuales: solo se aprueba un
+  // comprobante si sigue emparejado (monto exacto) con un depósito del archivo que no se haya usado antes. Cada uno se
+  // aprueba como «Pago completo» con validarPago (folio, cargos, aviso y recibo al residente) y guarda el depósito.
+  async 'finanzas.aprobarConciliacion'(p, yo) {
+    const ids: string[] = Array.isArray(p.pagoIds) ? [...new Set<string>(p.pagoIds.map((x: unknown) => str(x, 64)).filter(Boolean))].slice(0, 15) : [];
+    if (!ids.length) fail('Selecciona los pagos a aprobar.');
+    const { resultado } = await analizarEstadoCuenta(p, yo);
+    const archivo = str(p.archivo, 120) || 'Estado de cuenta';
+    const inicio = Date.now();
+    const aprobados: { pagoId: string; folio: string | null }[] = [];
+    const errores: { pagoId: string; motivo: string }[] = [];
+    const sinProcesar: string[] = [];
+    for (const id of ids) {
+      if (Date.now() - inicio > 20_000) {
+        sinProcesar.push(id);
+        continue;
+      }
+      const c = resultado.coincidencias.find((x) => x.pagoId === id);
+      if (!c) {
+        errores.push({ pagoId: id, motivo: 'Ya no coincide con un depósito del estado de cuenta (o ya fue procesado).' });
+        continue;
+      }
+      try {
+        const r = (await acciones.validarPago({ pagoId: id, aprobar: true }, yo)) as Item;
+        const conc: ConciliacionPago = {
+          movId: c.movId,
+          fecha: c.mov.fecha,
+          hora: c.mov.hora,
+          monto: c.mov.monto,
+          ordenante: c.mov.ordenante,
+          banco: c.mov.banco,
+          rastreo: c.mov.rastreo,
+          recibo: c.mov.recibo,
+          concepto: c.mov.concepto.slice(0, 300),
+          archivo,
+          en: now(),
+        };
+        await update('Pago', { id }, { conciliacion: JSON.stringify(conc) });
+        aprobados.push({ pagoId: id, folio: r?.folio ?? null });
+      } catch (err) {
+        errores.push({ pagoId: id, motivo: err instanceof ApiError ? err.message : 'Ocurrió un error al aprobarlo.' });
+        if (!(err instanceof ApiError)) console.error('aprobarConciliacion', id, err);
+      }
+    }
+    return { aprobados, errores, sinProcesar };
+  },
+};
+
 const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Editar un cargo pendiente (monto, concepto, vencimiento o tipo de ingreso) con su motivo.
   async 'cargos.editar'(p, yo) {
@@ -1065,8 +1161,9 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     for (const cg of cargos) {
       if (cg.estado !== 'PENDIENTE' || !cg.vence || cg.vence >= hoy) continue;
       const tipo = tipoDeCargo(cg as { id: string; tipo?: string | null });
-      const esCuota = tipo === 'CUOTA';
-      const esExtra = (TIPOS_CARGO_MANUAL as readonly string[]).includes(tipo);
+      // La cuota proporcional (entrega) es cuota de mantenimiento, no un extraordinario.
+      const esCuota = tipo === 'CUOTA' || tipo === 'PROPORCIONAL';
+      const esExtra = !esCuota && (TIPOS_CARGO_MANUAL as readonly string[]).includes(tipo);
       if (!esCuota && tipo !== 'RECARGO' && !(esExtra && criterio.extraordinarios)) continue;
       const d = deuda.get(cg.unidadId) ?? { cuotas: 0, extras: 0, monto: 0 };
       if (esCuota) d.cuotas++;
@@ -1877,6 +1974,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   ...accionesEncuestas,
   ...accionesComunicados,
   ...accionesFinanzas,
+  ...accionesConciliacion,
   ...accionesReportes,
 
   // ----- app y notificaciones push (solo categorías que su rol permite) -----
@@ -2395,9 +2493,34 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
         const fechaEntrega = !fija && /^\d{4}-\d{2}-\d{2}$/.test(f.fechaEntrega) ? f.fechaEntrega : null;
         let u = fija ?? porClave.get(claveUnidad(etiqueta));
         if (!u) {
+          // Cuota proporcional de entrega (casilla al dar de alta): se valida antes de crear la unidad.
+          const cuota = Number(c!.cuotaMensual) || 0;
+          const proporcional = f.proporcional === true;
+          if (proporcional) {
+            exigir(yo, 'finanzas', 'editar');
+            if (!fechaEntrega) fail('Indica la fecha de entrega para calcular la cuota proporcional.');
+            if (!(cuota > 0)) fail('El condominio no tiene cuota mensual: captúrala en Condominios › Cuotas y pagos.');
+          }
           u = await put('Unidad', { condominioId: c!.id, etiqueta, fechaEntrega });
           porClave.set(claveUnidad(etiqueta), u);
           r.unidad = 'creada';
+          if (proporcional) {
+            const cp = cargoProporcional(cuota, fechaEntrega!, c!.diaVencimiento);
+            if (cp.monto > 0) {
+              await put('Cargo', {
+                id: `proporcional#${u.id}#${cp.periodo}`,
+                condominioId: c!.id,
+                unidadId: u.id,
+                concepto: cp.concepto,
+                periodo: cp.periodo,
+                monto: cp.monto,
+                vence: cp.vence,
+                estado: 'PENDIENTE',
+                tipo: 'PROPORCIONAL',
+              });
+              r.cambios.push(`cuota proporcional ${cp.monto.toFixed(2)}`);
+            }
+          }
         } else {
           r.unidad = 'existente';
           if (fechaEntrega && u.fechaEntrega !== fechaEntrega) {
@@ -2751,6 +2874,14 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
         };
       })
       .sort((a, b) => String(a.nombre || a.email).localeCompare(String(b.nombre || b.email)));
+  },
+
+  // Sonidos del beagle del semáforo de pendientes (verde: nada · amarillo: ladra · rojo: gruñe). Solo superadministrador.
+  async 'condominios.beagle'(p, yo) {
+    const c = await condominioSuper(p, yo);
+    const cfg = configBeagle({ activo: p.activo === true, cadaMin: Number(p.cadaMin), volumen: p.volumen });
+    await update('Condominio', { id: c.id }, { beagleSonidos: JSON.stringify(cfg) });
+    return cfg;
   },
 
   async 'condominios.asignarAdmin'(p, yo) {

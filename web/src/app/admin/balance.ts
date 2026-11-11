@@ -191,3 +191,33 @@ function reservado(
     disponible: redondear(saldoFinal - totalReservado),
   };
 }
+
+/** Lo que un pago aprobado aportó a una categoría (o a una amenidad) en el mes, con los conceptos que lo forman. */
+export type AporteIngreso = { pago: Pago; monto: number; conceptos: { concepto: string; monto: number }[] };
+export type FiltroIngreso = { tipo: string } | { amenidad: string };
+
+/**
+ * Detalle de una fila de «Ingresos» del balance: qué pagos del mes suman a esa categoría o amenidad. Usa el mismo
+ * reparto que calcularBalance (desglosePago), así que la suma siempre coincide con el total de la fila.
+ */
+export function aportesDeIngreso(d: DatosFinanzas, periodo: string, filtro: FiltroIngreso): AporteIngreso[] {
+  const cargosPorId = new Map(d.cargos.map((c) => [c.id, c]));
+  const cats = categoriasDe(d.condo);
+  const out: AporteIngreso[] = [];
+  for (const p of d.pagos) {
+    if (p.estado !== 'VALIDADO' || fechaIngreso(p).slice(0, 7) !== periodo) continue;
+    const partes = desglosePago(p, cargosPorId).filter((x) => {
+      const cat = cats.some((c) => c.key === x.categoria) ? x.categoria : 'OTRO';
+      if ('tipo' in filtro) return cat !== 'AMENIDADES' && cat === filtro.tipo;
+      if (cat !== 'AMENIDADES') return false;
+      return (x.reserva ? amenidadDeConcepto(x.concepto) : 'Amenidades (desglose de la administración)') === filtro.amenidad;
+    });
+    if (!partes.length) continue;
+    out.push({
+      pago: p,
+      monto: redondear(partes.reduce((s, x) => s + x.monto, 0)),
+      conceptos: partes.map((x) => ({ concepto: x.concepto, monto: redondear(x.monto) })),
+    });
+  }
+  return out.sort((a, b) => fechaIngreso(a.pago).localeCompare(fechaIngreso(b.pago)) || String(a.pago.folio ?? '').localeCompare(String(b.pago.folio ?? '')));
+}

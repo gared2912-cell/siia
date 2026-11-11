@@ -3,8 +3,9 @@
 import { useMemo, useState } from 'react';
 import { adminCall, all, db, ok, type Schema } from '../api';
 import { Firma } from './Firma';
-import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, Tarjeta, TarjetaIcono, Tarjetas, errMsg, fecha, useAction, useLoad, useToast, type Tono } from '../ui';
+import { Acciones, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, Seg, Tarjeta, TarjetaIcono, Tarjetas, errMsg, fecha, hoy, money, useAction, useLoad, useToast, type Tono } from '../ui';
 import { claveUnidad, etiquetaUnidad, prefijoUnidad } from '../../../amplify/functions/shared/unidades';
+import { cargoProporcional } from '../../../amplify/functions/shared/finanzas';
 import { useAdmin, type Unidad } from './AdminApp';
 import { descargarMachote, leerMachote, type FilaActual, type FilaMachote } from './excel';
 import { ChatUnidad } from './Comunicacion';
@@ -402,7 +403,7 @@ export function Residentes({ irAGenerales }: { irAGenerales: () => void }) {
 }
 
 /** Envía filas al servidor en grupos de 20 (crea unidades y da de alta residentes). */
-async function importar(condominioId: string, filas: (Omit<FilaMachote, 'linea'> & { unidadId?: string })[], enviarCorreo: boolean, avance?: (r: Resultado[]) => void) {
+async function importar(condominioId: string, filas: (Omit<FilaMachote, 'linea'> & { unidadId?: string; proporcional?: boolean })[], enviarCorreo: boolean, avance?: (r: Resultado[]) => void) {
   const out: Resultado[] = [];
   for (let i = 0; i < filas.length; i += 20) {
     const r = await adminCall<Resultado[]>('residentes.importar', { condominioId, filas: filas.slice(i, i + 20), enviarCorreo });
@@ -431,13 +432,19 @@ export function BotonesAlta({ busy, disabled, texto = 'Guardar' }: { busy: boole
 }
 
 function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; onClose: () => void; onDone: () => void }) {
-  const { condo, unidades } = useAdmin();
+  const { condo, unidades, puede } = useAdmin();
   const toast = useToast();
   const [f, setF] = useState({ numero: '', nombre: '', telefono: '', telefono2: '', correo: '', fechaEntrega: '' });
+  // Cuota proporcional de entrega: al marcarla, se cobra la cuota solo por los días desde la entrega hasta fin de mes.
+  const [proporcional, setProporcional] = useState(false);
+  const cuota = condo?.cuotaMensual ?? 0;
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
   const etiqueta = etiquetaUnidad(f.numero, condo!.tipoUnidad);
   const existe = unidades.find((u) => claveUnidad(u.etiqueta) === claveUnidad(etiqueta));
+  const ofrecerProporcional = !!f.numero.trim() && !existe && cuota > 0 && puede('finanzas', 'editar');
+  const conProporcional = ofrecerProporcional && proporcional;
+  const cp = conProporcional && f.fechaEntrega ? cargoProporcional(cuota, f.fechaEntrega, condo?.diaVencimiento) : null;
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const correo = f.correo.trim().toLowerCase();
@@ -446,12 +453,13 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
     const okk = await run(async () => {
       if (f.nombre.trim() && !correo) throw new Error('Escribe el correo del residente: es su usuario para entrar al portal.');
       if (correo && perfiles.some((p) => p.email === correo)) throw new Error('Ya existe un usuario con ese correo.');
-      [r] = await importar(condo!.id, [{ ...f, correo }], enviar);
+      if (conProporcional && !f.fechaEntrega) throw new Error('Indica la fecha de entrega para calcular la cuota proporcional.');
+      [r] = await importar(condo!.id, [{ ...f, correo, proporcional: conProporcional }], enviar);
       if (r?.error) throw new Error(r.error);
     });
     if (okk) {
       if (r?.acceso) alert(`${etiqueta}: ${avisoAlta({ correoEnviado: r.correo, correoPedido: enviar }, correo)}`);
-      else toast(`${etiqueta} guardada.`);
+      else toast(`${etiqueta} guardada${cp ? ` con su cuota proporcional de ${money(cp.monto)}` : ''}.`);
       onDone();
     }
   }
@@ -471,6 +479,40 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
             <input type="date" value={f.fechaEntrega} onChange={set('fechaEntrega')} />
           </Field>
         </div>
+        {ofrecerProporcional && (
+          <div className="proporcional-alta">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={proporcional}
+                onChange={(e) => {
+                  setProporcional(e.target.checked);
+                  if (e.target.checked && !f.fechaEntrega) setF({ ...f, fechaEntrega: hoy() });
+                }}
+              />
+              Cobrar cuota proporcional de entrega
+            </label>
+            {proporcional && (
+              <>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Se cobra la cuota de mantenimiento solo por los días desde la entrega hasta fin de mes. Si lo entregaste antes, cambia la fecha de entrega.
+                </p>
+                {cp ? (
+                  <div className="proporcional-calculo">
+                    <span>
+                      {money(cuota)} × {cp.dias} de {cp.total} días · vence {fecha(cp.vence)}
+                    </span>
+                    <strong>{money(cp.monto)}</strong>
+                  </div>
+                ) : (
+                  <p className="small" style={{ margin: 0 }}>
+                    Indica la fecha de entrega.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <Field label="Nombre del residente">
           <input maxLength={120} value={f.nombre} onChange={set('nombre')} />
         </Field>

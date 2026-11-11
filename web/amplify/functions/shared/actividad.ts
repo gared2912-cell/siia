@@ -36,6 +36,8 @@ const RESUMEN_ACCION: Record<string, string> = {
   reenviarAcceso: 'Reenvió el acceso por correo',
   generarContrasena: 'Asignó una contraseña nueva',
   validarPago: 'Revisó un comprobante de pago',
+  'finanzas.aprobarConciliacion': 'Aprobó pagos con el match del estado de cuenta',
+  'condominios.beagle': 'Configuró los sonidos del beagle',
   'reportes.crear': 'Reportó una falla o pidió una mejora',
   'reportes.atender': 'Atendió un reporte de falla o mejora',
   'saldoFavor.aplicar': 'Pagó un cargo con saldo a favor',

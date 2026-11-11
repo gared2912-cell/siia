@@ -1,11 +1,12 @@
 // Finanzas › Egresos (gastos del condominio con su evidencia) y Finanzas › Balance mensual.
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { adminCall, type Schema } from '../api';
 import { Acciones, Datos, Empty, Field, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, hoy, money, periodoActual, useAction } from '../ui';
 import { Firma } from './Firma';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
-import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia } from './balance';
+import { calcularBalance, evidenciasDe, mesAnterior, nombreMes, type DatosFinanzas, type Evidencia, type FiltroIngreso } from './balance';
+import { DetalleIngreso } from './DetalleIngreso';
 import { CATEGORIAS_EGRESO, FONDO_AMENIDADES, MAX_EVIDENCIAS_EGRESO, apartadosDe, categoriasDe, nombreFondo } from '../../../amplify/functions/shared/finanzas';
 import { BarraCategorias } from './Fondos';
 import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
@@ -347,6 +348,29 @@ export function EditarEgreso({ e, fondo, onClose, onDone }: { e: Partial<Egreso>
 }
 
 // ---------- Balance mensual ----------
+/** Fila de «Ingresos» que se toca para ver qué pagos la forman (sin monto, no se abre). */
+function FilaIngreso({ monto, abrir, children }: { monto: number; abrir: () => void; children: ReactNode }) {
+  if (!(monto > 0))
+    return (
+      <tr>
+        <td>{children}</td>
+        <td className="num">{money(monto)}</td>
+      </tr>
+    );
+  return (
+    <tr className="fila-tocable" tabIndex={0} role="button" onClick={abrir} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), abrir())}>
+      <td>
+        {children}
+        <span className="fila-ver">Ver detalle</span>
+      </td>
+      <td className="num">
+        {money(monto)}
+        <Icon name="chevron-right" className="fila-flecha" />
+      </td>
+    </tr>
+  );
+}
+
 export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload: () => void }) {
   const { condo, unidades, puede, firmaReporte } = useAdmin();
   const gestiona = puede('finanzas', 'editar');
@@ -355,18 +379,20 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
   const { run, busy } = useAction();
   const b = calcularBalance(datos, mes);
 
-  const [menu, setMenu] = useState(false);
+  const [generando, setGenerando] = useState<'mensual' | 'anual' | null>(null);
+  // Desglose de una fila de «Ingresos»: qué pagos forman ese monto.
+  const [detalle, setDetalle] = useState<{ filtro: FiltroIngreso; titulo: string; color?: string } | null>(null);
   // El reporte (ExcelJS, logotipo y gráficas) se carga solo al descargarlo.
   const excel = () =>
     run(async () => {
-      setMenu(false);
+      setGenerando('mensual');
       const { descargarReporteFinanzas } = await import('./reporteFinanzas');
       await descargarReporteFinanzas({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy(), generadoPor: firmaReporte });
     }, 'Balance mensual descargado');
   // Proyección anual: Excel de enero a diciembre (real hasta el mes elegido, proyectado después).
   const proyeccion = () =>
     run(async () => {
-      setMenu(false);
+      setGenerando('anual');
       const [{ descargarProyeccionAnual }, contactos] = await Promise.all([
         import('./proyeccionAnual'),
         adminCall<Record<string, { nombre: string | null; email: string }[]>>('finanzas.contactos', { condominioId: condo!.id }).catch(() => ({})),
@@ -390,23 +416,21 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
       <section className="panel">
         <div className="panel-head">
           <h2>Balance de {nombreMes(mes)}</h2>
-          <div className="menu-boton">
-            <button className="btn-app secondary" disabled={busy} onClick={() => setMenu(!menu)} aria-expanded={menu}>
+          {/* Dos descargas separadas y de distinto color para que se vean a la primera. */}
+          <div className="balance-botones">
+            <button className="btn-app sm" disabled={busy} onClick={excel} title={`Estado financiero de ${nombreMes(mes).toLowerCase()} (Excel)`}>
               <Icon name="download" />
-              {busy ? 'Generando…' : 'Balance'} ▾
+              {busy && generando === 'mensual' ? 'Generando…' : 'Mensual'}
             </button>
-            {menu && (
-              <div className="menu-lista" role="menu">
-                <button role="menuitem" onClick={excel}>
-                  <strong>Mensual</strong>
-                  <span>Estado financiero de {nombreMes(mes).toLowerCase()} (Excel)</span>
-                </button>
-                <button role="menuitem" onClick={proyeccion}>
-                  <strong>Proyección anual</strong>
-                  <span>Enero a diciembre de {mes.slice(0, 4)}: real hasta {nombreMes(mes).toLowerCase()} y proyectado (Excel)</span>
-                </button>
-              </div>
-            )}
+            <button
+              className="btn-app sm btn-anual"
+              disabled={busy}
+              onClick={proyeccion}
+              title={`Enero a diciembre de ${mes.slice(0, 4)}: real hasta ${nombreMes(mes).toLowerCase()} y proyectado (Excel)`}
+            >
+              <Icon name="chart" />
+              {busy && generando === 'anual' ? 'Generando…' : 'Proyección anual'}
+            </button>
           </div>
         </div>
         <Mes value={mes} onChange={setMes} />
@@ -467,14 +491,11 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
                 </td>
               </tr>
               {b.ordinarios.map((x) => (
-                <tr key={x.tipo}>
-                  <td>
-                    <span className="punto-cat" style={{ background: x.color }} />
-                    {x.label}
-                    {x.fondo && <span className="small muted"> · fondo</span>}
-                  </td>
-                  <td className="num">{money(x.monto)}</td>
-                </tr>
+                <FilaIngreso key={x.tipo} monto={x.monto} abrir={() => setDetalle({ filtro: { tipo: x.tipo }, titulo: x.label, color: x.color })}>
+                  <span className="punto-cat" style={{ background: x.color }} />
+                  {x.label}
+                  {x.fondo && <span className="small muted"> · fondo</span>}
+                </FilaIngreso>
               ))}
               <tr>
                 <td>Subtotal sin amenidades</td>
@@ -487,12 +508,9 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
               </tr>
               {b.amenidades.length ? (
                 b.amenidades.map((a) => (
-                  <tr key={a.nombre}>
-                    <td>
-                      {a.nombre} <span className="small muted">· {a.reservas} reserva{a.reservas === 1 ? '' : 's'}</span>
-                    </td>
-                    <td className="num">{money(a.monto)}</td>
-                  </tr>
+                  <FilaIngreso key={a.nombre} monto={a.monto} abrir={() => setDetalle({ filtro: { amenidad: a.nombre }, titulo: a.nombre })}>
+                    {a.nombre} <span className="small muted">· {a.reservas} reserva{a.reservas === 1 ? '' : 's'}</span>
+                  </FilaIngreso>
                 ))
               ) : (
                 <tr>
@@ -611,6 +629,7 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
         </section>
       )}
       {saldo && <EditarSaldo periodo={mes} actual={b.saldoInicial} capturado={b.saldoCapturado} nota={b.saldoCapturado?.nota} onClose={() => setSaldo(false)} onDone={() => (setSaldo(false), reload())} />}
+      {detalle && <DetalleIngreso datos={datos} mes={mes} filtro={detalle.filtro} titulo={detalle.titulo} color={detalle.color} onClose={() => setDetalle(null)} />}
     </>
   );
 }

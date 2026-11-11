@@ -238,7 +238,7 @@ function Admin({ yo, mios }: { yo: string; mios: MisPermisos }) {
         actions={
           ((condo && !bloqueado) || puede('cotizaciones') || puede('usuarios')) && (
             <>
-              <Semaforo total={pend.total} conteos={pend.conteos} go={go} />
+              <Semaforo total={pend.total} conteos={pend.conteos} go={go} condoId={condo?.id} sonidos={condo?.beagleSonidos} />
               <CampanaAdmin pend={pend} />
             </>
           )

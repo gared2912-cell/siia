@@ -74,6 +74,8 @@ const schema = a
         serviciosCondominio: a.string().array(),
         // Mensaje automático que recibe el residente al subir un comprobante (vacío = el mensaje de siempre).
         mensajeComprobante: a.string(),
+        // Sonidos del beagle del semáforo (shared/beagle.ts): { activo, cadaMin, volumen }. Solo lo cambia el SUPERADMIN.
+        beagleSonidos: a.json(),
         // Finanzas (shared/finanzas.ts): categorías de ingreso propias del condominio [{ key, label, fondo }] y apartados
         // manuales del saldo [{ id, nombre, descripcion, activo, movimientos: [{ id, fecha, monto, nota, porNombre, en }] }].
         categoriasIngreso: a.json(),
@@ -212,6 +214,9 @@ const schema = a
         // categoría sale de los cargos que cubre y de la fecha de pago (cuota del mes o recuperación de cartera).
         categoriaResidente: a.string(),
         desglose: a.json(),
+        // Match automático (shared/conciliacion.ts): depósito del estado de cuenta con que se aprobó
+        // { movId, fecha, hora, monto, ordenante, banco, rastreo, recibo, concepto, archivo, en }. El movId no se reutiliza.
+        conciliacion: a.json(),
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('pagosPorUnidad'),

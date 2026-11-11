@@ -14,6 +14,8 @@ import {
   TIPOS_CARGO_MANUAL,
   categoriasDe,
   categoriasPropias,
+  cargoProporcional,
+  cuotaProporcional,
   desgloseDe,
   etiquetaCategoria,
   etiquetaIngreso,
@@ -23,6 +25,8 @@ import {
 import { FondosAdmin } from './Fondos';
 import { edicionesDe } from '../../../amplify/functions/shared/ediciones';
 import { AprobarPago, cargosDelPago, otrosPendientes } from './AprobarPago';
+import { ConciliarPagos } from './ConciliarPagos';
+import { conciliacionDe } from '../../../amplify/functions/shared/conciliacion';
 import { AJUSTES_PAGO, type AjustePago } from '../../../amplify/functions/shared/pagos';
 import { AVISO_BLOQUEO, CamposMotivo, HistorialEdiciones, PedirMotivo, motivoVacio, useBloqueoEdicion, type Motivo } from './Ediciones';
 
@@ -59,6 +63,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const [recibo, setRecibo] = useState<ReciboData | null>(null);
   const [fichaPago, setFichaPago] = useState<Pago | null>(null);
   const [aprobarPago, setAprobarPago] = useState<Pago | null>(null);
+  const [conciliar, setConciliar] = useState(false);
   const [fichaCargo, setFichaCargo] = useState<Cargo | null>(null);
   const [editarCargo, setEditarCargo] = useState<Cargo | null>(null);
   const [cancelarCargo, setCancelarCargo] = useState<Cargo | null>(null);
@@ -118,6 +123,12 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       () => adminCall('saldoFavor.aplicar', { cargoIds: pend.map((c) => c.id) }).then(() => (reloadUnidades(), reload(true))),
       'Saldo a favor abonado; se notificó al residente',
     );
+  };
+  // Depósito del estado de cuenta con que se aprobó por match automático.
+  const textoConciliacion = (p: Pago) => {
+    const c = conciliacionDe(p);
+    if (!c) return null;
+    return `Depósito del ${fecha(c.fecha)}${c.hora ? ` ${c.hora.slice(0, 5)}` : ''} por ${money(c.monto)}${c.ordenante ? ` de ${c.ordenante}` : ''}${c.banco ? ` (${c.banco})` : ''}${c.rastreo ? ` · rastreo ${c.rastreo}` : ''} · archivo «${c.archivo}»`;
   };
   const resultadoPago = (p: Pago) =>
     p.ajuste && p.ajuste !== 'COMPLETO' ? `${AJUSTES_PAGO[p.ajuste as AjustePago] ?? p.ajuste}${p.diferencia ? `: ${money(p.diferencia)}` : ''}` : null;
@@ -183,7 +194,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             ['ingresos', 'Ingresos', 'money'],
             ['egresos', 'Egresos', 'file'],
             ['fondos', 'Fondos y apartados', 'shield'],
-            ['balance', 'Balance mensual', 'chart'],
+            ['balance', 'Balance', 'chart'],
           ] as const
         ).map(([k, label, icon]) => (
           <button key={k} type="button" role="tab" aria-selected={vista === k} onClick={() => setVista(k)}>
@@ -242,6 +253,18 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       )}
       {vista === 'ingresos' && tab === 'revision' && (
         <section className="panel">
+          {valida && revision.length > 0 && (
+            <div className="conc-cta">
+              <div>
+                <strong>Match automático</strong>
+                <span className="small muted">Sube el estado de cuenta del banco y el sistema encuentra los comprobantes que coinciden para aprobarlos juntos.</span>
+              </div>
+              <button className="btn-app" onClick={() => setConciliar(true)}>
+                <Icon name="upload" />
+                Match automático
+              </button>
+            </div>
+          )}
           {revision.length ? (
             <Tarjetas>
               {revision.map((p) => (
@@ -401,6 +424,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                 ['El residente indicó', fichaPago.montoDeclarado != null ? money(fichaPago.montoDeclarado) : null],
                 ['Saldo a favor usado', fichaPago.saldoFavorUsado ? money(fichaPago.saldoFavorUsado) : null],
                 ['Resultado', resultadoPago(fichaPago)],
+                ['Conciliado con el banco', textoConciliacion(fichaPago)],
                 ['Saldo a favor de la unidad', fichaPago.estado === 'EN_REVISION' && favorDe(fichaPago.unidadId) > 0 ? money(favorDe(fichaPago.unidadId)) : null],
                 [fichaPago.estado === 'RECHAZADO' ? 'Motivo del rechazo' : 'Nota', fichaPago.estado === 'EN_REVISION' ? null : fichaPago.nota],
               ]}
@@ -490,6 +514,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
           </div>
         </Modal>
       )}
+      {conciliar && <ConciliarPagos pagos={revision} onClose={() => setConciliar(false)} onDone={() => (setConciliar(false), reloadUnidades(), reload(true))} />}
       {aprobarPago && <AprobarPago pago={aprobarPago} cargos={cargos} pagos={pagos} onClose={() => setAprobarPago(null)} onDone={() => (setAprobarPago(null), reload(true))} />}
       {editarCargo && <EditarCargo c={editarCargo} onClose={() => setEditarCargo(null)} onDone={() => (setEditarCargo(null), reload(true))} />}
       {cancelarCargo && (
@@ -513,7 +538,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
       {excelPagos && <ExcelPagos pagos={procesados} cargos={cargos} onClose={() => setExcelPagos(false)} />}
       {cobranza && <ReporteCobranza pagos={pagos} cargos={cargos} onClose={() => setCobranza(false)} />}
       {generar && <GenerarCuotas onClose={() => setGenerar(false)} onDone={() => (setGenerar(false), setTab('cargos'), reload(true))} />}
-      {cargo && <NuevoCargo onClose={() => setCargo(false)} onDone={() => (setCargo(false), setTab('cargos'), reload(true))} />}
+      {cargo && <NuevoCargo cargos={cargos} onClose={() => setCargo(false)} onDone={() => (setCargo(false), setTab('cargos'), reload(true))} />}
       {recibo && (
         <Modal title={`Recibo ${recibo.pago.folio}`} onClose={() => setRecibo(null)} wide>
           <Recibo data={recibo} />
@@ -566,12 +591,56 @@ function GenerarCuotas({ onClose, onDone }: { onClose: () => void; onDone: () =>
   );
 }
 
-function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const { condoId, unidades } = useAdmin();
+function NuevoCargo({ onClose, onDone, cargos }: { onClose: () => void; onDone: () => void; cargos: Cargo[] }) {
+  const { condoId, condo, unidades } = useAdmin();
+  const [modo, setModo] = useState<'extra' | 'proporcional'>('extra');
   const [f, setF] = useState({ unidadId: '', concepto: '', monto: '', vence: hoy(), todas: false, tipo: 'OTRO' });
+  // Cuota proporcional: cuota mensual × días del mes desde la entrega (shared/finanzas.ts cuotaProporcional).
+  const [pr, setPr] = useState({ unidadId: '', entrega: '', cuota: String(condo?.cuotaMensual ?? ''), monto: '', vence: '', concepto: '' });
+  const [tocado, setTocado] = useState({ monto: false, vence: false, concepto: false });
   const { run, busy } = useAction();
+
+  const calculo = pr.entrega && Number(pr.cuota) > 0 ? cuotaProporcional(Number(pr.cuota), pr.entrega) : null;
+  const venceSugerido = (entrega: string) => cargoProporcional(1, entrega, condo?.diaVencimiento).vence;
+  const conceptoSugerido = (entrega: string) => cargoProporcional(1, entrega).concepto;
+  const cambiarPr = (cambio: Partial<typeof pr>) => {
+    const n = { ...pr, ...cambio };
+    if (cambio.unidadId !== undefined && !pr.entrega) n.entrega = unidades.find((u) => u.id === cambio.unidadId)?.fechaEntrega ?? '';
+    if (n.entrega && Number(n.cuota) > 0) {
+      const c = cuotaProporcional(Number(n.cuota), n.entrega);
+      if (!tocado.monto) n.monto = c.monto.toFixed(2);
+      if (!tocado.vence) n.vence = venceSugerido(n.entrega);
+      if (!tocado.concepto) n.concepto = conceptoSugerido(n.entrega);
+    }
+    setPr(n);
+  };
+  const periodo = calculo?.periodo ?? '';
+  // ¿Ya se generó la cuota completa de ese mes para la unidad? Se avisa para no cobrar doble.
+  const cuotaCompleta = pr.unidadId && periodo ? cargos.find((c) => c.estado === 'PENDIENTE' && c.id === `${pr.unidadId}#${periodo}#cuota`) : undefined;
+
   async function crear(e: React.FormEvent) {
     e.preventDefault();
+    if (modo === 'proporcional') {
+      const okk = await run(async () => {
+        if (!pr.unidadId) throw new Error('Selecciona la casa o departamento.');
+        if (!pr.entrega) throw new Error('Indica la fecha de entrega.');
+        if (!(Number(pr.monto) > 0)) throw new Error('Indica el monto.');
+        ok(
+          await db.models.Cargo.create({
+            condominioId: condoId,
+            unidadId: pr.unidadId,
+            concepto: pr.concepto.trim() || conceptoSugerido(pr.entrega),
+            monto: Math.round(Number(pr.monto) * 100) / 100,
+            vence: pr.vence || venceSugerido(pr.entrega),
+            periodo,
+            estado: 'PENDIENTE',
+            tipo: 'PROPORCIONAL',
+          }),
+        );
+      }, 'Cuota proporcional creada');
+      if (okk) onDone();
+      return;
+    }
     const destino = f.todas ? unidades : unidades.filter((u) => u.id === f.unidadId);
     const okk = await run(async () => {
       if (!destino.length) throw new Error('Selecciona la unidad.');
@@ -593,8 +662,71 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
     if (okk) onDone();
   }
   return (
-    <Modal title="Cargo extraordinario" onClose={onClose}>
+    <Modal title={modo === 'proporcional' ? 'Cuota proporcional' : 'Cargo extraordinario'} onClose={onClose}>
       <form className="form" onSubmit={crear}>
+        <Seg
+          value={modo}
+          onChange={setModo}
+          options={[
+            ['extra', 'Cargo extraordinario'],
+            ['proporcional', 'Cuota proporcional (entrega)'],
+          ]}
+        />
+        {modo === 'proporcional' ? (
+          <>
+            <p className="small muted" style={{ margin: 0 }}>
+              Para la casa o departamento que se entrega a mitad de mes: se cobra la cuota solo por los días desde la entrega hasta fin de mes. Cuenta como
+              cuota de mantenimiento y queda marcada como proporcional. Al dar de alta un departamento nuevo también puedes marcarla ahí.
+            </p>
+            <Field label="Casa o departamento">
+              <select required value={pr.unidadId} onChange={(e) => cambiarPr({ unidadId: e.target.value })}>
+                <option value="">Selecciona…</option>
+                {unidades.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.etiqueta}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div className="form-2">
+              <Field label="Fecha de entrega" hint="Se toma de la ficha de la unidad si ya la tiene.">
+                <input required type="date" value={pr.entrega} onChange={(e) => cambiarPr({ entrega: e.target.value })} />
+              </Field>
+              <Field label="Cuota mensual (MXN)">
+                <input required type="number" min="0.01" step="0.01" value={pr.cuota} onChange={(e) => cambiarPr({ cuota: e.target.value })} />
+              </Field>
+            </div>
+            {calculo && (
+              <div className="proporcional-calculo">
+                <span>
+                  {money(Number(pr.cuota))} × {calculo.dias} de {calculo.total} días
+                </span>
+                <strong>{money(calculo.monto)}</strong>
+              </div>
+            )}
+            {cuotaCompleta && (
+              <div className="alert">
+                Esta unidad ya tiene pendiente la cuota completa de ese mes («{cuotaCompleta.concepto}», {money(cuotaCompleta.monto)}). Cancélala en Cargos para no
+                cobrar doble.
+              </div>
+            )}
+            <Field label="Concepto">
+              <input required maxLength={120} value={pr.concepto} onChange={(e) => (setTocado({ ...tocado, concepto: true }), setPr({ ...pr, concepto: e.target.value }))} />
+            </Field>
+            <div className="form-2">
+              <Field label="Monto a cobrar (MXN)" hint="Ya calculado; puedes redondearlo.">
+                <input required type="number" min="0.01" step="0.01" value={pr.monto} onChange={(e) => (setTocado({ ...tocado, monto: true }), setPr({ ...pr, monto: e.target.value }))} />
+              </Field>
+              <Field label="Vence">
+                <input required type="date" value={pr.vence} onChange={(e) => (setTocado({ ...tocado, vence: true }), setPr({ ...pr, vence: e.target.value }))} />
+              </Field>
+            </div>
+            <button className="btn-app" disabled={busy}>
+              Crear cuota proporcional
+            </button>
+          </>
+        ) : (
+          <>
         <label className="check">
           <input type="checkbox" checked={f.todas} onChange={(e) => setF({ ...f, todas: e.target.checked })} />
           Aplicar a todas las unidades
@@ -614,7 +746,7 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         <Field label="Concepto">
           <input required maxLength={120} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} placeholder="Multa, cuota extraordinaria, renta de salón…" />
         </Field>
-        <TipoIngreso value={f.tipo} onChange={(tipo) => setF({ ...f, tipo })} />
+        <TipoIngreso value={f.tipo} onChange={(tipo) => (tipo === 'PROPORCIONAL' ? setModo('proporcional') : setF({ ...f, tipo }))} />
         <div className="form-2">
           <Field label="Monto (MXN)">
             <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />
@@ -626,6 +758,8 @@ function NuevoCargo({ onClose, onDone }: { onClose: () => void; onDone: () => vo
         <button className="btn-app" disabled={busy}>
           Crear cargo
         </button>
+          </>
+        )}
       </form>
     </Modal>
   );

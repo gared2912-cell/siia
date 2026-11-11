@@ -1,5 +1,8 @@
-// Recibo de pago imprimible (se genera a partir de un pago validado con folio).
+// Recibo de pago imprimible (se genera a partir de un pago validado con folio): banda corporativa, datos del pago,
+// conceptos, importe con letra, número de serie, sello digital, código QR y sello «PAGADO» (ver reciboSello.ts).
+import { useEffect, useState } from 'react';
 import { Icon, fecha, money, useAction } from './ui';
+import { importeConLetra, qrDataUrl, selloRecibo, type SelloRecibo } from './reciboSello';
 
 type PagoRecibo = {
   id: string;
@@ -60,6 +63,23 @@ export function notasRecibo(p: PagoRecibo, fmt: (n: number) => string): string[]
 
 export function Recibo({ data }: { data: ReciboData }) {
   const { pago, cargos, condominio, unidad } = data;
+  const [sello, setSello] = useState<SelloRecibo | null>(null);
+  const [qr, setQr] = useState('');
+  useEffect(() => {
+    let vivo = true;
+    selloRecibo(data)
+      .then(async (s) => {
+        if (!vivo) return;
+        setSello(s);
+        const img = await qrDataUrl(s.qr);
+        if (vivo) setQr(img);
+      })
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pago.id, pago.folio, pago.monto]);
   const imprimir = () => {
     document.body.classList.add('printing');
     window.print();
@@ -71,62 +91,103 @@ export function Recibo({ data }: { data: ReciboData }) {
       const { descargarRecibo } = await import('./reciboPdf');
       await descargarRecibo(data);
     }, 'Recibo descargado');
+  const filas = cargos.length ? cargos.map((c) => ({ id: c.id, concepto: conceptoRecibo(c, money), monto: c.monto })) : [{ id: 'cuenta', concepto: 'Pago a cuenta de mantenimiento', monto: pago.monto }];
+  const notas = notasRecibo(pago, money);
   return (
     <>
       <div className="recibo">
-        <div className="recibo-head">
-          <img src="/marca/siia-vertical.svg" alt="SIIA · soluciones inmobiliarias" />
-          <div style={{ textAlign: 'right' }}>
-            <div className="small muted">Recibo de pago</div>
-            <div className="codigo">{pago.folio}</div>
-            <div className="small">Validado el {fecha(pago.validadoEn)}</div>
-          </div>
-        </div>
-        <p style={{ margin: '0 0 4px' }}>
-          <strong>{condominio.nombre}</strong>
-        </p>
-        {condominio.direccion && <p className="small muted" style={{ margin: 0 }}>{condominio.direccion}</p>}
-        <p style={{ margin: '12px 0' }}>
-          Unidad: <strong>{unidad.etiqueta}</strong>
-          {unidad.propietario && ` · ${unidad.propietario}`}
-        </p>
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Concepto</th>
-              <th className="num">Importe</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cargos.length ? (
-              cargos.map((c) => (
-                <tr key={c.id}>
-                  <td>{conceptoRecibo(c, money)}</td>
-                  <td className="num">{money(c.monto)}</td>
+        <div className="recibo-marco">
+          <img className="recibo-agua" src="/marca/isotipo.svg" alt="" aria-hidden="true" />
+          <header className="recibo-banda">
+            <img src="/marca/siia-horizontal-blanco.svg" alt="SIIA · soluciones inmobiliarias" />
+            <div className="recibo-folio">
+              <span>Recibo de pago</span>
+              <strong>{pago.folio}</strong>
+              <small>Validado el {fecha(pago.validadoEn)}</small>
+            </div>
+          </header>
+          <div className="recibo-cuerpo">
+            <dl className="recibo-datos">
+              <div className="ancho">
+                <dt>Condominio</dt>
+                <dd>
+                  {condominio.nombre}
+                  {condominio.direccion && <small>{condominio.direccion}</small>}
+                </dd>
+              </div>
+              <div>
+                <dt>Casa o departamento</dt>
+                <dd>{unidad.etiqueta}</dd>
+              </div>
+              {unidad.propietario && (
+                <div>
+                  <dt>Residente</dt>
+                  <dd>{unidad.propietario}</dd>
+                </div>
+              )}
+              <div>
+                <dt>Fecha de pago</dt>
+                <dd>{fecha(pago.fecha)}</dd>
+              </div>
+              <div>
+                <dt>Referencia</dt>
+                <dd>{pago.referencia || '—'}</dd>
+              </div>
+            </dl>
+
+            <table className="recibo-tabla">
+              <thead>
+                <tr>
+                  <th className="n">#</th>
+                  <th>Concepto</th>
+                  <th className="num">Importe</th>
                 </tr>
-              ))
-            ) : (
-              <tr>
-                <td>Pago a cuenta de mantenimiento</td>
-                <td className="num">{money(pago.monto)}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        <div className="recibo-total" style={{ marginTop: 12 }}>
-          Total recibido: {money(pago.monto)}
-        </div>
-        {notasRecibo(pago, money).map((t) => (
-          <div key={t} className="small" style={{ textAlign: 'right', marginTop: 4 }}>
-            {t}
+              </thead>
+              <tbody>
+                {filas.map((c, i) => (
+                  <tr key={c.id}>
+                    <td className="n">{i + 1}</td>
+                    <td>{c.concepto}</td>
+                    <td className="num">{money(c.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="recibo-total-caja">
+              <div className="recibo-total-fila">
+                <span>Total recibido</span>
+                <strong>{money(pago.monto)}</strong>
+              </div>
+              <div className="recibo-letra">({importeConLetra(pago.monto)})</div>
+              {notas.map((t) => (
+                <div key={t} className="recibo-nota">
+                  {t}
+                </div>
+              ))}
+            </div>
+
+            <div className="recibo-sello">
+              <div className="recibo-qr">{qr ? <img src={qr} alt="Código QR del recibo" /> : <span />}</div>
+              <div className="recibo-sello-texto">
+                <div>
+                  <span>No. de serie</span>
+                  <strong>{sello?.serie ?? '…'}</strong>
+                </div>
+                <div>
+                  <span>Sello digital SIIA</span>
+                  <code>{sello?.sello ?? '…'}</code>
+                </div>
+              </div>
+              <SelloPagado folio={pago.folio ?? ''} fecha={fecha(pago.validadoEn)} />
+            </div>
           </div>
-        ))}
-        <p className="small muted" style={{ marginTop: 16 }}>
-          Fecha de pago: {fecha(pago.fecha)}
-          {pago.referencia && ` · Referencia: ${pago.referencia}`}
-          <br />
-          SIIA · Sistemas Integrales Inmobiliarios y de Administración · Documento sin validez fiscal.
-        </p>
+          <footer className="recibo-pie">
+            SIIA · Sistemas Integrales Inmobiliarios y de Administración · siia.casa
+            <br />
+            Documento sin validez fiscal. El número de serie y el sello digital identifican este recibo de forma única.
+          </footer>
+        </div>
       </div>
       <div className="row-actions" style={{ marginTop: 12 }}>
         <button className="btn-app" disabled={busy} onClick={descargar}>
@@ -139,5 +200,36 @@ export function Recibo({ data }: { data: ReciboData }) {
         </button>
       </div>
     </>
+  );
+}
+
+/** Sello circular «PAGADO» con el folio y la fecha de validación. */
+function SelloPagado({ folio, fecha: f }: { folio: string; fecha: string }) {
+  const id = `arco-${folio.replace(/[^A-Za-z0-9]/g, '')}`;
+  return (
+    <svg className="recibo-estampa" viewBox="0 0 120 120" role="img" aria-label={`Pagado · ${folio} · ${f}`}>
+      <defs>
+        <path id={`${id}-a`} d="M 60 60 m -44 0 a 44 44 0 1 1 88 0" />
+        <path id={`${id}-b`} d="M 60 60 m -48 0 a 48 48 0 0 0 96 0" />
+      </defs>
+      <circle cx="60" cy="60" r="56" fill="none" stroke="currentColor" strokeWidth="2.5" />
+      <circle cx="60" cy="60" r="36" fill="none" stroke="currentColor" strokeWidth="1" />
+      <text fontSize="9.5" fontWeight="700" letterSpacing="1.6" fill="currentColor">
+        <textPath href={`#${id}-a`} startOffset="50%" textAnchor="middle">
+          SIIA · ADMINISTRACIÓN
+        </textPath>
+      </text>
+      <text fontSize="8" fontWeight="700" letterSpacing="1.2" fill="currentColor">
+        <textPath href={`#${id}-b`} startOffset="50%" textAnchor="middle">
+          {folio}
+        </textPath>
+      </text>
+      <text x="60" y="58" textAnchor="middle" fontSize="15" fontWeight="800" letterSpacing="1" fill="currentColor">
+        PAGADO
+      </text>
+      <text x="60" y="72" textAnchor="middle" fontSize="7.5" fontWeight="600" fill="currentColor">
+        {f}
+      </text>
+    </svg>
   );
 }

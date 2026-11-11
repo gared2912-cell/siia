@@ -12,6 +12,7 @@ import { TipoIngreso } from './FinanzasAdmin';
 import { Firma } from './Firma';
 import { PedirMotivo } from './Ediciones';
 import { AdminsCondominio } from './AdminsCondominio';
+import { BeagleConfig } from './BeagleConfig';
 import { AvisoSuspendido, Papelera, ZonaCondominio } from './EstadoCondominio';
 
 type Cargo = Schema['Cargo']['type'];
@@ -145,6 +146,7 @@ function Ficha({ tab, setTab, onBack }: { tab: Tab; setTab: (t: Tab) => void; on
         <>
           <DatosCondominio key={`g${c.id}`} c={c} seccion="general" />
           {superadmin && <AdminsCondominio key={`a${c.id}`} />}
+          {superadmin && <BeagleConfig key={`b${c.id}`} />}
           <Documentos />
           {superadmin && <ZonaCondominio key={`z${c.id}`} onEliminado={onBack} />}
         </>

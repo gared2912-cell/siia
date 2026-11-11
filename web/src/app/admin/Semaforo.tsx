@@ -4,8 +4,12 @@
 // Lo acompaña el beagle de SIIA: baila de gusto en verde, se pone triste en amarillo y se enoja en rojo. En el celular
 // solo se muestra el semáforo. Cada 30 minutos, si no está en verde, el beagle recuerda en tono amable cuántos hay.
 // Al tocarlo se ve cuántos pendientes tiene cada módulo y se puede ir directo.
+// Sonidos (los configura el superadministrador por condominio): en amarillo ladra y en rojo gruñe, cada 2 horas por
+// omisión; en verde no hace nada. El último sonido se recuerda en el navegador para no repetirlo al recargar.
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../ui';
+import { configBeagle } from '../../../amplify/functions/shared/beagle';
+import { sonar } from './sonidosBeagle';
 
 export type Luz = 'verde' | 'amarillo' | 'rojo';
 export const luzDe = (total: number): Luz => (total > 10 ? 'rojo' : total > 5 ? 'amarillo' : 'verde');
@@ -97,11 +101,70 @@ const SECCION: Record<string, { label: string; icono: string }> = {
   asistencia: { label: 'Asistencia técnica', icono: 'help' },
 };
 
-export function Semaforo({ total, conteos, go }: { total: number; conteos: Record<string, number>; go: (k: string) => void }) {
+export function Semaforo({
+  total,
+  conteos,
+  go,
+  condoId,
+  sonidos,
+}: {
+  total: number;
+  conteos: Record<string, number>;
+  go: (k: string) => void;
+  condoId?: string;
+  sonidos?: unknown;
+}) {
   const luz = luzDe(total);
   const [abierto, setAbierto] = useState(false);
   const [globo, setGlobo] = useState(false);
+  const [suena, setSuena] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const cfg = configBeagle(sonidos);
+
+  // Sonido: amarillo → ladrido, rojo → gruñido, cada cfg.cadaMin minutos. Si el navegador aún no deja reproducir
+  // audio (no se ha tocado la página), suena al primer toque.
+  useEffect(() => {
+    if (!cfg.activo || luz === 'verde' || !condoId) return;
+    const clave = `siia-beagle-sonido-${condoId}`;
+    let vivo = true;
+    let esperando = false;
+    const alTocar = () => {
+      esperando = false;
+      intentar();
+    };
+    async function intentar() {
+      let ultimo = 0;
+      try {
+        ultimo = Number(localStorage.getItem(clave)) || 0;
+      } catch {
+        /* sin almacenamiento local */
+      }
+      if (!vivo || Date.now() - ultimo < cfg.cadaMin * 60_000) return;
+      const ok = await sonar(luz === 'rojo' ? 'grunido' : 'ladrido', cfg.volumen);
+      if (!vivo) return;
+      if (!ok) {
+        if (!esperando) {
+          esperando = true;
+          document.addEventListener('pointerdown', alTocar, { once: true });
+        }
+        return;
+      }
+      try {
+        localStorage.setItem(clave, String(Date.now()));
+      } catch {
+        /* sin almacenamiento local */
+      }
+      setSuena(true);
+      setTimeout(() => vivo && setSuena(false), 1600);
+    }
+    intentar();
+    const t = setInterval(intentar, 60_000);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+      document.removeEventListener('pointerdown', alTocar);
+    };
+  }, [luz, condoId, cfg.activo, cfg.cadaMin, cfg.volumen]);
 
   // Recordatorio amable: si no está en verde, el beagle habla al entrar y luego cada 30 minutos.
   useEffect(() => {
@@ -148,7 +211,7 @@ export function Semaforo({ total, conteos, go }: { total: number; conteos: Recor
   const lista = Object.entries(conteos).filter(([k, n]) => n > 0 && SECCION[k]);
   const texto = luz === 'verde' ? 'En verde' : luz === 'amarillo' ? 'En amarillo' : 'En rojo';
   return (
-    <div className={`semaforo-wrap luz-${luz}`} ref={ref}>
+    <div className={`semaforo-wrap luz-${luz}${suena ? (luz === 'rojo' ? ' grune' : ' ladra') : ''}`} ref={ref}>
       <button
         className="semaforo-btn"
         onClick={() => (setAbierto(!abierto), setGlobo(false))}

@@ -3,6 +3,7 @@
 /** Tipos de ingreso. Los cargos nuevos guardan su tipo; los anteriores se clasifican por su id. */
 export const TIPOS_INGRESO = [
   { key: 'CUOTA', label: 'Cuotas mensuales' },
+  { key: 'PROPORCIONAL', label: 'Cuota proporcional (entrega)' },
   { key: 'MANT_INTERNO', label: 'Mantenimiento interno' },
   { key: 'MANT_EXTERNO', label: 'Mantenimiento externo' },
   { key: 'RECAUDACION', label: 'Recaudación especial' },
@@ -15,7 +16,7 @@ export const TIPOS_INGRESO = [
 ] as const;
 
 /** Tipos que el administrador elige al crear un cargo extraordinario (además de las categorías propias, «P-…»). */
-export const TIPOS_CARGO_MANUAL = ['RECAUDACION', 'MANT_INTERNO', 'MANT_EXTERNO', 'MULTA', 'AHORRO', 'CARTERA', 'OTRO'] as const;
+export const TIPOS_CARGO_MANUAL = ['PROPORCIONAL', 'RECAUDACION', 'MANT_INTERNO', 'MANT_EXTERNO', 'MULTA', 'AHORRO', 'CARTERA', 'OTRO'] as const;
 
 /** Ingresos ordinarios del condominio; las amenidades (RESERVA) se reportan aparte, por amenidad. */
 export const TIPOS_ORDINARIOS = TIPOS_INGRESO.filter((t) => t.key !== 'RESERVA');
@@ -135,7 +136,9 @@ export function categoriaDeCargo(c: CargoC, mesPago: string): string {
   const tipo = tipoDeCargo(c);
   if (esPropia(tipo)) return tipo;
   switch (tipo) {
-    case 'CUOTA': {
+    // La cuota proporcional (entrega) es cuota de mantenimiento por menos días: misma categoría y misma regla.
+    case 'CUOTA':
+    case 'PROPORCIONAL': {
       const mes = (c.periodo || c.vence || '').slice(0, 7);
       return mes && mesPago && mesPago > mes ? 'RECUPERACION' : 'CORRIENTE';
     }
@@ -307,3 +310,38 @@ export function nombreFondo(fondo: string | null | undefined, condominio: CondoF
   const a = apartadosDe(condominio?.apartados).find((x) => x.id === fondo);
   return a ? `Apartado: ${a.nombre}` : 'Fondo';
 }
+
+// ---------- Cuota proporcional (entrega de la casa o departamento) ----------
+const diasDelMes = (a: number, m: number) => new Date(Date.UTC(a, m, 0)).getUTCDate();
+
+/**
+ * Cuota proporcional del mes de entrega: la cuota mensual por los días que le tocan al residente, del día de entrega
+ * al último del mes (ambos incluidos). Ej.: $450 entregado el 20 de octubre → 12 de 31 días → $174.19.
+ */
+export function cuotaProporcional(cuotaMensual: number, fechaEntrega: string) {
+  const [a, m, d] = fechaEntrega.split('-').map(Number);
+  const total = diasDelMes(a, m);
+  const dias = Math.max(0, Math.min(total, total - d + 1));
+  return { dias, total, monto: r2((cuotaMensual * dias) / total), periodo: `${a}-${String(m).padStart(2, '0')}` };
+}
+
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * Cargo de cuota proporcional al entregar la casa o departamento: monto, concepto y vencimiento (el día de vencimiento
+ * de cuotas del condominio, en el mes siguiente a la entrega). Tipo PROPORCIONAL: en el balance cuenta como cuota de
+ * mantenimiento (corriente o recuperación de cartera, con la regla por fecha), marcada como proporcional.
+ */
+export function cargoProporcional(cuotaMensual: number, fechaEntrega: string, diaVencimiento?: number | null) {
+  const c = cuotaProporcional(cuotaMensual, fechaEntrega);
+  const [a, m, d] = fechaEntrega.split('-').map(Number);
+  const mes = MESES_LARGOS[m - 1];
+  const [sa, sm] = m === 12 ? [a + 1, 1] : [a, m + 1];
+  const dia = Math.min(Math.max(diaVencimiento || 10, 1), 28);
+  return {
+    ...c,
+    concepto: `Cuota proporcional ${mes} ${a} (entrega ${d} de ${mes})`,
+    vence: `${sa}-${String(sm).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+  };
+}
+

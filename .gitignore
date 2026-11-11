@@ -13,3 +13,6 @@ dist/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Archivos privados de seguimiento (datos bancarios, etc.) — nunca subir
+Importantes/

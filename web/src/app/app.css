@@ -1507,28 +1507,262 @@ table.tbl {
   flex: none;
 }
 
-/* Recibo imprimible */
+/* Recibo imprimible (Recibo.tsx): marco doble, banda corporativa, sello digital, QR y sello «PAGADO» */
 .recibo {
+  --r-teal: #38cbb9;
+  --r-teal-osc: #0b6f71;
+  --r-teal-claro: #eaf8f6;
+  --r-gris: #6f7680;
+  --r-linea: #dfe7ea;
   background: #fff;
-  padding: 8px;
+  padding: 5px;
+  border: 1.5px solid var(--r-teal-osc);
+  border-radius: 10px;
+  color: #2e3446;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
-.recibo-head {
+.recibo-marco {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--r-teal);
+  border-radius: 6px;
+}
+.recibo-agua {
+  position: absolute;
+  right: -40px;
+  bottom: 60px;
+  width: 260px;
+  opacity: 0.05;
+  pointer-events: none;
+}
+.recibo-banda {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
-  border-bottom: 2px solid var(--teal);
-  padding-bottom: 12px;
-  margin-bottom: 14px;
+  padding: 16px 20px;
+  background: linear-gradient(120deg, var(--r-teal-osc) 0%, #0e8d86 60%, var(--r-teal) 100%);
+  border-bottom: 4px solid var(--r-teal);
+  color: #fff;
 }
-.recibo-head img {
-  width: 110px;
+.recibo-banda img {
+  width: 150px;
+  max-width: 42%;
 }
-.recibo-total {
+.recibo-folio {
+  display: grid;
+  text-align: right;
+  line-height: 1.2;
+}
+.recibo-folio span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+.recibo-folio strong {
+  font-family: var(--font-title);
+  font-size: 1.7rem;
+  letter-spacing: 0.04em;
+}
+.recibo-folio small {
+  font-size: 0.78rem;
+  opacity: 0.9;
+}
+.recibo-cuerpo {
+  position: relative;
+  padding: 16px 20px 6px;
+}
+.recibo-datos {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--r-teal-claro);
+}
+@media (min-width: 640px) {
+  .recibo-datos {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.recibo-datos .ancho {
+  grid-column: 1 / -1;
+}
+.recibo-datos dt {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--r-gris);
+}
+.recibo-datos dd {
+  margin: 2px 0 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.recibo-datos dd small {
+  display: block;
+  font-weight: 400;
+  color: var(--r-gris);
+}
+.recibo-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+.recibo-tabla th {
+  padding: 8px 10px;
+  background: var(--r-teal-osc);
+  color: #fff;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.recibo-tabla td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--r-linea);
+  vertical-align: top;
+}
+.recibo-tabla tbody tr:nth-child(even) td {
+  background: #f6fafa;
+}
+.recibo-tabla .n {
+  width: 28px;
+  text-align: center;
+  color: var(--r-gris);
+}
+.recibo-tabla .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.recibo-total-caja {
+  margin: 14px 0 0 auto;
+  max-width: 420px;
+  text-align: right;
+}
+.recibo-total-fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--r-teal-claro);
+  border-left: 4px solid var(--r-teal-osc);
+}
+.recibo-total-fila span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.recibo-total-fila strong {
   font-family: var(--font-title);
   font-size: 1.6rem;
-  color: var(--slate);
-  text-align: right;
+  color: var(--r-teal-osc);
+  font-variant-numeric: tabular-nums;
+}
+.recibo-letra {
+  margin-top: 6px;
+  font-size: 0.76rem;
+  font-style: italic;
+  color: var(--r-gris);
+}
+.recibo-nota {
+  margin-top: 4px;
+  font-size: 0.82rem;
+}
+.recibo-sello {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 108px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--r-teal);
+}
+.recibo-qr img,
+.recibo-qr span {
+  display: block;
+  width: 92px;
+  height: 92px;
+  border: 1px solid var(--r-linea);
+  border-radius: 6px;
+}
+.recibo-sello-texto {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.recibo-sello-texto span {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--r-gris);
+}
+.recibo-sello-texto strong {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.86rem;
+  color: var(--r-teal-osc);
+}
+.recibo-sello-texto code {
+  display: block;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.6rem;
+  line-height: 1.35;
+  color: #4b5262;
+  word-break: break-all;
+}
+.recibo-estampa {
+  width: 108px;
+  height: 108px;
+  color: var(--r-teal-osc);
+  opacity: 0.85;
+  transform: rotate(-12deg);
+}
+.recibo-pie {
+  margin-top: 12px;
+  padding: 10px 20px;
+  border-top: 3px solid var(--r-teal);
+  background: #f3f6f7;
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--r-gris);
+  text-align: center;
+}
+@media (max-width: 560px) {
+  .recibo-banda {
+    padding: 12px 14px;
+  }
+  .recibo-folio strong {
+    font-size: 1.3rem;
+  }
+  .recibo-cuerpo {
+    padding: 12px 12px 4px;
+  }
+  .recibo-sello {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+  .recibo-qr img,
+  .recibo-qr span {
+    width: 80px;
+    height: 80px;
+  }
+  .recibo-estampa {
+    grid-column: 1 / -1;
+    justify-self: end;
+    width: 92px;
+    height: 92px;
+    margin-top: -6px;
+  }
 }
 @media print {
   body.printing * {
@@ -1541,7 +1775,8 @@ table.tbl {
   body.printing .recibo {
     position: absolute;
     inset: 0;
-    padding: 24px;
+    height: max-content;
+    margin: 16px;
   }
 }
 
@@ -3792,4 +4027,403 @@ table.tbl {
 .marca-sel svg {
   width: 14px;
   height: 14px;
+}
+
+/* ---------- Match automático con el estado de cuenta (admin/ConciliarPagos.tsx) ---------- */
+.conc-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--card-line);
+  border-left: 5px solid var(--teal);
+  border-radius: 10px;
+  background: #f4fbfb;
+}
+.conc-cta > div {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 260px;
+}
+.conc-subir {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  padding: 20px;
+  border: 2px dashed var(--teal);
+  border-radius: var(--radius-app);
+  background: #f4fbfb;
+  color: var(--teal-dark);
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+}
+.conc-subir:hover {
+  background: #e8f8f6;
+}
+.conc-subir:focus-within {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+.conc-subir.ocupado {
+  cursor: progress;
+  opacity: 0.75;
+}
+.conc-subir input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.conc-subir svg {
+  width: 26px;
+  height: 26px;
+}
+.conc-archivo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.conc-archivo svg {
+  width: 16px;
+  height: 16px;
+}
+.conc-resumen {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (min-width: 640px) {
+  .conc-resumen {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.conc-cifra {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-line);
+  border-top: 4px solid var(--t-neutro);
+  border-radius: 10px;
+  background: #fff;
+}
+.conc-cifra.c-ok {
+  border-top-color: var(--t-ok);
+}
+.conc-cifra.c-warn {
+  border-top-color: var(--t-warn);
+}
+.conc-cifra strong {
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.conc-cifra span {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.conc-seccion h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+.conc-seccion > p {
+  margin: 4px 0 10px;
+}
+.conc-seccion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+.conc-plegable summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+.conc-plegable summary h3 {
+  display: inline;
+}
+.conc-item {
+  align-items: flex-start;
+}
+.conc-item input[type='checkbox'] {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  accent-color: var(--teal-dark);
+}
+.conc-item .tarjeta-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.conc-item .tarjeta-sub {
+  overflow-wrap: anywhere;
+}
+.tarjeta.conc-marcado {
+  background: #f5fbf8;
+}
+.conc-razones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0;
+}
+.conc-razones .pill {
+  white-space: normal;
+}
+.conc-alerta {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #8a6100;
+}
+.conc-alerta svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+.conc-nota {
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.conc-ver {
+  padding: 0 14px 10px 48px;
+}
+.conc-pie {
+  position: sticky;
+  bottom: -22px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 -20px -22px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--card-line);
+  background: #fff;
+  box-shadow: 0 -6px 14px -10px rgb(47 52 80 / 0.35);
+}
+.conc-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+}
+.conc-lista li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--card-line);
+  font-variant-numeric: tabular-nums;
+}
+.conc-lista li:last-child {
+  border-bottom: 0;
+}
+.conc-barra {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+.conc-barra span {
+  display: block;
+  height: 100%;
+  background: var(--teal);
+  transition: width 0.3s;
+}
+
+/* Beagle del semáforo mientras suena (Semaforo.tsx): brinca al ladrar y tiembla al gruñir */
+.semaforo-wrap.ladra .beagle {
+  animation: beagle-ladra 0.32s ease-out 3;
+}
+.semaforo-wrap.grune .beagle {
+  animation: beagle-grune 0.08s linear 18;
+}
+@keyframes beagle-ladra {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  40% {
+    transform: translateY(-4px) scale(1.06);
+  }
+}
+@keyframes beagle-grune {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-1.5px) rotate(-2deg);
+  }
+  75% {
+    transform: translateX(1.5px) rotate(2deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .semaforo-wrap.ladra .beagle,
+  .semaforo-wrap.grune .beagle {
+    animation: none;
+  }
+}
+
+/* Condominios › Datos generales › Sonidos del beagle (BeagleConfig.tsx) */
+.beagle-reglas {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.beagle-reglas li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+}
+.beagle-reglas li > span {
+  flex: 1 1 160px;
+}
+
+/* Finanzas › Balance: dos descargas separadas (Egresos.tsx BalanceMensual) */
+.balance-botones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.btn-app.btn-anual {
+  background: linear-gradient(180deg, #4b5470, #343b54);
+  border-color: #262c40;
+  box-shadow:
+    0 2px 0 #20263a,
+    0 4px 10px -4px rgb(32 38 58 / 0.5);
+}
+.btn-app.btn-anual:hover:not(:disabled) {
+  background: linear-gradient(180deg, #555f7d, #3b4360);
+}
+
+/* Finanzas › Balance › Ingresos: filas que abren su desglose (Egresos.tsx FilaIngreso, DetalleIngreso.tsx) */
+.tbl tr.fila-tocable {
+  cursor: pointer;
+}
+.tbl tr.fila-tocable:hover td,
+.tbl tr.fila-tocable:focus-visible td {
+  background: #eef9f7;
+}
+.tbl tr.fila-tocable:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+.fila-ver {
+  margin-left: 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.fila-flecha {
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  vertical-align: -3px;
+  color: var(--teal-dark);
+}
+.detalle-resumen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--card-line);
+  border-left: 5px solid var(--cat, var(--teal));
+  border-radius: 10px;
+  background: #fff;
+}
+.detalle-resumen > div {
+  display: grid;
+}
+.detalle-resumen strong {
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.detalle-resumen span {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.detalle-resumen .detalle-punto {
+  display: none;
+}
+.detalle-aporte {
+  font-family: var(--font-title);
+  font-size: 1.5rem;
+  color: var(--teal-dark);
+}
+.detalle-conceptos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+}
+.detalle-conceptos li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--card-line);
+  font-variant-numeric: tabular-nums;
+}
+.detalle-conceptos li:last-child {
+  border-bottom: 0;
+}
+
+/* Cargo extraordinario › Cuota proporcional (FinanzasAdmin.tsx NuevoCargo) */
+.proporcional-calculo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border-left: 4px solid #65a30d;
+  background: #f3f9ec;
+  font-variant-numeric: tabular-nums;
+}
+.proporcional-calculo strong {
+  font-family: var(--font-title);
+  font-size: 1.3rem;
+  color: #3f6212;
+}
+
+/* Agregar departamento › Cuota proporcional de entrega (Residentes.tsx AgregarResidente) */
+.proporcional-alta {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-line);
+  border-radius: 10px;
+  background: #fbfdfc;
 }
