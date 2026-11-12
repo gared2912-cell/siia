@@ -919,6 +919,8 @@ async function separarPorCargo(pagoId: string, cargoIds: string[], monto: number
       fecha: pago!.fecha ?? null,
       referencia: pago!.referencia ?? null,
       comprobantePath: pago!.comprobantePath ?? null,
+      comprobanteHash: pago!.comprobanteHash ?? null,
+      comprobanteRepetido: pago!.comprobanteRepetido ?? null,
       cargoIds,
       categoriaResidente: pago!.categoriaResidente ?? null,
       estado: 'EN_REVISION',
@@ -2305,6 +2307,10 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       });
       return r;
     }
+    // Comprobante que ya se había subido antes: solo se aprueba a mano, con la confirmación de que se revisó
+    // (el match automático tampoco lo toma: no manda revisadoRepetido).
+    if (pago!.comprobanteRepetido && p.revisadoRepetido !== true)
+      fail('Este comprobante ya se había subido antes en otro pago. Revísalo personalmente y confirma que lo revisaste para aprobarlo.');
     // Monto que muestra el comprobante (la administración puede corregir lo que escribió el residente).
     const monto = p.montoRecibido == null || p.montoRecibido === '' ? pago!.monto : r2(Number(p.montoRecibido));
     if (!(monto >= 0) || monto > 1_000_000) fail('Indica el monto recibido.');

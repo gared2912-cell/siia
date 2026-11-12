@@ -49,6 +49,7 @@ export type PagoC = {
   cargoIds?: (string | null)[] | null;
   usarSaldoFavor?: boolean | null;
   conciliacion?: unknown;
+  comprobanteRepetido?: unknown;
 };
 type UnidadC = { id: string; etiqueta: string; propietario?: string | null; saldoFavor?: number | null };
 type PerfilC = { unidadId?: string | null; nombre?: string | null; rol?: string | null };
@@ -354,7 +355,9 @@ export function conciliar(args: {
   for (const u of unidades) if (u.propietario) (nombres.get(u.id) ?? nombres.set(u.id, []).get(u.id)!).push(u.propietario);
   const nombreCoincide = (ordenante: string, unidadId: string) => Math.max(0, ...(nombres.get(unidadId) ?? []).map((n) => palabrasEnComun(ordenante, n)));
 
-  const pend = pagos.filter((p) => p.estado === 'EN_REVISION');
+  // Los comprobantes que ya se habían subido antes no entran al match: la administración los revisa y aprueba a mano.
+  const repetidos = pagos.filter((p) => p.estado === 'EN_REVISION' && p.comprobanteRepetido);
+  const pend = pagos.filter((p) => p.estado === 'EN_REVISION' && !p.comprobanteRepetido);
   const aprobados = pagos.filter((p) => p.estado === 'VALIDADO');
   // Depósitos ya usados por un match anterior.
   const usados = new Map<string, PagoC>();
@@ -552,6 +555,14 @@ export function conciliar(args: {
         : `No aparece en este estado de cuenta${iguales ? ` · hay ${iguales + 1} comprobantes iguales de esta unidad (posible repetido)` : ''}`;
     sinDeposito.push({ pagoId: p.id, etiqueta: etiqueta(p.unidadId), monto: p.monto, fechaPago: diaPago(p), motivo });
   }
+  for (const p of repetidos)
+    sinDeposito.push({
+      pagoId: p.id,
+      etiqueta: etiqueta(p.unidadId),
+      monto: p.monto,
+      fechaPago: diaPago(p),
+      motivo: 'Comprobante que ya se había subido antes: revísalo y apruébalo personalmente desde «Por aprobar»',
+    });
   // Otros comprobantes por aprobar de la misma unidad (otros montos): se informa para revisarlos después.
   for (const c of coincidencias) {
     const otros = sinDeposito.filter((s) => s.etiqueta === c.etiqueta && !c.duplicados.includes(s.pagoId));

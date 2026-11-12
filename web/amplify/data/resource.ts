@@ -195,6 +195,11 @@ const schema = a
         fecha: a.date(),
         referencia: a.string(),
         comprobantePath: a.string(),
+        // Huella SHA-256 del archivo del comprobante. Si el mismo archivo ya estaba en otro pago del condominio
+        // (subido de nuevo, no un pago separado por cargo), comprobanteRepetido = { pagoId, unidadId, monto, fecha,
+        // estado, folio }: la administración debe revisarlo y aprobarlo a mano (el match automático no lo toma).
+        comprobanteHash: a.string(),
+        comprobanteRepetido: a.json(),
         cargoIds: a.string().array(),
         estado: a.enum(['EN_REVISION', 'VALIDADO', 'RECHAZADO']),
         folio: a.string(),

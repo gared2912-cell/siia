@@ -26,7 +26,7 @@ import {
 } from '../../../amplify/functions/shared/finanzas';
 import { FondosAdmin } from './Fondos';
 import { edicionesDe } from '../../../amplify/functions/shared/ediciones';
-import { AprobarPago, cargosDelPago, otrosPendientes } from './AprobarPago';
+import { AprobarPago, NotaRepetido, cargosDelPago, otrosPendientes, repetidoDe } from './AprobarPago';
 import { ConciliarPagos } from './ConciliarPagos';
 import { conciliacionDe } from '../../../amplify/functions/shared/conciliacion';
 import { AJUSTES_PAGO, type AjustePago } from '../../../amplify/functions/shared/pagos';
@@ -283,6 +283,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                     <>
                       <strong>{money(p.monto)}</strong>
                       <Badge estado="EN_REVISION">Por aprobar</Badge>
+                      {repetidoDe(p) && (
+                        <span className="badge revisar" title="Este comprobante ya se había subido antes: revísalo personalmente">
+                          ⚠ Repetido
+                        </span>
+                      )}
                     </>
                   }
                 />
@@ -427,6 +432,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
               <Badge estado={fichaPago.estado} />
               <strong>{money(fichaPago.monto)}</strong>
             </div>
+            <NotaRepetido pago={fichaPago} etiqueta={etiqueta} />
             <Datos
               items={[
                 ['Folio de recibo', fichaPago.folio],

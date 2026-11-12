@@ -3,7 +3,7 @@
 // y cada módulo solo responde si la administración lo habilitó para su condominio.
 import type { AppSyncResolverEvent } from 'aws-lambda';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   ApiError,
@@ -59,7 +59,18 @@ const pub = (c: Item) => ({
 });
 
 // revision: nota interna de la administración sobre un cargo («⚠ Revisar»); el residente no la ve.
-const sinPrivados = ({ userId, __typename, revision, ...rest }: Item) => rest;
+const sinPrivados = ({ userId, __typename, revision, comprobanteHash, comprobanteRepetido, ...rest }: Item) => rest;
+
+/** Huella SHA-256 de un archivo del bucket (vacío si no se pudo leer: no detiene el registro del pago). */
+async function huellaArchivo(path: string): Promise<string | null> {
+  try {
+    const o = await s3.send(new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: path }));
+    return createHash('sha256').update(Buffer.from(await o.Body!.transformToByteArray())).digest('hex');
+  } catch (err) {
+    console.error('huellaArchivo', path, err);
+    return null;
+  }
+}
 /** Etapas del seguimiento de un incidente (JSON guardado como texto, a veces dos veces). */
 function pasosIncidente(v: unknown): Item[] {
   let h = v;
@@ -252,6 +263,13 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       const validos = new Set(cargos.filter((c) => c.estado === 'PENDIENTE').map((c) => c.id));
       if (!cargoIds.every((id) => validos.has(id))) fail('Alguno de los cargos seleccionados ya no está pendiente.');
     }
+    // ¿Este mismo archivo ya se había subido en otro pago del condominio? Se marca para que la administración lo revise.
+    const comprobanteHash = await huellaArchivo(comprobantePath);
+    const previo = comprobanteHash
+      ? (await byIndex('Pago', 'byCondominio', 'condominioId', condominio.id))
+          .filter((x) => x.comprobanteHash === comprobanteHash && x.comprobantePath !== comprobantePath)
+          .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0]
+      : undefined;
     const pago = await put('Pago', {
       condominioId: condominio.id,
       unidadId: unidad!.id,
@@ -260,6 +278,10 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
       fecha,
       referencia: str(p.referencia, 120),
       comprobantePath,
+      comprobanteHash,
+      comprobanteRepetido: previo
+        ? JSON.stringify({ pagoId: previo.id, unidadId: previo.unidadId, monto: previo.monto, fecha: previo.fecha ?? null, estado: previo.estado, folio: previo.folio ?? null })
+        : null,
       cargoIds,
       // Pide descontar su saldo a favor; la administración lo confirma al aprobar.
       usarSaldoFavor: p.usarSaldoFavor === true && (unidad!.saldoFavor ?? 0) > 0 ? true : null,

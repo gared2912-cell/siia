@@ -10,6 +10,7 @@ import { EditarEgreso, EliminarEgreso, Mes, VerEvidencia } from './Egresos';
 import { AVISO_BLOQUEO, HistorialEdiciones, useBloqueoEdicion } from './Ediciones';
 import { evidenciasDe, mesCorto, nombreMes, type DatosFinanzas } from './balance';
 import { FONDO_AMENIDADES, calcularFondoAmenidades } from '../../../amplify/functions/shared/finanzas';
+import { repetidoDe } from './AprobarPago';
 
 type Egreso = Schema['Egreso']['type'];
 type Pago = Schema['Pago']['type'];
@@ -51,8 +52,11 @@ export function AmenidadesFinanzas({ datos, reservas, reload }: { datos: DatosFi
   const aprobarPago = (p: Pago, aprobar: boolean) => {
     const nota = aprobar ? '' : prompt('Motivo del rechazo (lo verá el residente):');
     if (!aprobar && nota === null) return;
+    // Comprobante que ya se había subido antes: la administración confirma que lo revisó personalmente.
+    const repetido = aprobar && !!repetidoDe(p);
+    if (repetido && !confirm('⚠ Este comprobante ya se había subido antes en otro pago.\n\n¿Lo revisaste personalmente y no es un pago que ya se haya aplicado?')) return;
     run(
-      () => adminCall('validarPago', { pagoId: p.id, aprobar, nota }).then(() => (setFichaR(null), reload())),
+      () => adminCall('validarPago', { pagoId: p.id, aprobar, nota, revisadoRepetido: repetido || undefined }).then(() => (setFichaR(null), reload())),
       aprobar ? 'Pago aprobado: la reserva quedó confirmada y se emitió el recibo' : 'Pago rechazado; se notificó al residente',
     );
   };

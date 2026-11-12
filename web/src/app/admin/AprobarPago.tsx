@@ -11,6 +11,38 @@ import { QUE_PAGA_RESIDENTE, categoriasDe, etiquetaCategoria, partesDePago, type
 type Pago = Schema['Pago']['type'];
 type Cargo = Schema['Cargo']['type'];
 
+/** El mismo archivo ya estaba en otro pago del condominio (lo marca portal-api al registrar el comprobante). */
+export type Repetido = { pagoId: string; unidadId: string; monto: number; fecha?: string | null; estado?: string | null; folio?: string | null };
+export function repetidoDe(p: { comprobanteRepetido?: unknown }): Repetido | null {
+  let r = p.comprobanteRepetido;
+  for (let k = 0; k < 2 && typeof r === 'string'; k++) {
+    try {
+      r = JSON.parse(r);
+    } catch {
+      return null;
+    }
+  }
+  return r && typeof r === 'object' && typeof (r as Repetido).pagoId === 'string' ? (r as Repetido) : null;
+}
+const ESTADO_PREVIO: Record<string, string> = { EN_REVISION: 'por aprobar', VALIDADO: 'aprobado', RECHAZADO: 'rechazado' };
+
+/** Nota para la administración: este comprobante ya se había subido antes; hay que revisarlo y aprobarlo a mano. */
+export function NotaRepetido({ pago, etiqueta }: { pago: Pago; etiqueta: (id: string) => string }) {
+  const r = repetidoDe(pago);
+  if (!r || pago.estado !== 'EN_REVISION') return null;
+  const otraUnidad = r.unidadId !== pago.unidadId;
+  return (
+    <div className="revisar-nota">
+      <strong>⚠ Comprobante repetido</strong>
+      <p>
+        Este mismo archivo ya se había subido antes{otraUnidad ? ` por ${etiqueta(r.unidadId)}` : ''}: pago de {money(r.monto)}
+        {r.fecha ? ` del ${r.fecha.split('-').reverse().join('/')}` : ''}, {ESTADO_PREVIO[r.estado ?? ''] ?? 'registrado'}
+        {r.folio ? ` con el recibo ${r.folio}` : ''}. Revísalo personalmente antes de aprobarlo; el match automático no lo toma.
+      </p>
+    </div>
+  );
+}
+
 /** Cargos pendientes que cubre un comprobante (los ya pagados o cancelados no cuentan). */
 export const cargosDelPago = (p: Pago, cargos: Cargo[]) => cargos.filter((c) => (p.cargoIds ?? []).includes(c.id) && c.estado === 'PENDIENTE');
 
@@ -34,6 +66,8 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
   const [faltante, setFaltante] = useState<Faltante>('PENDIENTE');
   const [excedente, setExcedente] = useState<Excedente>('SALDO_FAVOR');
   const [nota, setNota] = useState('');
+  const repetido = repetidoDe(pago);
+  const [revisado, setRevisado] = useState(false);
   // Si sobra, el sistema propone abonarlo a los otros cargos pendientes de la unidad (todos marcados).
   const [extras, setExtras] = useState<string[]>(otros.map((c) => c.id));
   // Desglose por categoría: null = el automático (por los cargos que cubre y la fecha de pago).
@@ -89,6 +123,7 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
       excedente,
       nota,
       cargosExtra: sobra ? extras : [],
+      revisadoRepetido: repetido ? revisado : undefined,
       desglose: desglose ? desglose.map((d) => ({ categoria: d.categoria, monto: Number(d.monto) || 0 })).filter((d) => d.monto > 0) : null,
     };
     if (await run(() => adminCall('validarPago', datos), 'Pago aprobado y recibo emitido; se notificó al residente')) {
@@ -106,6 +141,15 @@ export function AprobarPago({ pago, cargos, pagos, onClose, onDone }: { pago: Pa
         <div>
           <Archivo path={pago.comprobantePath} origen={{ model: 'Pago', id: pago.id }} label="Ver comprobante" />
         </div>
+        {repetido && (
+          <>
+            <NotaRepetido pago={pago} etiqueta={etiqueta} />
+            <label className="check">
+              <input type="checkbox" required checked={revisado} onChange={(e) => setRevisado(e.target.checked)} />
+              Revisé este comprobante personalmente y no es un pago que ya se haya aplicado
+            </label>
+          </>
+        )}
         <Field label="Monto recibido según el comprobante">
           <input required type="number" min="0" step="0.01" inputMode="decimal" value={monto} onChange={(e) => setMonto(e.target.value)} />
         </Field>
