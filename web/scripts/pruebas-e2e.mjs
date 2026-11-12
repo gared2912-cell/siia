@@ -745,6 +745,74 @@ try {
     return `recibo ${r.folio}: $30 + $10, quedan $20 pendientes`;
   });
 
+  // Match por cargo: un comprobante por cuota ($450) + proporcional ($120) pagado en depósitos separados.
+  const etiquetaR2 = (await ddb.send(new GetCommand({ TableName: T('Unidad'), Key: { id: X.unidadesRobles[1] } }))).Item.etiqueta;
+  const filaBanco = (n, monto, texto) => [
+    hoy,
+    '10:00:00',
+    `${Date.now()}${n}`,
+    `SPEI Recibido: | Institucion contraparte: BBVA Ordenante: PRUEBA E2E Cuenta Ordenante: 1 | Clave de Rastreo: E2E${Date.now()}X${n} Concepto del Pago: ${etiquetaR2} ${texto} | Recibo # ${n}`,
+    '',
+    monto,
+    '',
+  ];
+  const ENC_BANCO = ['Fecha Movimiento', 'Hora', 'Recibo', 'Descripción', 'Cargos', 'Abonos', 'Saldo'];
+  const pagoDos = async (nombre) => {
+    const a = await cargoR2(`Cuota de mantenimiento (${nombre})`, 450);
+    const b = await cargoR2(`Proporcional de octubre (${nombre})`, 120);
+    const key = await r2.subir('comprobantes', `${nombre}.pdf`, `%PDF-1.4 ${nombre}`, 'application/pdf');
+    const p = await ok(r2.portal('finanzas.registrarPago', { monto: 570, fecha: hoy, comprobantePath: key, cargoIds: [a.id, b.id] }));
+    return { a, b, p, key };
+  };
+  const pagoDb = async (id) => (await ddb.send(new GetCommand({ TableName: T('Pago'), Key: { id } }))).Item;
+  await prueba('Match por cargo: comprobante de 2 cargos pagados en 2 depósitos = 2 recibos', async () => {
+    const { a, b, p, key } = await pagoDos('match-separado');
+    const filas = [ENC_BANCO, filaBanco(1, 450, 'mtto nov'), filaBanco(2, 120, 'proporcional oct')];
+    const r = await ok(ct.admin('finanzas.conciliar', { condominioId: X.robles, filas }));
+    const partes = r.coincidencias.filter((c) => c.pagoId === p.id);
+    esperar(
+      partes.length === 2 && partes.every((c) => c.nivel === 'COINCIDE' && c.cargoIds?.length === 1),
+      JSON.stringify(r.coincidencias.map((c) => ({ c: c.clave, m: c.monto, n: c.nivel, a: c.alertas }))),
+    );
+    const ap = await ok(ct.admin('finanzas.aprobarConciliacion', { condominioId: X.robles, filas, archivo: 'e2e.xlsx', claves: partes.map((c) => c.clave) }));
+    esperar(ap.aprobados.length === 2 && !ap.errores.length, JSON.stringify(ap));
+    const d = await hasta(() => ok(r2.portal('finanzas.estadoCuenta')), (x) => [a.id, b.id].every((id) => x.cargos.find((y) => y.id === id)?.estado === 'PAGADO'));
+    esperar(d.cargos.find((y) => y.id === a.id).monto === 450 && d.cargos.find((y) => y.id === b.id).monto === 120, 'montos de cargos alterados');
+    const pagos = await Promise.all(ap.aprobados.map((x) => pagoDb(x.pagoId)));
+    esperar(
+      new Set(pagos.map((y) => y.folio)).size === 2 &&
+        pagos.every((y) => y.estado === 'VALIDADO' && y.ajuste === 'COMPLETO' && y.comprobantePath === key && y.cargoIds.length === 1 && y.conciliacion) &&
+        pagos.map((y) => y.monto).sort((x, y) => x - y).join() === '120,450',
+      JSON.stringify(pagos.map((y) => ({ id: y.id, m: y.monto, f: y.folio, e: y.estado, aj: y.ajuste, c: y.cargoIds }))),
+    );
+    // Los depósitos ya usados no se vuelven a proponer.
+    const r2do = await ok(ct.admin('finanzas.conciliar', { condominioId: X.robles, filas }));
+    esperar(r2do.resumen.yaConciliados === 2 && !r2do.coincidencias.length, JSON.stringify(r2do.resumen));
+    return `recibos ${pagos.map((y) => `${y.folio} $${y.monto}`).join(' y ')}`;
+  });
+  await prueba('Match por cargo: si solo llegó la cuota, la proporcional sigue por aprobar', async () => {
+    const { a, b, p } = await pagoDos('match-parcial');
+    const filas = [ENC_BANCO, filaBanco(3, 450, 'mtto nov')];
+    const r = await ok(ct.admin('finanzas.conciliar', { condominioId: X.robles, filas }));
+    const parte = r.coincidencias.find((c) => c.pagoId === p.id);
+    esperar(parte?.cargoIds?.join() === a.id && /seguirá en «Por aprobar»/.test(parte.notas.join(' ')), JSON.stringify(parte));
+    const ap = await ok(ct.admin('finanzas.aprobarConciliacion', { condominioId: X.robles, filas, archivo: 'e2e.xlsx', claves: [parte.clave] }));
+    esperar(ap.aprobados.length === 1 && ap.aprobados[0].pagoId !== p.id, JSON.stringify(ap));
+    const nuevo = await pagoDb(ap.aprobados[0].pagoId);
+    const orig = await pagoDb(p.id);
+    esperar(nuevo.estado === 'VALIDADO' && nuevo.monto === 450 && nuevo.folio, JSON.stringify(nuevo));
+    esperar(orig.estado === 'EN_REVISION' && orig.monto === 120 && orig.cargoIds.join() === b.id, JSON.stringify(orig));
+    // Después llega el depósito de la proporcional: coincide por su total con lo que quedó del comprobante.
+    const filas2 = [ENC_BANCO, filaBanco(4, 120, 'proporcional oct')];
+    const r2c = await ok(ct.admin('finanzas.conciliar', { condominioId: X.robles, filas: filas2 }));
+    const resto = r2c.coincidencias.find((c) => c.pagoId === p.id);
+    esperar(resto?.nivel === 'COINCIDE' && !resto.cargoIds, JSON.stringify(resto));
+    const ap2 = await ok(ct.admin('finanzas.aprobarConciliacion', { condominioId: X.robles, filas: filas2, archivo: 'e2e-2.xlsx', claves: [resto.clave] }));
+    const fin = await pagoDb(p.id);
+    esperar(ap2.aprobados.length === 1 && fin.estado === 'VALIDADO' && fin.folio && fin.folio !== nuevo.folio, JSON.stringify(fin));
+    return `cuota ${nuevo.folio}, proporcional después ${fin.folio}`;
+  });
+
   // =====================================================================
   grupo('Finanzas: egresos con evidencia y balance mensual');
   const subirEvidencia = async (sesion, nombre, tipo, contenido) => {

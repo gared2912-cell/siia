@@ -8,6 +8,9 @@
 //   número de la unidad en el concepto del depósito o el nombre de quien transfirió (≥ 2 palabras del residente).
 // - «Coincide» (se propone aprobar): evidencia + monto exacto + fecha a ≤ 3 días + el pago cubre justo sus cargos +
 //   sin señales de duplicado. Cualquier duda pasa a «Revisar» (no se marca sola) con el motivo.
+// - Por cargo: si un comprobante cubre varios cargos (p. ej. cuota de noviembre $450 + proporcional de octubre $120)
+//   y no hay un depósito por el total, se buscan depósitos de esa unidad por cada cargo (o grupo de cargos) por
+//   separado. Cada depósito encontrado se aprueba aparte con su propio recibo; lo que no aparezca sigue por aprobar.
 import { favorAUsar, r2, repartirPago } from './pagos';
 
 export type Movimiento = {
@@ -53,7 +56,12 @@ type CargoC = { id: string; unidadId: string; monto: number; concepto: string; e
 
 export type Nivel = 'COINCIDE' | 'REVISAR';
 export type Coincidencia = {
+  clave: string; // lo que se selecciona y aprueba: el id del pago, o «pagoId|movId» si es un cargo por separado
   pagoId: string;
+  /** Solo si se aprueba por separado: los cargos del comprobante que cubre este depósito. */
+  cargoIds?: string[];
+  /** Solo si se aprueba por separado: el monto total que declaró el residente en el comprobante. */
+  montoComprobante?: number;
   movId: string;
   nivel: Nivel;
   unidadId: string;
@@ -294,6 +302,21 @@ export function palabrasEnComun(ordenante: string, nombre: string) {
 }
 
 // ---------- Cruce ----------
+/**
+ * Cargos cuya suma es exactamente `monto`: primero un solo cargo, luego grupos de 2, 3… (el grupo más chico;
+ * en empate, los que vencen antes). null si ninguna combinación cuadra al centavo.
+ */
+export function grupoExacto<T extends { monto: number; vence?: string | null }>(cargos: T[], monto: number): T[] | null {
+  const lista = [...cargos].sort((a, b) => String(a.vence ?? '').localeCompare(String(b.vence ?? ''))).slice(0, 12);
+  let mejor: T[] | null = null;
+  for (let mask = 1; mask < 1 << lista.length; mask++) {
+    const g = lista.filter((_, i) => mask & (1 << i));
+    if (mejor && g.length >= mejor.length) continue;
+    if (Math.abs(g.reduce((s, c) => s + c.monto, 0) - monto) <= 0.004) mejor = g;
+  }
+  return mejor;
+}
+
 const diasEntre = (a: string, b: string) => Math.round(Math.abs(Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 86400000);
 const diaPago = (p: PagoC) => p.fecha || String(p.createdAt ?? '').slice(0, 10);
 const fechaCorta = (d: string) => {
@@ -342,8 +365,10 @@ export function conciliar(args: {
 
   // Vista previa de cómo se aplicaría cada comprobante (mismo cálculo que admin-api validarPago).
   const cargosPorId = new Map(cargos.map((c) => [c.id, c]));
+  const pendientesDe = (p: PagoC) =>
+    (p.cargoIds ?? []).map((id) => (id ? cargosPorId.get(id) : undefined)).filter((c): c is CargoC => !!c && c.estado === 'PENDIENTE' && c.unidadId === p.unidadId);
   const aplicacion = (p: PagoC) => {
-    const propios = (p.cargoIds ?? []).map((id) => (id ? cargosPorId.get(id) : undefined)).filter((c): c is CargoC => !!c && c.estado === 'PENDIENTE' && c.unidadId === p.unidadId);
+    const propios = pendientesDe(p);
     const total = r2(propios.reduce((s, c) => s + c.monto, 0));
     const favor = p.usarSaldoFavor ? favorAUsar(U.get(p.unidadId)?.saldoFavor ?? 0, total, p.monto) : 0;
     const plan = repartirPago(propios, p.monto + favor);
@@ -361,6 +386,30 @@ export function conciliar(args: {
   const nuevos: Movimiento[] = [];
   const detectadas = new Map<string, { encontradas: string[]; marcadas: string[]; ref: string[]; nombre: string[] }>();
 
+  /** ¿El depósito es de la unidad del comprobante? (sin revisar el monto). null = no hay evidencia suficiente. */
+  function evidencia(mov: Movimiento, p: PagoC) {
+    const det = detectadas.get(mov.id)!;
+    const unidadesConcepto = det.encontradas;
+    const rastreo = mayus(mov.rastreo).replace(/[^A-Z0-9]/g, '');
+    const refPago = mayus(p.referencia).replace(/[^A-Z0-9]/g, '');
+    const porRastreo = (rastreo.length >= 8 && refPago.includes(rastreo)) || (mov.recibo.length >= 6 && refPago.includes(mov.recibo));
+    const porUnidad = unidadesConcepto.includes(p.unidadId) || (!unidadesConcepto.length && det.ref.includes(p.unidadId));
+    const comun = mov.ordenante ? nombreCoincide(mov.ordenante, p.unidadId) : 0;
+    if (!porRastreo && !porUnidad && comun < 2) return null;
+    const dias = diasEntre(mov.fecha, diaPago(p) || mov.fecha);
+    if (dias > DIAS_MAX && !porRastreo) return null;
+    const razones: string[] = [];
+    if (porRastreo) razones.push('La clave de rastreo del banco está en el comprobante');
+    if (porUnidad) razones.push(unidadesConcepto.includes(p.unidadId) ? `El concepto dice ${etiqueta(p.unidadId)}` : `La referencia dice ${etiqueta(p.unidadId)}`);
+    if (comun >= 2) razones.push('Quien transfirió es residente de la unidad');
+    razones.push('Monto exacto');
+    if (dias <= DIAS_COINCIDE) razones.push(dias === 0 ? 'Misma fecha' : `Fecha con ${dias} día${dias === 1 ? '' : 's'} de diferencia`);
+    const otras = unidadesConcepto.filter((id) => id !== p.unidadId);
+    const conflicto = !porRastreo && otras.length ? `El concepto del depósito menciona ${otras.map(etiqueta).join(', ')}` : null;
+    const score = (porRastreo ? 100 : 0) + (porUnidad ? 50 : 0) + (comun >= 2 ? 20 + comun : 0) - (conflicto ? 40 : 0) - Math.min(dias, DIAS_MAX);
+    return { score, razones, dias, porUnidad, conflicto };
+  }
+
   for (const mov of lectura.movimientos) {
     const previo = usados.get(mov.id);
     if (previo) {
@@ -374,27 +423,10 @@ export function conciliar(args: {
     const ref = /^\s*[A-Z0-9-]{1,6}\s*$/i.test(mov.referencia) ? unidadesEnTexto(mov.referencia, unidades).encontradas : [];
     const porNombre = mov.ordenante ? unidades.filter((u) => nombreCoincide(mov.ordenante, u.id) >= 2).map((u) => u.id) : [];
     detectadas.set(mov.id, { encontradas: unidadesConcepto, marcadas: enConcepto.marcadas, ref, nombre: porNombre });
-    const rastreo = mayus(mov.rastreo).replace(/[^A-Z0-9]/g, '');
-
     for (const p of pend) {
       if (Math.abs(p.monto - mov.monto) > 0.004) continue;
-      const refPago = mayus(p.referencia).replace(/[^A-Z0-9]/g, '');
-      const porRastreo = (rastreo.length >= 8 && refPago.includes(rastreo)) || (mov.recibo.length >= 6 && refPago.includes(mov.recibo));
-      const porUnidad = unidadesConcepto.includes(p.unidadId) || (!unidadesConcepto.length && ref.includes(p.unidadId));
-      const comun = mov.ordenante ? nombreCoincide(mov.ordenante, p.unidadId) : 0;
-      if (!porRastreo && !porUnidad && comun < 2) continue;
-      const dias = diasEntre(mov.fecha, diaPago(p) || mov.fecha);
-      if (dias > DIAS_MAX && !porRastreo) continue;
-      const razones: string[] = [];
-      if (porRastreo) razones.push('La clave de rastreo del banco está en el comprobante');
-      if (porUnidad) razones.push(unidadesConcepto.includes(p.unidadId) ? `El concepto dice ${etiqueta(p.unidadId)}` : `La referencia dice ${etiqueta(p.unidadId)}`);
-      if (comun >= 2) razones.push('Quien transfirió es residente de la unidad');
-      razones.push('Monto exacto');
-      if (dias <= DIAS_COINCIDE) razones.push(dias === 0 ? 'Misma fecha' : `Fecha con ${dias} día${dias === 1 ? '' : 's'} de diferencia`);
-      const otras = unidadesConcepto.filter((id) => id !== p.unidadId);
-      const conflicto = !porRastreo && otras.length ? `El concepto del depósito menciona ${otras.map(etiqueta).join(', ')}` : null;
-      const score = (porRastreo ? 100 : 0) + (porUnidad ? 50 : 0) + (comun >= 2 ? 20 + comun : 0) - (conflicto ? 40 : 0) - Math.min(dias, DIAS_MAX);
-      pares.push({ mov, pago: p, score, razones, dias, porUnidad, conflicto });
+      const ev = evidencia(mov, p);
+      if (ev) pares.push({ mov, pago: p, ...ev });
     }
   }
 
@@ -420,6 +452,7 @@ export function conciliar(args: {
     const ap = aplicacion(p);
     if (!ap.ok) alertas.push(ap.texto);
     coincidencias.push({
+      clave: p.id,
       pagoId: p.id,
       movId: par.mov.id,
       nivel: alertas.length ? 'REVISAR' : 'COINCIDE',
@@ -435,6 +468,71 @@ export function conciliar(args: {
       duplicados: [],
     });
   }
+
+  // Por cargo: comprobantes de varios cargos sin un depósito por el total. Se buscan depósitos de la misma unidad por
+  // el monto de cada cargo (o de un grupo de sus cargos); cada uno se aprueba por separado con su propio recibo.
+  // Un cargo que ya cubre otra coincidencia no se vuelve a usar.
+  const cargosCubiertos = new Set<string>();
+  for (const c of coincidencias) for (const x of pendientesDe(pend.find((p) => p.id === c.pagoId)!)) cargosCubiertos.add(x.id);
+  const porCargo: Coincidencia[] = [];
+  for (const p of [...pend].sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))) {
+    if (pagoUsado.has(p.id) || p.usarSaldoFavor || pendientesDe(p).length < 2) continue;
+    let restantes = pendientesDe(p).filter((c) => !cargosCubiertos.has(c.id));
+    if (!restantes.length) continue;
+    const candidatos = nuevos
+      .filter((m) => !movUsado.has(m.id))
+      .map((m) => ({ mov: m, ev: evidencia(m, p) }))
+      .filter((x): x is { mov: Movimiento; ev: NonNullable<ReturnType<typeof evidencia>> } => !!x.ev)
+      .sort((a, b) => b.ev.score - a.ev.score || a.mov.fecha.localeCompare(b.mov.fecha));
+    const partes: Coincidencia[] = [];
+    for (const { mov, ev } of candidatos) {
+      const grupo = grupoExacto(restantes, mov.monto);
+      if (!grupo) continue;
+      movUsado.add(mov.id);
+      restantes = restantes.filter((c) => !grupo.includes(c));
+      grupo.forEach((c) => cargosCubiertos.add(c.id));
+      const alertas: string[] = [];
+      if (ev.conflicto) alertas.push(ev.conflicto);
+      if (ev.dias > DIAS_COINCIDE)
+        alertas.push(`El depósito es del ${fechaCorta(mov.fecha)} y el residente dijo que pagó el ${fechaCorta(diaPago(p))} (${ev.dias} días de diferencia)`);
+      const gemelo = aprobados.find(
+        (a) => a.unidadId === p.unidadId && Math.abs(a.monto - mov.monto) <= 0.004 && !conciliacionDe(a) && diasEntre(diaPago(a) || mov.fecha, mov.fecha) <= DIAS_COINCIDE,
+      );
+      if (gemelo) alertas.push(`Ya hay un pago aprobado de ${etiqueta(p.unidadId)} por ${pesos(mov.monto)} (recibo ${gemelo.folio ?? 's/f'}): revisa que no sea este mismo depósito`);
+      partes.push({
+        clave: `${p.id}|${mov.id}`,
+        pagoId: p.id,
+        cargoIds: grupo.map((c) => c.id),
+        montoComprobante: p.monto,
+        movId: mov.id,
+        nivel: alertas.length ? 'REVISAR' : 'COINCIDE',
+        unidadId: p.unidadId,
+        etiqueta: etiqueta(p.unidadId),
+        monto: mov.monto,
+        fechaPago: diaPago(p),
+        mov,
+        razones: [...ev.razones.filter((r) => r !== 'Monto exacto'), grupo.length === 1 ? 'Monto exacto del cargo' : 'Monto exacto de sus cargos'],
+        alertas,
+        cubre: `Cubre: ${grupo.map((c) => `${c.concepto} (${pesos(c.monto)})`).join(', ')} · con su propio recibo`,
+        notas: [],
+        duplicados: [],
+      });
+      if (!restantes.length) break;
+    }
+    if (!partes.length) continue;
+    pagoUsado.add(p.id);
+    const suma = r2(partes.reduce((s, x) => s + x.monto, 0));
+    const nota = restantes.length
+      ? `El comprobante de ${pesos(p.monto)} cubre varios cargos y se pagaron por separado. Sin depósito en este archivo: ${restantes
+          .map((c) => `${c.concepto} (${pesos(c.monto)})`)
+          .join(', ')}; seguirá en «Por aprobar».`
+      : Math.abs(suma - p.monto) <= 0.004
+        ? `El comprobante de ${pesos(p.monto)} cubre ${partes.length > 1 ? `${partes.length} depósitos que suman lo mismo` : 'este depósito'}: cada depósito lleva su recibo.`
+        : `El residente declaró ${pesos(p.monto)} y los depósitos suman ${pesos(suma)}: cada cargo se aprueba por lo que llegó al banco.`;
+    for (const x of partes) x.notas.push(nota);
+    porCargo.push(...partes);
+  }
+  coincidencias.push(...porCargo);
 
   // Comprobantes sin depósito en este archivo; los de la misma unidad y monto que uno ya emparejado son probables repetidos.
   const sinDeposito: SinDeposito[] = [];

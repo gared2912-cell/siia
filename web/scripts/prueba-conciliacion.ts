@@ -72,6 +72,62 @@ assert.equal(r.sinComprobante.length, 1);
 assert.match(r.sinComprobante[0].motivo, /otro monto/);
 console.log('✔ cruce: repetidos, nombre, monto distinto');
 
+// --- Por cargo: un comprobante de $570 (cuota nov $450 + proporcional oct $120) ---
+const spei = (n: number, rastreo: string, concepto: string, monto: number) => [
+  46333,
+  46333.5,
+  String(n),
+  `SPEI Recibido: | Institucion contraparte: BBVA Ordenante: X Cuenta Ordenante: 1 | Clave de Rastreo: ${rastreo} Concepto del Pago: ${concepto} | Recibo # ${n}`,
+  '',
+  monto,
+  '',
+];
+const enc = ['Fecha Movimiento', 'Hora', 'Recibo', 'Descripción', 'Cargos', 'Abonos', 'Saldo'];
+const base368 = {
+  unidades: [{ id: '368', etiqueta: 'Depto 368' }],
+  perfiles: [],
+  cargos: [
+    { id: 'nov', unidadId: '368', monto: 450, concepto: 'Cuota noviembre', estado: 'PENDIENTE', vence: '2026-11-10' },
+    { id: 'oct', unidadId: '368', monto: 120, concepto: 'Proporcional octubre', estado: 'PENDIENTE', vence: '2026-10-31' },
+  ],
+  pagos: [{ id: 'q', unidadId: '368', monto: 570, fecha: '2026-11-07', estado: 'EN_REVISION', cargoIds: ['nov', 'oct'], createdAt: '1' }],
+  nombreCondominio: 'Laula',
+};
+// a) Un solo depósito por el total: un solo recibo por los dos cargos (como antes).
+const rTotal = conciliar({ ...base368, lectura: leerEstadoCuenta([enc, spei(1, 'TOT11111111', 'Laula 368', 570)]) });
+assert.equal(rTotal.coincidencias.length, 1);
+assert.equal(rTotal.coincidencias[0].clave, 'q');
+assert.equal(rTotal.coincidencias[0].cargoIds, undefined);
+assert.equal(rTotal.coincidencias[0].nivel, 'COINCIDE');
+// b) Dos depósitos separados ($450 y $120): dos coincidencias, cada una con su cargo y su recibo.
+const rSep = conciliar({ ...base368, lectura: leerEstadoCuenta([enc, spei(1, 'AAA11111111', 'Laula 368 nov', 450), spei(2, 'BBB22222222', 'Laula 368 oct', 120)]) });
+assert.equal(rSep.coincidencias.length, 2);
+const porMonto = (m: number) => rSep.coincidencias.find((c) => c.monto === m)!;
+assert.deepEqual(porMonto(450).cargoIds, ['nov']);
+assert.deepEqual(porMonto(120).cargoIds, ['oct']);
+assert.ok(rSep.coincidencias.every((c) => c.nivel === 'COINCIDE' && c.clave.startsWith('q|')));
+assert.equal(rSep.sinDeposito.length, 0);
+assert.equal(rSep.sinComprobante.length, 0);
+// c) Solo llegó la cuota de $450: se aprueba ese cargo y la proporcional sigue por aprobar.
+const rUno = conciliar({ ...base368, lectura: leerEstadoCuenta([enc, spei(1, 'AAA11111111', 'Laula 368 nov', 450)]) });
+assert.equal(rUno.coincidencias.length, 1);
+assert.deepEqual(rUno.coincidencias[0].cargoIds, ['nov']);
+assert.match(rUno.coincidencias[0].notas.join(' '), /Proporcional octubre.*seguirá en «Por aprobar»/);
+// d) Un depósito de otra unidad por $450 no cuenta.
+const rOtra = conciliar({ ...base368, lectura: leerEstadoCuenta([enc, spei(1, 'AAA11111111', 'Laula 104 nov', 450)]) });
+assert.equal(rOtra.coincidencias.length, 0);
+// e) Grupos: tres cargos ($450 + $120 + $200) pagados como $570 y $200.
+const rGrupo = conciliar({
+  ...base368,
+  cargos: [...base368.cargos, { id: 'multa', unidadId: '368', monto: 200, concepto: 'Multa', estado: 'PENDIENTE', vence: '2026-11-15' }],
+  pagos: [{ ...base368.pagos[0], monto: 770, cargoIds: ['nov', 'oct', 'multa'] }],
+  lectura: leerEstadoCuenta([enc, spei(1, 'AAA11111111', 'Laula 368', 570), spei(2, 'BBB22222222', 'Laula 368 multa', 200)]),
+});
+assert.equal(rGrupo.coincidencias.length, 2);
+assert.deepEqual([...rGrupo.coincidencias.find((c) => c.monto === 570)!.cargoIds!].sort(), ['nov', 'oct']);
+assert.deepEqual(rGrupo.coincidencias.find((c) => c.monto === 200)!.cargoIds, ['multa']);
+console.log('✔ por cargo: total, depósitos separados, parcial, otra unidad y grupos');
+
 // --- Archivo real contra Laula en STAGING (solo lectura) ---
 const archivo = process.argv[2];
 if (archivo) {

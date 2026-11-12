@@ -823,30 +823,38 @@ const accionesConciliacion: Record<string, (p: Item, yo: Yo) => Promise<unknown>
     return (await analizarEstadoCuenta(p, yo)).resultado;
   },
 
-  // Aprueba los comprobantes elegidos. El cruce se vuelve a hacer aquí con los datos actuales: solo se aprueba un
-  // comprobante si sigue emparejado (monto exacto) con un depósito del archivo que no se haya usado antes. Cada uno se
+  // Aprueba las coincidencias elegidas (por su clave). El cruce se vuelve a hacer aquí con los datos actuales: solo se
+  // aprueba si sigue emparejada (monto exacto) con un depósito del archivo que no se haya usado antes. Cada una se
   // aprueba como «Pago completo» con validarPago (folio, cargos, aviso y recibo al residente) y guarda el depósito.
+  // Una coincidencia «por cargo» (el depósito cubre solo parte de los cargos del comprobante) separa esos cargos en un
+  // pago propio con el mismo comprobante, que se aprueba con su recibo; el resto sigue por aprobar.
   async 'finanzas.aprobarConciliacion'(p, yo) {
-    const ids: string[] = Array.isArray(p.pagoIds) ? [...new Set<string>(p.pagoIds.map((x: unknown) => str(x, 64)).filter(Boolean))].slice(0, 15) : [];
+    const lista = Array.isArray(p.claves) ? p.claves : Array.isArray(p.pagoIds) ? p.pagoIds : [];
+    const ids: string[] = [...new Set<string>(lista.map((x: unknown) => str(x, 140)).filter(Boolean))].slice(0, 15);
     if (!ids.length) fail('Selecciona los pagos a aprobar.');
     const { resultado } = await analizarEstadoCuenta(p, yo);
     const archivo = str(p.archivo, 120) || 'Estado de cuenta';
     const inicio = Date.now();
-    const aprobados: { pagoId: string; folio: string | null }[] = [];
-    const errores: { pagoId: string; motivo: string }[] = [];
+    const aprobados: { clave: string; pagoId: string; folio: string | null }[] = [];
+    const errores: { clave: string; pagoId: string; motivo: string }[] = [];
     const sinProcesar: string[] = [];
-    for (const id of ids) {
+    // Las partes de un mismo comprobante se procesan juntas y en orden (cada una cambia el comprobante original).
+    const orden = [...ids].sort((a, b) => a.localeCompare(b));
+    for (const clave of orden) {
       if (Date.now() - inicio > 20_000) {
-        sinProcesar.push(id);
+        sinProcesar.push(clave);
         continue;
       }
-      const c = resultado.coincidencias.find((x) => x.pagoId === id);
+      // Si una parte ya se aprobó en un lote anterior, lo que resta del comprobante puede coincidir ahora por el total.
+      const [pid, mid] = clave.split('|');
+      const c = resultado.coincidencias.find((x) => x.clave === clave) ?? (mid ? resultado.coincidencias.find((x) => x.pagoId === pid && x.movId === mid) : undefined);
       if (!c) {
-        errores.push({ pagoId: id, motivo: 'Ya no coincide con un depósito del estado de cuenta (o ya fue procesado).' });
+        errores.push({ clave, pagoId: clave.split('|')[0], motivo: 'Ya no coincide con un depósito del estado de cuenta (o ya fue procesado).' });
         continue;
       }
       try {
-        const r = (await acciones.validarPago({ pagoId: id, aprobar: true }, yo)) as Item;
+        const id = c.cargoIds ? await separarPorCargo(c.pagoId, c.cargoIds, c.monto) : c.pagoId;
+        const r = (await acciones.validarPago({ pagoId: id, aprobar: true, ...(c.cargoIds ? { montoRecibido: c.monto } : {}) }, yo)) as Item;
         const conc: ConciliacionPago = {
           movId: c.movId,
           fecha: c.mov.fecha,
@@ -861,15 +869,67 @@ const accionesConciliacion: Record<string, (p: Item, yo: Yo) => Promise<unknown>
           en: now(),
         };
         await update('Pago', { id }, { conciliacion: JSON.stringify(conc) });
-        aprobados.push({ pagoId: id, folio: r?.folio ?? null });
+        aprobados.push({ clave, pagoId: id, folio: r?.folio ?? null });
       } catch (err) {
-        errores.push({ pagoId: id, motivo: err instanceof ApiError ? err.message : 'Ocurrió un error al aprobarlo.' });
-        if (!(err instanceof ApiError)) console.error('aprobarConciliacion', id, err);
+        errores.push({ clave, pagoId: c.pagoId, motivo: err instanceof ApiError ? err.message : 'Ocurrió un error al aprobarlo.' });
+        if (!(err instanceof ApiError)) console.error('aprobarConciliacion', clave, err);
       }
     }
     return { aprobados, errores, sinProcesar };
   },
 };
+
+/**
+ * Match por cargo: separa `cargoIds` del comprobante `pagoId` en un pago propio (mismo comprobante, residente y fecha)
+ * por `monto`, listo para aprobarse con su recibo. El comprobante original se queda con los demás cargos y con lo que
+ * resta de lo declarado. Si los cargos son todos los que le quedan al comprobante, se aprueba el original tal cual.
+ * Devuelve el id del pago que se debe aprobar.
+ */
+async function separarPorCargo(pagoId: string, cargoIds: string[], monto: number): Promise<string> {
+  const pago = await get('Pago', { id: pagoId });
+  if (!pago || pago.estado !== 'EN_REVISION') fail('El comprobante ya fue procesado.');
+  const propios: string[] = (pago!.cargoIds ?? []).filter(Boolean);
+  if (!cargoIds.every((id) => propios.includes(id))) fail('El comprobante ya no incluye estos cargos.');
+  const cargos = (await Promise.all(cargoIds.map((id) => get('Cargo', { id })))).filter((c) => c?.estado === 'PENDIENTE');
+  if (cargos.length !== cargoIds.length) fail('Uno de los cargos ya no está pendiente.');
+  if (Math.abs(r2(cargos.reduce((s, c) => s + Number(c!.monto), 0)) - monto) > 0.004) fail('El monto de los cargos cambió. Vuelve a subir el estado de cuenta.');
+  // Cargos que seguirán en el comprobante original (solo los que siguen pendientes).
+  const resto = (await Promise.all(propios.filter((id) => !cargoIds.includes(id)).map((id) => get('Cargo', { id })))).filter(
+    (c): c is Item => !!c && c.estado === 'PENDIENTE' && c.unidadId === pago!.unidadId,
+  );
+  if (!resto.length) return pagoId;
+  const totalResto = r2(resto.reduce((s, c) => s + Number(c.monto), 0));
+  const declaradoResto = r2(pago!.monto - monto);
+  // Primero el original (condicional: si otro administrador lo procesó, no se crea nada).
+  await update(
+    'Pago',
+    { id: pagoId },
+    { cargoIds: resto.map((c) => c.id), monto: declaradoResto > 0 ? declaradoResto : totalResto, usarSaldoFavor: null },
+    { estado: 'EN_REVISION', monto: pago!.monto },
+  ).catch((err) => {
+    if (err?.name === 'ConditionalCheckFailedException') fail('El comprobante cambió mientras se aprobaba. Vuelve a subir el estado de cuenta.');
+    throw err;
+  });
+  try {
+    const nuevo = await put('Pago', {
+      condominioId: pago!.condominioId,
+      unidadId: pago!.unidadId,
+      userId: pago!.userId ?? null,
+      monto,
+      fecha: pago!.fecha ?? null,
+      referencia: pago!.referencia ?? null,
+      comprobantePath: pago!.comprobantePath ?? null,
+      cargoIds,
+      categoriaResidente: pago!.categoriaResidente ?? null,
+      estado: 'EN_REVISION',
+      createdAt: pago!.createdAt,
+    });
+    return nuevo.id as string;
+  } catch (err) {
+    await update('Pago', { id: pagoId }, { cargoIds: propios, monto: pago!.monto, usarSaldoFavor: pago!.usarSaldoFavor ?? null }).catch(() => undefined);
+    throw err;
+  }
+}
 
 const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
   // Editar un cargo pendiente (monto, concepto, vencimiento o tipo de ingreso) con su motivo.

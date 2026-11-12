@@ -10,7 +10,7 @@ import type { Coincidencia, Conciliacion } from '../../../amplify/functions/shar
 
 type Pago = Schema['Pago']['type'];
 type Paso = 'archivo' | 'resultado' | 'confirmar' | 'aprobando' | 'listo';
-type Final = { aprobados: { pagoId: string; folio: string | null }[]; errores: { pagoId: string; motivo: string }[] };
+type Final = { aprobados: { clave: string; pagoId: string; folio: string | null }[]; errores: { clave: string; pagoId: string; motivo: string }[] };
 
 const LOTE = 5;
 
@@ -50,7 +50,7 @@ export function ConciliarPagos({ pagos, onClose, onDone }: { pagos: Pago[]; onCl
       const r = await adminCall<Conciliacion>('finanzas.conciliar', { condominioId: condo!.id, filas });
       setArchivo({ nombre: file.name, filas });
       setRes(r);
-      setSel(new Set(r.coincidencias.filter((c) => c.nivel === 'COINCIDE').map((c) => c.pagoId)));
+      setSel(new Set(r.coincidencias.filter((c) => c.nivel === 'COINCIDE').map((c) => c.clave)));
       setPaso('resultado');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -72,18 +72,18 @@ export function ConciliarPagos({ pagos, onClose, onDone }: { pagos: Pago[]; onCl
           condominioId: condo!.id,
           filas: archivo!.filas,
           archivo: archivo!.nombre,
-          pagoIds: lote,
+          claves: lote,
         });
         out.aprobados.push(...r.aprobados);
         out.errores.push(...r.errores);
         cola.unshift(...r.sinProcesar);
         intentosSinAvance = r.aprobados.length || r.errores.length ? 0 : intentosSinAvance + 1;
         if (intentosSinAvance >= 3) {
-          out.errores.push(...cola.splice(0).map((pagoId) => ({ pagoId, motivo: 'No se alcanzó a procesar. Intenta de nuevo.' })));
+          out.errores.push(...cola.splice(0).map((clave) => ({ clave, pagoId: clave, motivo: 'No se alcanzó a procesar. Intenta de nuevo.' })));
         }
       } catch (e) {
         // Error de red o del servidor: los de este lote se reportan y se sigue con los demás.
-        out.errores.push(...lote.map((pagoId) => ({ pagoId, motivo: e instanceof Error ? e.message : 'Ocurrió un error.' })));
+        out.errores.push(...lote.map((clave) => ({ clave, pagoId: clave, motivo: e instanceof Error ? e.message : 'Ocurrió un error.' })));
       }
       setProgreso({ hechos: out.aprobados.length + out.errores.length, total: sel.size });
     }
@@ -112,7 +112,9 @@ export function ConciliarPagos({ pagos, onClose, onDone }: { pagos: Pago[]; onCl
         <div className="stack">
           <p style={{ margin: 0 }}>
             Sube el estado de cuenta que descargas de tu banco (Excel o CSV). El sistema busca cada depósito, identifica la casa o departamento por el concepto, la
-            clave de rastreo o el nombre de quien transfirió, y lo compara con los comprobantes por aprobar. <strong>Solo se proponen los de monto exacto.</strong>
+            clave de rastreo o el nombre de quien transfirió, y lo compara con los comprobantes por aprobar. <strong>Solo se proponen los de monto exacto.</strong>{' '}
+            Si un comprobante cubre varios cargos (por ejemplo, cuota y proporcional) y se pagaron en depósitos separados, cada cargo se aprueba por su lado con su
+            propio recibo.
           </p>
           <p className="small muted" style={{ margin: 0 }}>
             Nada se aprueba hasta que lo confirmes. Un depósito solo puede aprobar un comprobante, y un depósito ya usado no se vuelve a usar en cargas
@@ -149,7 +151,7 @@ export function ConciliarPagos({ pagos, onClose, onDone }: { pagos: Pago[]; onCl
       )}
 
       {paso === 'confirmar' && res && (
-        <Confirmar items={res.coincidencias.filter((c) => sel.has(c.pagoId))} volver={() => setPaso('resultado')} aprobar={aprobar} />
+        <Confirmar items={res.coincidencias.filter((c) => sel.has(c.clave))} volver={() => setPaso('resultado')} aprobar={aprobar} />
       )}
 
       {paso === 'listo' && final && res && <Listo final={final} res={res} terminar={onDone} />}
@@ -178,7 +180,7 @@ function Resultado({
 }) {
   const coinciden = res.coincidencias.filter((c) => c.nivel === 'COINCIDE');
   const revisar = res.coincidencias.filter((c) => c.nivel === 'REVISAR');
-  const elegidos = res.coincidencias.filter((c) => sel.has(c.pagoId));
+  const elegidos = res.coincidencias.filter((c) => sel.has(c.clave));
   const total = elegidos.reduce((s, c) => s + c.monto, 0);
   const cambiar = (id: string) => {
     const n = new Set(sel);
@@ -187,7 +189,7 @@ function Resultado({
   };
   const todos = (lista: Coincidencia[], si: boolean) => {
     const n = new Set(sel);
-    for (const c of lista) si ? n.add(c.pagoId) : n.delete(c.pagoId);
+    for (const c of lista) si ? n.add(c.clave) : n.delete(c.clave);
     setSel(n);
   };
   const { resumen } = res;
@@ -230,7 +232,7 @@ function Resultado({
           <p className="small muted">Monto exacto, se identificó la casa o departamento y la fecha coincide. Quedan seleccionados para aprobar.</p>
           <ul className="tarjetas">
             {coinciden.map((c) => (
-              <ItemMatch key={c.pagoId} c={c} pago={porId.get(c.pagoId)} marcado={sel.has(c.pagoId)} cambiar={() => cambiar(c.pagoId)} />
+              <ItemMatch key={c.clave} c={c} pago={porId.get(c.pagoId)} marcado={sel.has(c.clave)} cambiar={() => cambiar(c.clave)} />
             ))}
           </ul>
         </section>
@@ -246,7 +248,7 @@ function Resultado({
           </p>
           <ul className="tarjetas">
             {revisar.map((c) => (
-              <ItemMatch key={c.pagoId} c={c} pago={porId.get(c.pagoId)} marcado={sel.has(c.pagoId)} cambiar={() => cambiar(c.pagoId)} />
+              <ItemMatch key={c.clave} c={c} pago={porId.get(c.pagoId)} marcado={sel.has(c.clave)} cambiar={() => cambiar(c.clave)} />
             ))}
           </ul>
         </section>
@@ -346,7 +348,9 @@ function ItemMatch({ c, pago, marcado, cambiar }: { c: Coincidencia; pago?: Pago
           </span>
           <span className="tarjeta-sub">
             <b>Comprobante:</b> pagado el {fecha(c.fechaPago)}
+            {c.montoComprobante != null && ` · declaró ${money(c.montoComprobante)} por varios cargos`}
           </span>
+          {c.cargoIds && <span className="pill sm">Cargo por separado</span>}
           <span className="conc-razones">
             {c.razones.map((r) => (
               <span key={r} className="pill sm ok">
@@ -395,8 +399,11 @@ function Confirmar({ items, volver, aprobar }: { items: Coincidencia[]; volver: 
       )}
       <ul className="conc-lista">
         {items.map((c) => (
-          <li key={c.pagoId}>
-            <span>{c.etiqueta}</span>
+          <li key={c.clave}>
+            <span>
+              {c.etiqueta}
+              {c.cargoIds ? ' · cargo por separado' : ''}
+            </span>
             <span>{money(c.monto)}</span>
           </li>
         ))}
@@ -418,8 +425,8 @@ function Confirmar({ items, volver, aprobar }: { items: Coincidencia[]; volver: 
 }
 
 function Listo({ final, res, terminar }: { final: Final; res: Conciliacion; terminar: () => void }) {
-  const et = (id: string) => res.coincidencias.find((c) => c.pagoId === id);
-  const total = final.aprobados.reduce((s, a) => s + (et(a.pagoId)?.monto ?? 0), 0);
+  const et = (clave: string) => res.coincidencias.find((c) => c.clave === clave) ?? res.coincidencias.find((c) => c.pagoId === clave);
+  const total = final.aprobados.reduce((s, a) => s + (et(a.clave)?.monto ?? 0), 0);
   return (
     <div className="stack">
       {final.aprobados.length > 0 && (
@@ -433,8 +440,8 @@ function Listo({ final, res, terminar }: { final: Final; res: Conciliacion; term
           {final.errores.length} no se aprobaron:
           <ul>
             {final.errores.map((e) => (
-              <li key={e.pagoId}>
-                {et(e.pagoId)?.etiqueta ?? 'Pago'} {et(e.pagoId) ? money(et(e.pagoId)!.monto) : ''}: {e.motivo}
+              <li key={e.clave}>
+                {et(e.clave)?.etiqueta ?? 'Pago'} {et(e.clave) ? money(et(e.clave)!.monto) : ''}: {e.motivo}
               </li>
             ))}
           </ul>
@@ -443,11 +450,11 @@ function Listo({ final, res, terminar }: { final: Final; res: Conciliacion; term
       {final.aprobados.length > 0 && (
         <ul className="conc-lista">
           {final.aprobados.map((a) => (
-            <li key={a.pagoId}>
+            <li key={a.clave}>
               <span>
-                {et(a.pagoId)?.etiqueta} · recibo {a.folio ?? '—'}
+                {et(a.clave)?.etiqueta} · recibo {a.folio ?? '—'}
               </span>
-              <span>{money(et(a.pagoId)?.monto)}</span>
+              <span>{money(et(a.clave)?.monto)}</span>
             </li>
           ))}
         </ul>
