@@ -7,7 +7,7 @@
 //    lleva la proporcional, que se genera al dar de alta el departamento. Desde el mes siguiente, completa.
 // 2. Si la administración ya le cargó a mano una cuota de ese mes (proporcional o un cargo con «cuota» o
 //    «proporcional» en el concepto), no se genera la completa.
-// 3. Solo la automática: una unidad dada de alta después del día de cargo del mes no recibe la completa ese mes.
+// 3. Solo la automática: una unidad SIN fecha de entrega dada de alta después del día de cargo no recibe la completa ese mes.
 import { byIndex, hoyMX, put, type Item } from './db';
 import { esCuotaManual, periodoDeCuota } from './finanzas';
 
@@ -36,7 +36,8 @@ const altaMX = (x: Item) => (x.createdAt ? hoyMX(new Date(x.createdAt)) : '');
 export function sinCuotaCompleta(u: Item, cargosUnidad: Item[], periodo: string, automatica?: { fechaCargo: string }): string | null {
   if (u.fechaEntrega && String(u.fechaEntrega) > `${periodo}-01`) return 'entrega';
   if (cargosUnidad.some((c) => esCuotaManual(c) && periodoDeCuota(c) === periodo)) return 'manual';
-  if (automatica && altaMX(u) > automatica.fechaCargo) return 'alta';
+  // Sin fecha de entrega, la fecha de alta hace sus veces; con fecha de entrega anterior al mes, ese mes va completo.
+  if (automatica && !u.fechaEntrega && altaMX(u) > automatica.fechaCargo) return 'alta';
   return null;
 }
 

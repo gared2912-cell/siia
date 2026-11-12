@@ -41,6 +41,7 @@ es('Adeudo heredado (cartera) no cuenta', sinCuotaCompleta(vieja, [manual('Cuota
 // Regla 3: alta después del día de cargo (solo la automática)
 es('Alta el 6 nov, cargo el 5: sin completa (automática)', sinCuotaCompleta({ id: 'u', createdAt: '2026-11-06T17:00:00Z' }, [], nov, auto), 'alta');
 es('Alta el 5 nov a las 7 pm (México), cargo el 5: completa', sinCuotaCompleta({ id: 'u', createdAt: '2026-11-06T01:00:00Z' }, [], nov, auto), null);
+es('Alta el 6 nov pero entregada el 21 oct (depto 168): completa', sinCuotaCompleta({ id: 'u', createdAt: '2026-11-06T17:00:00Z', fechaEntrega: '2026-10-21' }, [], nov, auto), null);
 es('Alta el 6 nov, generación manual de cuotas: completa', sinCuotaCompleta({ id: 'u', createdAt: '2026-11-06T17:00:00Z' }, [], nov), null);
 
 console.log(fallas ? `\n${fallas} falla(s)` : '\nTodo bien');
