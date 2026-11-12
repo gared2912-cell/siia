@@ -467,6 +467,64 @@ try {
     const r = await ok(ct.admin('generarCargos', { condominioId: X.robles, periodo }));
     esperar(r.creados === 0, JSON.stringify(r));
   });
+
+  // =====================================================================
+  grupo('Cuotas: entrega a mitad de mes y cuota proporcional (reglas del 11 nov 2026)');
+  {
+    const dHoy = Number(hoy.slice(8));
+    const entrega = `${periodo}-${String(Math.max(2, Math.min(dHoy, 5))).padStart(2, '0')}`;
+    const [ya, ma] = periodo.split('-').map(Number);
+    const diasMes = new Date(Date.UTC(ya, ma, 0)).getUTCDate();
+    const esperado = Math.round(((900 * (diasMes - Number(entrega.slice(8)) + 1)) / diasMes) * 100) / 100;
+    const mesPasado = new Date(Date.UTC(ya, ma - 2, 15)).toISOString().slice(0, 10);
+    const mesNombre = new Date(Date.UTC(ya, ma - 1, 15)).toLocaleDateString('es-MX', { month: 'long', timeZone: 'UTC' });
+    const cargosDe = async () => (await scanTodo('Cargo')).filter((x) => x.condominioId === X.entregas && x.estado !== 'CANCELADO');
+    const unidad = async (etq) => (await scanTodo('Unidad')).find((u) => u.condominioId === X.entregas && u.etiqueta === etq);
+    await prueba('Condominio con cuota mensual de $900', async () => {
+      const c = await ok(sa.db('Condominio', 'create', { input: { nombre: `Las Entregas${SUFIJO}`, tipo: 'Condominio horizontal', tipoUnidad: 'CASA', activo: true, cuotaMensual: 900, diaVencimiento: 10, modulos: ['finanzas'] } }));
+      X.entregas = c.id;
+    });
+    await prueba('Alta con «Cobrar cuota proporcional»: solo los días desde la entrega', async () => {
+      const [r] = await ok(sa.admin('residentes.importar', { condominioId: X.entregas, filas: [{ numero: '1', fechaEntrega: entrega, proporcional: true }], enviarCorreo: false }));
+      esperar(!r.error && r.unidad === 'creada', JSON.stringify(r));
+      const u = await unidad('Casa 1');
+      const cp = (await cargosDe()).filter((x) => x.unidadId === u.id);
+      esperar(cp.length === 1 && cp[0].tipo === 'PROPORCIONAL' && cp[0].monto === esperado && cp[0].periodo === periodo, JSON.stringify(cp));
+      return `entrega ${entrega} → $${esperado}`;
+    });
+    await prueba('Alta desmarcando la proporcional: no se cobra nada ese mes', async () => {
+      const [r] = await ok(sa.admin('residentes.importar', { condominioId: X.entregas, filas: [{ numero: '2', fechaEntrega: entrega, proporcional: false }], enviarCorreo: false }));
+      esperar(!r.error, JSON.stringify(r));
+      const u = await unidad('Casa 2');
+      esperar(!(await cargosDe()).some((x) => x.unidadId === u.id), 'se creó un cargo');
+    });
+    await prueba('Carga masiva: entrega de este mes → proporcional automática; de un mes pasado → nada', async () => {
+      const rs = await ok(sa.admin('residentes.importar', { condominioId: X.entregas, filas: [{ numero: '3', fechaEntrega: entrega }, { numero: '4', fechaEntrega: mesPasado }, { numero: '5' }], enviarCorreo: false }));
+      esperar(rs.every((r) => !r.error), JSON.stringify(rs));
+      const cs = await cargosDe();
+      const [u3, u4, u5] = await Promise.all(['Casa 3', 'Casa 4', 'Casa 5'].map(unidad));
+      esperar(cs.filter((x) => x.unidadId === u3.id && x.tipo === 'PROPORCIONAL').length === 1, 'Casa 3 sin proporcional');
+      esperar(!cs.some((x) => x.unidadId === u4.id || x.unidadId === u5.id), 'Casa 4 o 5 con cargo');
+    });
+    await prueba('Cuota manual del mes en Casa 5 («Cuota de mantenimiento …», mantenimiento interno)', async () => {
+      const u5 = await unidad('Casa 5');
+      await ok(sa.db('Cargo', 'create', { input: { condominioId: X.entregas, unidadId: u5.id, concepto: `Cuota de mantenimiento ${mesNombre}`, monto: 900, vence: `${periodo}-10`, periodo, tipo: 'MANT_INTERNO' } }));
+    });
+    await prueba('Generar cuotas del mes: solo la Casa 4 (entregada antes); 1, 2 y 3 por entrega, 5 por cuota manual', async () => {
+      const r = await ok(sa.admin('generarCargos', { condominioId: X.entregas, periodo }));
+      const motivos = Object.fromEntries((r.saltadas ?? []).map((s) => [s.unidad, s.motivo]));
+      esperar(r.creados === 1 && motivos['Casa 1'] === 'entrega' && motivos['Casa 2'] === 'entrega' && motivos['Casa 3'] === 'entrega' && motivos['Casa 5'] === 'manual', JSON.stringify(r));
+      const u4 = await unidad('Casa 4');
+      esperar((await cargosDe()).some((x) => x.id === `${u4.id}#${periodo}#cuota` && x.monto === 900), 'Casa 4 sin cuota completa');
+      return JSON.stringify(motivos);
+    });
+    await prueba('Ninguna casa queda con dos cuotas del mes', async () => {
+      const cs = await cargosDe();
+      const porUnidad = {};
+      for (const x of cs.filter((y) => y.periodo === periodo && /cuota/i.test(y.concepto))) porUnidad[x.unidadId] = (porUnidad[x.unidadId] ?? 0) + 1;
+      esperar(Object.values(porUnidad).every((n) => n === 1), JSON.stringify(porUnidad));
+    });
+  }
   await prueba('Cargo extraordinario a Casa 1', async () => {
     const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[0], concepto: 'Multa por ruido', monto: 500, vence: manana, periodo } }));
     X.multa = c.id;
