@@ -490,7 +490,9 @@ try {
       const u = await unidad('Casa 1');
       const cp = (await cargosDe()).filter((x) => x.unidadId === u.id);
       esperar(cp.length === 1 && cp[0].tipo === 'PROPORCIONAL' && cp[0].monto === esperado && cp[0].periodo === periodo, JSON.stringify(cp));
-      return `entrega ${entrega} → $${esperado}`;
+      // Sin día de vencimiento de cuotas: tiene todo el mes de la entrega para pagarla.
+      esperar(cp[0].vence === `${periodo}-${String(diasMes).padStart(2, '0')}`, `vence ${cp[0].vence}`);
+      return `entrega ${entrega} → $${esperado}, vence ${cp[0].vence}`;
     });
     await prueba('Alta desmarcando la proporcional: no se cobra nada ese mes', async () => {
       const [r] = await ok(sa.admin('residentes.importar', { condominioId: X.entregas, filas: [{ numero: '2', fechaEntrega: entrega, proporcional: false }], enviarCorreo: false }));

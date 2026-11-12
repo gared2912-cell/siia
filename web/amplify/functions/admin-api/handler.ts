@@ -2541,7 +2541,7 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
           porClave.set(claveUnidad(etiqueta), u);
           r.unidad = 'creada';
           if (proporcional) {
-            const cp = cargoProporcional(cuota, fechaEntrega!, c!.diaVencimiento);
+            const cp = cargoProporcional(cuota, fechaEntrega!);
             if (cp.monto > 0) {
               await put('Cargo', {
                 id: `proporcional#${u.id}#${cp.periodo}`,

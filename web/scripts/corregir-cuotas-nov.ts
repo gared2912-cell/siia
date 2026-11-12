@@ -51,13 +51,13 @@ for (const u of [...unidades].sort((a, b) => String(a.etiqueta).localeCompare(St
   const pendientes = delMes.filter((x) => x.estado === 'PENDIENTE');
   if (pagados.length) {
     for (const x of pendientes) await cancelar(x, `Duplicada: la cuota de ${PERIODO} ya está pagada («${pagados[0].concepto}»).`);
-    const cp = cargoProporcional(cuota, entrega, c.diaVencimiento);
+    const cp = cargoProporcional(cuota, entrega);
     filas.push(
       `${u.etiqueta} · entrega ${entrega} · ${desc}\n    → ${pendientes.length ? `cancelo ${pendientes.map((x) => `«${x.concepto}»`).join(', ')}; ` : ''}respeto lo pagado (${money(pagados[0].monto)}; la proporcional sería ${money(cp.monto)}).`,
     );
     continue;
   }
-  const cp = cargoProporcional(cuota, entrega, c.diaVencimiento);
+  const cp = cargoProporcional(cuota, entrega);
   for (const x of pendientes) await cancelar(x, `Reemplazada por la cuota proporcional de entrega (${entrega}).`);
   if (APLICAR)
     await put('Cargo', {

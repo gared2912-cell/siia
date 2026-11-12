@@ -385,7 +385,7 @@ async function crear(T, password) {
     const total = new Date(Date.UTC(a, m, 0)).getUTCDate();
     const dias = total - d + 1;
     const mes = new Date(Date.UTC(a, m - 1, 15)).toLocaleDateString('es-MX', { month: 'long', timeZone: 'UTC' });
-    return { monto: Math.round(((cuota * dias) / total) * 100) / 100, periodo: fecha.slice(0, 7), concepto: `Cuota proporcional ${mes} ${a} (entrega ${d} de ${mes})`, vence: `${addMonths(fecha.slice(0, 7), 1)}-10` };
+    return { monto: Math.round(((cuota * dias) / total) * 100) / 100, periodo: fecha.slice(0, 7), concepto: `Cuota proporcional ${mes} ${a} (entrega ${d} de ${mes})`, vence: `${fecha.slice(0, 7)}-${pad(total)}` }; // todo el mes de la entrega para pagarla
   };
 
   // Personas (50 residentes)

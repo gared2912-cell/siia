@@ -446,7 +446,7 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
   const ofrecerProporcional = !!f.numero.trim() && !existe && cuota > 0 && puede('finanzas', 'editar');
   const conProporcional = ofrecerProporcional && proporcional;
   const entrega = f.fechaEntrega || (conProporcional ? hoy() : '');
-  const cp = conProporcional && entrega ? cargoProporcional(cuota, entrega, condo?.diaVencimiento) : null;
+  const cp = conProporcional && entrega ? cargoProporcional(cuota, entrega) : null;
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const correo = f.correo.trim().toLowerCase();
@@ -493,8 +493,8 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
             {proporcional && (
               <>
                 <p className="small muted" style={{ margin: 0 }}>
-                  Se cobra la cuota de mantenimiento solo por los días desde la entrega hasta fin de mes{f.fechaEntrega ? '' : ' (sin fecha de entrega se toma hoy)'}. La
-                  cuota completa se cobra sola desde el mes siguiente.
+                  Se cobra la cuota de mantenimiento solo por los días desde la entrega hasta fin de mes{f.fechaEntrega ? '' : ' (sin fecha de entrega se toma hoy)'}. Tiene todo
+                  ese mes para pagarla; la cuota completa se cobra sola desde el mes siguiente.
                 </p>
                 {cp ? (
                   <div className="proporcional-calculo">

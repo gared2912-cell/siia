@@ -623,7 +623,7 @@ function NuevoCargo({ onClose, onDone, cargos }: { onClose: () => void; onDone: 
   const { run, busy } = useAction();
 
   const calculo = pr.entrega && Number(pr.cuota) > 0 ? cuotaProporcional(Number(pr.cuota), pr.entrega) : null;
-  const venceSugerido = (entrega: string) => cargoProporcional(1, entrega, condo?.diaVencimiento).vence;
+  const venceSugerido = (entrega: string) => cargoProporcional(1, entrega).vence;
   const conceptoSugerido = (entrega: string) => cargoProporcional(1, entrega).concepto;
   const cambiarPr = (cambio: Partial<typeof pr>) => {
     const n = { ...pr, ...cambio };
