@@ -739,6 +739,26 @@ function conEdicion(actual: Item, nuevos: Item, m: { motivo: string; detalle: st
   return { ...nuevos, ediciones: JSON.stringify([...edicionesDe(actual.ediciones), e]) };
 }
 
+/** Nota «⚠ Revisar» de un cargo (JSON guardado como texto). */
+function revisionDe(c: Item): Item | null {
+  let r = c.revision;
+  for (let k = 0; k < 2 && typeof r === 'string'; k++) {
+    try {
+      r = JSON.parse(r);
+    } catch {
+      return null;
+    }
+  }
+  return r && typeof r === 'object' ? r : null;
+}
+/** Marca como resuelta la nota pendiente del cargo (aprobada tal cual, o corregida al editar o cancelar). Vacío si no hay. */
+function revisionResuelta(c: Item, estado: 'APROBADA' | 'CORREGIDA'): { revision?: string } {
+  const r = revisionDe(c);
+  if (r?.estado !== 'PENDIENTE') return {};
+  const f = firmanteActual()!;
+  return { revision: JSON.stringify({ ...r, estado, resueltaEn: now(), resueltaPor: { id: f.id, nombre: f.nombre, email: f.email ?? null } }) };
+}
+
 /** Suma (o resta, con negativo) al saldo a favor de la unidad; nunca lo deja negativo. */
 async function moverSaldoFavor(unidadId: string, delta: number) {
   if (!delta) return;
@@ -881,7 +901,18 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
       if (pagos.some((x) => x.estado === 'EN_REVISION' && (x.cargoIds ?? []).includes(actual!.id)))
         fail('Este cargo tiene un comprobante en revisión. Apruébalo o recházalo antes de cambiar el monto.');
     }
-    return update('Cargo', { id: actual!.id }, conEdicion(actual!, nuevos, m, 'EDITAR'));
+    return update('Cargo', { id: actual!.id }, { ...conEdicion(actual!, nuevos, m, 'EDITAR'), ...revisionResuelta(actual!, 'CORREGIDA') });
+  },
+
+  // «⚠ Revisar»: la administración revisó la nota del cargo y lo deja como está.
+  async 'cargos.revisar'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const c = await get('Cargo', { id: str(p.id, 200) });
+    if (!c) fail('Cargo no encontrado.');
+    exigirCondo(yo, c!.condominioId);
+    const r = revisionResuelta(c!, 'APROBADA');
+    if (!r.revision) fail('Este cargo no tiene nada por revisar.');
+    return update('Cargo', { id: c!.id }, r);
   },
 
   // Cancelar uno o varios cargos pendientes (p. ej. una cuota extraordinaria completa) con su motivo.
@@ -898,7 +929,7 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
     }
     let cancelados = 0;
     for (const c of cargos.filter((x) => x.estado === 'PENDIENTE')) {
-      await update('Cargo', { id: c.id }, conEdicion(c, { estado: 'CANCELADO' }, m, 'CANCELAR'), { estado: 'PENDIENTE' }).catch(() => undefined);
+      await update('Cargo', { id: c.id }, { ...conEdicion(c, { estado: 'CANCELADO' }, m, 'CANCELAR'), ...revisionResuelta(c, 'CORREGIDA') }, { estado: 'PENDIENTE' }).catch(() => undefined);
       cancelados++;
     }
     return { cancelados };

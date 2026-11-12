@@ -72,6 +72,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const bloqueado = useBloqueoEdicion();
   const [historialDe, setHistorialDe] = useState<string | null>(null);
   const [filtroUnidad, setFiltroUnidad] = useState('');
+  const [soloRevisar, setSoloRevisar] = useState(false);
   const { run, busy } = useAction();
 
   if (loading && !data) return <Loading />;
@@ -96,8 +97,10 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
   const amenidadesPend = reservasPorAprobar(data!.reservas, pagos).length;
   const revision = pagos.filter((p) => p.estado === 'EN_REVISION').sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const procesados = pagos.filter((p) => p.estado !== 'EN_REVISION').sort((a, b) => String(b.validadoEn ?? b.createdAt).localeCompare(String(a.validadoEn ?? a.createdAt)));
+  const porRevisar = cargos.filter((c) => revisionDe(c)?.estado === 'PENDIENTE');
   const cargosVista = cargos
     .filter((c) => !filtroUnidad || c.unidadId === filtroUnidad)
+    .filter((c) => !soloRevisar || revisionDe(c)?.estado === 'PENDIENTE')
     .sort((a, b) => String(b.periodo ?? '').localeCompare(String(a.periodo ?? '')) || etiqueta(a.unidadId).localeCompare(etiqueta(b.unidadId), 'es', { numeric: true }));
 
   const rechazar = (p: Pago) => {
@@ -337,6 +340,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
               ))}
             </select>
           </div>
+          {porRevisar.length > 0 && (
+            <button type="button" className={`revisar-filtro${soloRevisar ? ' activo' : ''}`} onClick={() => setSoloRevisar(!soloRevisar)}>
+              ⚠ {porRevisar.length} {porRevisar.length === 1 ? 'cargo' : 'cargos'} por revisar{soloRevisar ? ' · ver todos' : ''}
+            </button>
+          )}
           {cargosVista.length ? (
             <Tarjetas>
               {cargosVista.map((c) => {
@@ -353,6 +361,11 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
                         <strong>{money(c.monto)}</strong>
                         <Badge estado={vencido ? 'VENCIDO' : c.estado}>{vencido ? 'Vencido' : undefined}</Badge>
                         {edicionesDe(c.ediciones).length > 0 && <span className="badge">Editado</span>}
+                        {revisionDe(c)?.estado === 'PENDIENTE' && (
+                          <span className="badge revisar" title={revisionDe(c)!.nota}>
+                            ⚠ Revisar
+                          </span>
+                        )}
                       </>
                     }
                   />
@@ -475,6 +488,13 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             />
             <Firma item={fichaCargo} alta="Generado por" />
             <HistorialEdiciones item={fichaCargo} />
+            <RevisionCargo
+              c={fichaCargo}
+              puedeResolver={gestiona && fichaCargo.estado === 'PENDIENTE'}
+              onAprobar={() => run(() => adminCall('cargos.revisar', { id: fichaCargo.id }).then(() => (setFichaCargo(null), reload(true))), 'Listo: el cargo queda como está')}
+              onCorregir={() => (setEditarCargo(fichaCargo), setFichaCargo(null))}
+              busy={busy}
+            />
             {valida && fichaCargo.estado === 'PENDIENTE' && favorDe(fichaCargo.unidadId) > 0 && (
               <div className="alert small" style={{ margin: 0 }}>
                 <p style={{ margin: '0 0 8px' }}>
@@ -777,6 +797,50 @@ function NuevoCargo({ onClose, onDone, cargos }: { onClose: () => void; onDone: 
         )}
       </form>
     </Modal>
+  );
+}
+
+/** Nota «⚠ Revisar» de un cargo (JSON guardado como texto). */
+type Revision = { nota: string; creadaEn?: string; estado: 'PENDIENTE' | 'APROBADA' | 'CORREGIDA'; resueltaEn?: string; resueltaPor?: { nombre?: string } };
+function revisionDe(c: { revision?: unknown }): Revision | null {
+  let r = c.revision;
+  for (let k = 0; k < 2 && typeof r === 'string'; k++) {
+    try {
+      r = JSON.parse(r);
+    } catch {
+      return null;
+    }
+  }
+  return r && typeof r === 'object' && typeof (r as Revision).nota === 'string' ? (r as Revision) : null;
+}
+
+/** En la ficha del cargo: la nota «⚠ Revisar» con «Está bien» (lo deja como está) o «Corregir» (abre Editar). */
+function RevisionCargo({ c, puedeResolver, onAprobar, onCorregir, busy }: { c: Cargo; puedeResolver: boolean; onAprobar: () => void; onCorregir: () => void; busy: boolean }) {
+  const r = revisionDe(c);
+  if (!r) return null;
+  if (r.estado !== 'PENDIENTE')
+    return (
+      <p className="small muted" style={{ margin: 0 }}>
+        ✓ Revisado: {r.estado === 'APROBADA' ? 'se dejó como estaba' : 'se corrigió'}
+        {r.resueltaPor?.nombre ? ` · ${r.resueltaPor.nombre}` : ''}
+        {r.resueltaEn ? ` · ${fecha(r.resueltaEn.slice(0, 10))}` : ''}
+      </p>
+    );
+  return (
+    <div className="revisar-nota">
+      <strong>⚠ Revisar</strong>
+      <p>{r.nota}</p>
+      {puedeResolver && (
+        <div className="row-actions">
+          <button className="btn-app sm" disabled={busy} onClick={onAprobar}>
+            Está bien
+          </button>
+          <button className="btn-app sm secondary" disabled={busy} onClick={onCorregir}>
+            Corregir
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

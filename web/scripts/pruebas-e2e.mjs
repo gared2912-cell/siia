@@ -566,6 +566,30 @@ try {
     await ok(sa.admin('cargos.cancelar', { id: X.cargoEditado, motivo: 'AJUSTE' }));
     return '2 ediciones en el historial, sin correos para el administrador';
   });
+  // «⚠ Revisar»: nota interna de la administración sobre un cargo (no es una edición; el residente no la ve).
+  const conRevision = async (id, nota) => {
+    const { Item } = await ddb.send(new GetCommand({ TableName: T('Cargo'), Key: { id } }));
+    await ddb.send(new PutCommand({ TableName: T('Cargo'), Item: { ...Item, revision: JSON.stringify({ nota, creadaEn: new Date().toISOString(), estado: 'PENDIENTE' }) } }));
+  };
+  await prueba('«⚠ Revisar»: el residente no ve la nota; la contadora la aprueba y el cargo queda igual', async () => {
+    await conRevision(X.multa, 'Monto distinto al reglamento: revisar');
+    const e = await ok(r1.portal('finanzas.estadoCuenta'));
+    const suyo = e.cargos.find((c) => c.id === X.multa);
+    esperar(suyo && !('revision' in suyo), 'el residente ve la nota');
+    await bloqueado(cs.admin('cargos.revisar', { id: X.multa }));
+    const r = await ok(ct.admin('cargos.revisar', { id: X.multa }));
+    const rev = JSON.parse(r.revision);
+    esperar(rev.estado === 'APROBADA' && rev.resueltaPor?.nombre && r.monto === 500 && !jsonLista(r.ediciones).length, JSON.stringify(rev));
+    await bloqueado(ct.admin('cargos.revisar', { id: X.multa }));
+    return 'aprobada sin contar como edición';
+  });
+  await prueba('«⚠ Revisar»: corregir el cargo marca la nota como corregida', async () => {
+    const c = await ok(ct.db('Cargo', 'create', { input: { condominioId: X.robles, unidadId: X.unidadesRobles[1], concepto: 'Cuota proporcional de prueba', monto: 165, vence: manana, tipo: 'PROPORCIONAL' } }));
+    await conRevision(c.id, 'Con la fecha de entrega, la proporcional calculada es $188.71.');
+    const e = await ok(ct.admin('cargos.editar', { id: c.id, concepto: 'Cuota proporcional de prueba', monto: 188.71, vence: manana, motivo: 'ERROR_CAPTURA', detalle: 'Monto según fecha de entrega' }));
+    esperar(e.monto === 188.71 && JSON.parse(e.revision).estado === 'CORREGIDA', e.revision);
+    await ok(sa.admin('cargos.cancelar', { id: c.id, motivo: 'AJUSTE' }));
+  });
   await prueba('Residente ve su saldo en Inicio y Finanzas', async () => {
     const e = await hasta(() => ok(r1.portal('finanzas.estadoCuenta')), (x) => x.saldo === 2000);
     esperar(e.saldo === 2000 && e.cargos.length === 2 && e.datosPago?.includes('CLABE'), JSON.stringify({ saldo: e.saldo, cargos: e.cargos.length }));

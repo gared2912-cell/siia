@@ -45,6 +45,7 @@ const RESUMEN_ACCION: Record<string, string> = {
   cargoExtraordinario: 'Generó un cargo extraordinario',
   'cargos.editar': 'Editó un cargo (con motivo)',
   'cargos.cancelar': 'Canceló cargos (con motivo)',
+  'cargos.revisar': 'Revisó un cargo marcado «⚠ Revisar» y lo dejó como está',
   'egresos.guardar': 'Registró o editó un egreso',
   'egresos.borrar': 'Eliminó un egreso',
   'saldos.inicial': 'Capturó el saldo inicial del mes',

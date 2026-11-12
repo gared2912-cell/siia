@@ -4427,3 +4427,38 @@ table.tbl {
   border-radius: 10px;
   background: #fbfdfc;
 }
+
+/* «⚠ Revisar»: nota discreta de la administración sobre un cargo (FinanzasAdmin.tsx RevisionCargo) */
+.badge.revisar {
+  background: #fff4dc;
+  color: #8a5a00;
+}
+.revisar-filtro {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 4px 12px;
+  border: 1px solid #f1d9a6;
+  border-radius: 999px;
+  background: #fffaf0;
+  color: #8a5a00;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.revisar-filtro.activo {
+  background: #fff4dc;
+}
+.revisar-nota {
+  border: 1px solid #f1d9a6;
+  border-left: 4px solid #e0a526;
+  border-radius: 10px;
+  background: #fffaf0;
+  padding: 10px 12px;
+  color: #5c4100;
+}
+.revisar-nota p {
+  margin: 4px 0 8px;
+  font-size: 0.88rem;
+}

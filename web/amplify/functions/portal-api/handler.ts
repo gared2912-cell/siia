@@ -58,7 +58,8 @@ const pub = (c: Item) => ({
   suspendido: !operando(c),
 });
 
-const sinPrivados = ({ userId, __typename, ...rest }: Item) => rest;
+// revision: nota interna de la administración sobre un cargo («⚠ Revisar»); el residente no la ve.
+const sinPrivados = ({ userId, __typename, revision, ...rest }: Item) => rest;
 /** Etapas del seguimiento de un incidente (JSON guardado como texto, a veces dos veces). */
 function pasosIncidente(v: unknown): Item[] {
   let h = v;

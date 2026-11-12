@@ -172,6 +172,10 @@ const schema = a
         origenCargoId: a.string(),
         // Historial de ediciones con motivo (shared/ediciones.ts); solo lo escribe admin-api.
         ediciones: a.json(),
+        // Nota «⚠ Revisar» para la administración (p. ej. un monto capturado a mano que no coincide con el cálculo):
+        // { nota, creadaEn, creadaPor, estado: PENDIENTE | APROBADA | CORREGIDA, resueltaEn, resueltaPor }.
+        // No cuenta como edición. La resuelve admin-api (cargos.revisar, o al editar/cancelar el cargo). El residente no la ve.
+        revision: a.json(),
       })
       .secondaryIndexes((i) => [
         i('unidadId').name('byUnidad').queryField('cargosPorUnidad'),
