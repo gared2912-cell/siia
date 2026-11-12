@@ -1,5 +1,7 @@
 // Datos de demostración para el portal de residentes (staging).
-// Crea 2 condominios, 50 unidades, 50 residentes (+2 vigilantes) y datos en todos los módulos.
+// Crea 2 condominios (24 casas y 22 departamentos), residentes, 2 vigilantes, 1 proveedor y datos en todos los módulos:
+// cuotas automáticas, entregas a mitad de mes con cuota proporcional, fondos y apartados, egresos, check-in de
+// proveedores, asistencia técnica, mascotas rechazadas, etc. Laula y cualquier condominio sin id «demo-*» no se tocan.
 //
 //   DEMO_PASSWORD='…' npm run demo:crear     → borra la demo anterior y crea una nueva
 //   npm run demo:limpiar                     → borra todo lo de demostración
@@ -233,7 +235,7 @@ async function limpiar(T) {
   } while (token);
   console.log(`  usuarios: ${borrados}`);
   // Registros
-  const modelos = ['Condominio', 'Unidad', 'Perfil', 'Cargo', 'Pago', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'Aviso', 'Mascota'];
+  const modelos = ['Condominio', 'Unidad', 'Perfil', 'Cargo', 'Pago', 'Egreso', 'SaldoMensual', 'CorteAccesos', 'Comunicado', 'Encuesta', 'Voto', 'Mensaje', 'Incidente', 'Mantenimiento', 'Amenidad', 'Reserva', 'Visita', 'TurnoVigilancia', 'Aviso', 'Mascota', 'ReporteProveedor', 'AsistenciaProveedor', 'Actividad'];
   for (const m of modelos) {
     const keyName = m === 'Perfil' ? 'userId' : 'id';
     const campo = m === 'Condominio' ? 'id' : 'condominioId';
@@ -266,16 +268,24 @@ async function limpiar(T) {
     }
     if (keys.length) console.log(`  ${m}: ${keys.length}`);
   }
-  // Archivos
-  let ContinuationToken;
+  // Solicitudes de asistencia técnica de ejemplo (no llevan condominioId: se reconocen por el correo)
+  {
+    const r = await ddb.send(new ScanCommand({ TableName: T('Cotizacion'), FilterExpression: 'contains(correo, :dom)', ExpressionAttributeValues: { ':dom': `@${DOMINIO}` }, ProjectionExpression: 'id' }));
+    for (const k of r.Items ?? []) await ddb.send(new BatchWriteCommand({ RequestItems: { [T('Cotizacion')]: [{ DeleteRequest: { Key: k } }] } }));
+    if (r.Items?.length) console.log(`  Cotizacion: ${r.Items.length}`);
+  }
+  // Archivos (de residentes con prefijo demo- y todo lo de condominios/demo-*)
   let archivos = 0;
-  do {
-    const r = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: 'residentes/', ContinuationToken }));
-    const demo = (r.Contents ?? []).filter((o) => o.Key.split('/').pop().startsWith('demo-'));
-    if (demo.length) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: demo.map((o) => ({ Key: o.Key })) } }));
-    archivos += demo.length;
-    ContinuationToken = r.NextContinuationToken;
-  } while (ContinuationToken);
+  for (const Prefix of ['residentes/', 'condominios/demo-']) {
+    let ContinuationToken;
+    do {
+      const r = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix, ContinuationToken }));
+      const demo = (r.Contents ?? []).filter((o) => Prefix !== 'residentes/' || o.Key.split('/').pop().startsWith('demo-'));
+      if (demo.length) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: demo.map((o) => ({ Key: o.Key })) } }));
+      archivos += demo.length;
+      ContinuationToken = r.NextContinuationToken;
+    } while (ContinuationToken);
+  }
   console.log(`  archivos: ${archivos}`);
 }
 
@@ -309,7 +319,18 @@ const CONDOS = [
     datosPago:
       'Banco: BBVA México\nBeneficiario: Asociación de Colonos Residencial Los Encinos, A.C.\nCLABE: 012 680 01234567891 2\nReferencia: tu número de casa (ej. C14)\nEnvía tu comprobante desde Finanzas › Registrar pago.',
     telefonoCaseta: '442 215 3380',
-    unidades: Array.from({ length: 30 }, (_, i) => ({ etiqueta: `Casa ${i + 1}`, cuota: i >= 24 ? 1650 : 1450 })),
+    tipoUnidad: 'CASA',
+    banco: 'BBVA México',
+    beneficiario: 'Asociación de Colonos Residencial Los Encinos, A.C.',
+    clabe: '012680012345678912',
+    referenciaPago: 'Tu número de casa (ej. C14)',
+    cuotaMensual: 1450,
+    recargoActivo: true,
+    recargoMonto: 150,
+    mensajeComprobante: '¡Gracias! Recibimos tu comprobante. Lo revisamos en un máximo de 48 horas hábiles.',
+    categoriasIngreso: [{ key: 'P-alberca', label: 'Mantenimiento de alberca', fondo: true }],
+    apartado: { id: 'A-pintura', nombre: 'Pintura de fachadas 2027', descripcion: 'Acordado en asamblea: $15,000 al mes durante 6 meses.', monto: 15000 },
+    unidades: Array.from({ length: 24 }, (_, i) => ({ etiqueta: `Casa ${i + 1}`, cuota: 1450 })),
   },
   {
     id: 'demo-alameda',
@@ -320,7 +341,16 @@ const CONDOS = [
     datosPago:
       'Banco: Banorte\nBeneficiario: Condominio Torre Alameda\nCLABE: 072 680 00987654321 0\nReferencia: número de departamento (ej. 302)',
     telefonoCaseta: '442 690 1127',
-    unidades: [1, 2, 3, 4].flatMap((piso) => [1, 2, 3, 4, 5].map((n) => ({ etiqueta: `Depto ${piso}0${n}`, cuota: n === 5 ? 2400 : 2100 }))),
+    tipoUnidad: 'DEPARTAMENTO',
+    banco: 'Banorte',
+    beneficiario: 'Condominio Torre Alameda',
+    clabe: '072680009876543210',
+    referenciaPago: 'Número de departamento (ej. 302)',
+    cuotaMensual: 2100,
+    recargoActivo: false,
+    categoriasIngreso: [],
+    apartado: { id: 'A-elevador', nombre: 'Modernización de elevadores', descripcion: 'Fondo para cambiar el control del elevador 2.', monto: 25000 },
+    unidades: [...[1, 2, 3, 4].flatMap((piso) => [1, 2, 3, 4, 5].map((n) => ({ etiqueta: `Depto ${piso}0${n}`, cuota: 2100 }))), { etiqueta: 'Depto 501', cuota: 2100 }, { etiqueta: 'Depto 502', cuota: 2100 }],
   },
 ];
 
@@ -333,13 +363,30 @@ async function crear(T, password) {
   const mesNombre = (p) => new Date(`${p}-15T12:00:00Z`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
 
   // Condominios y unidades
+  // Escenarios de entrega (reglas de cuotas del 11 nov 2026, shared/cuotas.ts):
+  //  - las 2 últimas unidades de cada condominio se entregaron ESTE mes (después del día 1): solo cuota proporcional;
+  //  - la antepenúltima se entregó a mitad del mes PASADO: proporcional el mes pasado y completa este mes;
+  //  - el resto, entregadas hace tiempo: cuota completa cada mes.
+  const dHoy = Number(hoy.slice(8));
+  const diaEntrega = (n) => `${P0}-${pad(Math.max(2, Math.min(dHoy, n)))}`;
   const unidades = [];
   for (const c of CONDOS) {
-    for (const u of c.unidades) {
-      const un = { id: randomUUID(), condominioId: c.id, etiqueta: u.etiqueta, cuota: u.cuota, createdAt: at(addDays(hoy, -120), 10) };
-      unidades.push(un);
-    }
+    c.unidades.forEach((u, i) => {
+      const resto = c.unidades.length - i;
+      const escenario = resto <= 2 ? 'entregaMes' : resto === 3 ? 'entregaAnterior' : 'antigua';
+      const fechaEntrega = escenario === 'entregaMes' ? diaEntrega(resto === 2 ? 4 : 7) : escenario === 'entregaAnterior' ? `${periodos[1]}-18` : addDays(hoy, -int(150, 700));
+      const createdAt = escenario === 'antigua' ? at(addDays(hoy, -120), 10) : at(fechaEntrega, 11);
+      unidades.push({ id: randomUUID(), condominioId: c.id, etiqueta: u.etiqueta, cuota: u.cuota, fechaEntrega, createdAt, escenario });
+    });
   }
+  /** Cuota proporcional: cuota × días del día de entrega a fin de mes (igual que shared/finanzas.ts cuotaProporcional). */
+  const proporcional = (cuota, fecha) => {
+    const [a, m, d] = fecha.split('-').map(Number);
+    const total = new Date(Date.UTC(a, m, 0)).getUTCDate();
+    const dias = total - d + 1;
+    const mes = new Date(Date.UTC(a, m - 1, 15)).toLocaleDateString('es-MX', { month: 'long', timeZone: 'UTC' });
+    return { monto: Math.round(((cuota * dias) / total) * 100) / 100, periodo: fecha.slice(0, 7), concepto: `Cuota proporcional ${mes} ${a} (entrega ${d} de ${mes})`, vence: `${addMonths(fecha.slice(0, 7), 1)}-10` };
+  };
 
   // Personas (50 residentes)
   const usados = new Set();
@@ -354,11 +401,11 @@ async function crear(T, password) {
     usados.add(email);
     return { nombre: n, email, telefono: `${pick(['442', '446'])} ${int(100, 999)} ${pad(int(0, 9999), 4)}` };
   };
-  const ocupadas = shuffle(unidades).slice(0, 45); // 45 unidades con residente registrado; 5 sin registrar
+  const ocupadas = shuffle(unidades).slice(0, unidades.length - 4); // casi todas con residente registrado; 4 sin registrar
   const residentes = [];
-  ocupadas.forEach((u, i) => residentes.push({ ...persona(), unidad: u, estado: i === 44 ? 'SUSPENDIDO' : 'APROBADO' }));
+  ocupadas.forEach((u, i) => residentes.push({ ...persona(), unidad: u, estado: i === ocupadas.length - 1 ? 'SUSPENDIDO' : 'APROBADO' }));
   // 2 familiares adicionales en unidades ya ocupadas
-  for (const u of shuffle(ocupadas.slice(0, 40)).slice(0, 2)) residentes.push({ ...persona(), unidad: u, estado: 'APROBADO' });
+  for (const u of shuffle(ocupadas.slice(0, ocupadas.length - 5)).slice(0, 2)) residentes.push({ ...persona(), unidad: u, estado: 'APROBADO' });
   // 3 residentes que la administración ya dio de alta y recibieron sus accesos, pero aún no entran
   const libres = unidades.filter((u) => !ocupadas.includes(u));
   for (const u of libres.slice(0, 3)) residentes.push({ ...persona(), unidad: u, estado: 'APROBADO', invitado: true });
@@ -418,21 +465,34 @@ async function crear(T, password) {
     const c = condoDe(u);
     const r = principal(u);
     const perfil = r ? pick(['puntual', 'puntual', 'puntual', 'puntual', 'puntual', 'puntual', 'atrasado', 'atrasado', 'moroso']) : pick(['puntual', 'moroso']);
-    const cargos = periodos.map((p) => ({
-      id: `${u.id}#${p}#cuota`,
-      condominioId: c.id,
-      unidadId: u.id,
-      concepto: `Cuota de mantenimiento ${mesNombre(p)}`,
-      periodo: p,
-      monto: u.cuota,
-      vence: `${p}-10`,
-      estado: 'PENDIENTE',
-      createdAt: at(`${p}-01`, 7),
-    }));
-    if (c.id === 'demo-alameda')
-      cargos.push({ id: randomUUID(), condominioId: c.id, unidadId: u.id, concepto: 'Cuota extraordinaria – impermeabilización de azotea', periodo: periodos[1], monto: 3500, vence: `${periodos[1]}-25`, estado: 'PENDIENTE', createdAt: at(`${periodos[1]}-05`, 9) });
-    if (c.id === 'demo-encinos' && chance(0.12))
-      cargos.push({ id: randomUUID(), condominioId: c.id, unidadId: u.id, concepto: pick(['Multa por estacionarse en área común', 'Multa por ruido después de las 23:00', 'Reposición de tarjeta de acceso']), periodo: periodos[1], monto: pick([250, 500, 500]), vence: `${periodos[2]}-05`, estado: 'PENDIENTE', createdAt: at(`${periodos[1]}-20`, 11) });
+    // Cuota completa solo en los meses posteriores al de la entrega; el mes de entrega lleva la proporcional.
+    const mesEntrega = u.fechaEntrega.slice(0, 7);
+    const cargos = periodos
+      .filter((p) => p > mesEntrega || (p === mesEntrega && u.fechaEntrega.endsWith('-01')))
+      .map((p) => ({
+        id: `${u.id}#${p}#cuota`,
+        condominioId: c.id,
+        unidadId: u.id,
+        concepto: `Cuota de mantenimiento ${mesNombre(p)}`,
+        periodo: p,
+        monto: u.cuota,
+        vence: `${p}-10`,
+        estado: 'PENDIENTE',
+        tipo: 'CUOTA',
+        createdAt: at(`${p}-01`, 7),
+      }));
+    if (u.escenario !== 'antigua') {
+      const cp = proporcional(u.cuota, u.fechaEntrega);
+      cargos.unshift({ id: `proporcional#${u.id}#${cp.periodo}`, condominioId: c.id, unidadId: u.id, concepto: cp.concepto, periodo: cp.periodo, monto: cp.monto, vence: cp.vence, estado: 'PENDIENTE', tipo: 'PROPORCIONAL', createdAt: u.createdAt });
+      u.notas = `Entregada el ${u.fechaEntrega}: el mes de entrega paga la cuota proporcional (${mxn(cp.monto)}); desde el mes siguiente, la completa.`;
+    }
+    if (c.id === 'demo-alameda' && u.escenario === 'antigua')
+      cargos.push({ id: `extra#impermeab#${u.id}`, condominioId: c.id, unidadId: u.id, concepto: 'Cuota extraordinaria – impermeabilización de azotea', periodo: periodos[1], monto: 3500, vence: `${periodos[1]}-25`, estado: 'PENDIENTE', tipo: 'RECAUDACION', createdAt: at(`${periodos[1]}-05`, 9) });
+    if (c.id === 'demo-encinos' && u.escenario === 'antigua' && chance(0.15))
+      cargos.push({ id: randomUUID(), condominioId: c.id, unidadId: u.id, concepto: pick(['Multa por estacionarse en área común', 'Multa por ruido después de las 23:00', 'Reposición de tarjeta de acceso']), periodo: periodos[1], monto: pick([250, 500, 500]), vence: `${periodos[2]}-05`, estado: 'PENDIENTE', tipo: 'MULTA', createdAt: at(`${periodos[1]}-20`, 11) });
+    // Cartera heredada de la administración anterior (2 casas)
+    if (c.id === 'demo-encinos' && ['Casa 3', 'Casa 11'].includes(u.etiqueta))
+      cargos.push({ id: randomUUID(), condominioId: c.id, unidadId: u.id, concepto: 'Adeudo anterior (administración previa)', periodo: periodos[0], monto: 4350, vence: `${periodos[0]}-10`, estado: 'PENDIENTE', tipo: 'CARTERA', createdAt: at(`${periodos[0]}-02`, 10) });
 
     // Cuáles se pagan según el perfil
     const pagar = cargos.filter((cg, i) => {
@@ -488,6 +548,7 @@ async function crear(T, password) {
         comprobantePath,
         cargoIds: g.map((x) => x.id),
         estado,
+        categoriaResidente: base.periodo === P0 ? 'CORRIENTE' : 'RECUPERACION',
         createdAt: at(fecha, int(8, 22), int(0, 59)),
       };
       if (estado !== 'EN_REVISION') {
@@ -496,6 +557,8 @@ async function crear(T, password) {
         pago.validadoPor = ADMIN_EMAIL;
       }
       if (estado === 'VALIDADO') {
+        pago.ajuste = 'COMPLETO';
+        pago.totalCargos = monto;
         folio[c.id]++;
         pago.folio = `R-${pad(folio[c.id], 5)}`;
         g.forEach((x) => (x.estado = 'PAGADO'));
@@ -512,9 +575,69 @@ async function crear(T, password) {
     cargos.forEach((x) => add('Cargo', x));
   }
   for (const u of unidades) add('Unidad', u);
+  for (const u of unidades) delete u.escenario;
   for (const c of CONDOS) {
-    const { unidades: _, ...rest } = c;
-    add('Condominio', { ...rest, activo: true, folioSeq: folio[c.id], createdAt: at(addDays(hoy, -130), 10) });
+    const { unidades: _, apartado, ...rest } = c;
+    const desde = `${periodos[0]}-01`;
+    add('Condominio', {
+      ...rest,
+      activo: true,
+      folioSeq: folio[c.id],
+      diaVencimiento: 10,
+      cuotaAutomatica: true,
+      diaCargo: 1,
+      cuotaAutomaticaDesde: desde,
+      recargoDesde: c.recargoActivo ? desde : undefined,
+      avisoMorosidad: 'NOTIFICACION',
+      avisoMorosidadDesde: desde,
+      apartados: [
+        {
+          id: apartado.id,
+          nombre: apartado.nombre,
+          descripcion: apartado.descripcion,
+          activo: true,
+          movimientos: periodos.map((p, i) => ({ id: `m${i + 1}`, fecha: `${p}-05`, monto: apartado.monto, nota: 'Apartado del mes', porNombre: 'Administración SIIA', en: at(`${p}-05`, 10) })),
+        },
+      ],
+      createdAt: at(addDays(hoy, -130), 10),
+    });
+    add('SaldoMensual', { id: `${c.id}#${periodos[0]}`, condominioId: c.id, periodo: periodos[0], saldoInicial: c.id === 'demo-encinos' ? 86500 : 124300, nota: 'Saldo recibido de la administración anterior.', editadoPor: ADMIN_EMAIL });
+  }
+
+  // ---------- Egresos (con evidencia; uno pagado con el fondo de multas y otros con el apartado) ----------
+  const EGRESOS = {
+    'demo-encinos': [
+      ['Poda y jardinería', 'Poda mensual de áreas verdes', 'Jardinería Hermanos Reséndiz', 6800],
+      ['Luz', 'Recibo CFE alumbrado de áreas comunes', 'CFE', 9450],
+      ['Agua', 'Recibo CEA áreas comunes', 'CEA Querétaro', 3120],
+      ['Vigilancia', 'Servicio de vigilancia 24 h', 'Seguridad Privada Bajío', 28500],
+      ['Limpieza', 'Limpieza de andadores y casa club', 'Limpieza Integral QRO', 7200],
+    ],
+    'demo-alameda': [
+      ['Servicios de mantenimiento', 'Mantenimiento mensual de elevadores', 'Schindler México', 8900],
+      ['Luz', 'Recibo CFE áreas comunes', 'CFE', 6200],
+      ['Limpieza', 'Limpieza de pasillos y lobby', 'Limpieza Integral QRO', 5400],
+      ['Vigilancia', 'Recepción y vigilancia', 'Seguridad Privada Bajío', 21000],
+    ],
+  };
+  for (const [cid, lista] of Object.entries(EGRESOS))
+    for (const p of periodos)
+      for (const [categoria, concepto, proveedor, monto] of lista) {
+        if (p === P0 && chance(0.4)) continue; // del mes en curso, solo algunos
+        const fecha = `${p}-${pad(int(3, p === P0 ? Math.max(3, Math.min(dHoy, 25)) : 25))}`;
+        const path = `condominios/${cid}/egresos/demo-${randomUUID()}.pdf`;
+        archivos.push([path, pdf([proveedor, `Factura de ejemplo · ${concepto}`, `Fecha: ${fecha}`, `Importe: $${monto.toLocaleString('en-US')} MXN`, '(Documento de ejemplo)']), 'application/pdf']);
+        add('Egreso', { id: randomUUID(), condominioId: cid, fecha, categoria, concepto: `${concepto} ${mesNombre(p)}`, proveedor, formaPago: 'Transferencia', monto: Math.round(monto * (0.95 + rnd() * 0.1)), evidencias: [{ path, nombre: `${concepto}.pdf`, tipo: 'application/pdf', tamano: 1200 }], registradoPor: ADMIN_EMAIL, registradoPorNombre: 'Administración SIIA', createdAt: at(fecha, 12) });
+      }
+  for (const [cid, fondo, categoria, concepto, monto] of [
+    ['demo-encinos', 'MULTAS', 'Mobiliario y equipo', 'Bancas nuevas para el parque (fondo de multas)', 1800],
+    ['demo-encinos', 'A-pintura', 'Servicios de mantenimiento', 'Anticipo de pintura de fachadas (apartado)', 12000],
+    ['demo-alameda', 'A-elevador', 'Servicios de mantenimiento', 'Diagnóstico del control del elevador 2 (apartado)', 9500],
+  ]) {
+    const fecha = `${periodos[1]}-21`;
+    const path = `condominios/${cid}/egresos/demo-${randomUUID()}.pdf`;
+    archivos.push([path, pdf([concepto, `Fecha: ${fecha}`, `Importe: $${monto} MXN`, '(Documento de ejemplo)']), 'application/pdf']);
+    add('Egreso', { id: randomUUID(), condominioId: cid, fecha, categoria, concepto, proveedor: 'Proveedor de ejemplo', formaPago: 'Transferencia', monto, fondo, evidencias: [{ path, nombre: 'factura.pdf', tipo: 'application/pdf', tamano: 900 }], registradoPor: ADMIN_EMAIL, registradoPorNombre: 'Administración SIIA', createdAt: at(fecha, 12) });
   }
 
   // ---------- Comunicados ----------
@@ -768,18 +891,44 @@ async function crear(T, password) {
   MASCOTAS.forEach(([nombre, especie, raza, color], i) => {
     const u = conMascota[i % conMascota.length];
     const r = principal(u);
-    const estado = i < 10 ? 'APROBADA' : i < 13 ? 'PENDIENTE' : 'RECHAZADA';
+    const estado = i < 10 ? 'APROBADA' : i < 12 ? 'PENDIENTE' : 'RECHAZADA';
     let fotoPath;
     if (i < 12) {
       fotoPath = `${carpeta(r)}/mascotas/demo-${Date.now()}-${i}.png`;
       archivos.push([fotoPath, png(pick(colores), pick(colores), 'circulo'), 'image/png']);
     }
-    add('Mascota', { id: randomUUID(), condominioId: 'demo-encinos', unidadId: u.id, userId: r.sub, nombre, especie, raza, color, fotoPath, vacunaAntirrabica: estado === 'RECHAZADA' ? undefined : addDays(hoy, -int(20, 330)), estado, extraviada: i === 2, notas: estado === 'RECHAZADA' ? 'Falta la cartilla de vacunación vigente.' : i === 2 ? 'Tiene collar rojo con placa. Responde a su nombre.' : undefined, createdAt: at(addDays(hoy, -int(1, 60)), int(9, 20)) });
+    add('Mascota', { id: randomUUID(), condominioId: 'demo-encinos', unidadId: u.id, userId: r.sub, nombre, especie, raza, color, fotoPath, vacunaAntirrabica: estado === 'RECHAZADA' ? undefined : addDays(hoy, -int(20, 330)), estado, rechazadaEn: estado === 'RECHAZADA' ? ahoraMenos((i === 12 ? 3 : 12) * 1440) : undefined, extraviada: i === 2, notas: estado === 'RECHAZADA' ? 'Falta la cartilla de vacunación vigente.' : i === 2 ? 'Tiene collar rojo con placa. Responde a su nombre.' : undefined, createdAt: at(addDays(hoy, -int(1, 60)), int(9, 20)) });
     if (i === 2) {
       for (const x of unidades.filter((y) => y.condominioId === 'demo-encinos' && principal(y) && y !== u))
         add('Aviso', { id: randomUUID(), condominioId: 'demo-encinos', unidadId: x.id, tipo: 'MASCOTA', titulo: `Mascota extraviada: ${nombre} (${raza}, ${color})`, texto: `Si la ves, avisa a caseta o a ${u.etiqueta}.`, leido: chance(0.3), createdAt: ahoraMenos(int(90, 400)) });
     }
   });
+
+  // ---------- Proveedor (check-in / check-out y reportes) ----------
+  console.log('▶ Proveedor y asistencia técnica');
+  const prov = { nombre: 'Rogelio Reséndiz Montes', email: `proveedor.jardineria@${DOMINIO}`, telefono: '442 401 2290' };
+  prov.sub = await crearUsuario(prov.email, prov.nombre, password);
+  await cognito.send(new AdminAddUserToGroupCommand({ UserPoolId: POOL, Username: prov.sub, GroupName: 'PROVEEDOR' }));
+  add('Perfil', { userId: prov.sub, email: prov.email, nombre: prov.nombre, telefono: prov.telefono, rol: 'PROVEEDOR', estado: 'APROBADO', empresa: 'Jardinería Hermanos Reséndiz', nombrePublico: 'Jardinería SIIA', servicios: ['Jardinería'], condominiosServicio: CONDOS.map((c) => c.id), createdAt: at(addDays(hoy, -90), 9) });
+  for (const c of CONDOS) {
+    for (let k = 0; k < 3; k++) {
+      const dia = addDays(hoy, -k * 7);
+      const dentro = k === 0;
+      const ent = dentro ? ahoraMenos(int(40, 150)) : at(dia, 8, int(0, 40));
+      const foto = (n) => {
+        const p = `condominios/${c.id}/proveedores/${prov.sub}/demo-${n}-${randomUUID()}.png`;
+        archivos.push([p, png(pick(colores), pick(colores), 'rect'), 'image/png']);
+        return p;
+      };
+      add('AsistenciaProveedor', { id: randomUUID(), condominioId: c.id, proveedorId: prov.sub, proveedorNombre: prov.nombre, nombrePublico: 'Jardinería SIIA', empresa: 'Jardinería Hermanos Reséndiz', estado: dentro ? 'DENTRO' : 'SALIO', entradaEn: ent, entradaFoto: foto('entrada'), entradaDescripcion: 'Poda de setos y riego de jardines.', salidaEn: dentro ? undefined : at(dia, 13, int(0, 50)), salidaFoto: dentro ? undefined : foto('salida'), salidaDescripcion: dentro ? undefined : 'Terminado; se retiró la basura verde.', createdAt: ent });
+      if (!dentro)
+        for (const destino of ['RESIDENTES', 'ADMIN'])
+          add('ReporteProveedor', { id: randomUUID(), condominioId: c.id, proveedorId: prov.sub, proveedorNombre: prov.nombre, empresa: 'Jardinería Hermanos Reséndiz', destino, tipo: 'Jardinería', descripcion: destino === 'ADMIN' ? 'Se podaron 14 setos y se detectó una fuga pequeña en el riego del jardín central.' : 'Poda y riego de áreas verdes.', fecha: dia, fotos: [], nombrePublico: 'Jardinería SIIA', createdAt: at(dia, 14) });
+    }
+  }
+  // Solicitudes de «Pide ayuda» (Asistencia técnica): una pendiente y una atendida
+  add('Cotizacion', { id: randomUUID(), origen: 'SOPORTE', estado: 'PENDIENTE', nombre: 'Elena Cabrera Ruiz', telefono: '442 555 0101', correo: `elena.cabrera@${DOMINIO}`, desarrollo: 'Residencial Los Encinos', unidad: 'Casa 9', mensaje: 'No me llegó el correo con mi contraseña.', pagina: '/ayuda/', createdAt: ahoraMenos(180) });
+  add('Cotizacion', { id: randomUUID(), origen: 'SOPORTE', estado: 'RESPONDIDA', nombre: 'Pablo Ortiz Trejo', telefono: '442 555 0202', correo: `pablo.ortiz@${DOMINIO}`, desarrollo: 'Torre Alameda', unidad: '304', mensaje: 'Cambié de celular y no puedo entrar.', pagina: '/ayuda/', respondidaEn: ahoraMenos(1300), respondidaPor: { id: 'demo', nombre: 'Administración SIIA', email: ADMIN_EMAIL }, notaRespuesta: 'Se le reenvió el acceso.', createdAt: ahoraMenos(1500) });
 
   // ---------- Escritura ----------
   console.log(`▶ Subiendo ${archivos.length} archivos a S3`);
@@ -789,7 +938,7 @@ async function crear(T, password) {
     await escribir(T, m, items);
     console.log(`  ${m}: ${items.length}`);
   }
-  return { residentes, vigilantes, unidades };
+  return { residentes, vigilantes, unidades, prov };
 }
 
 function hoyMX(iso) {
@@ -805,7 +954,7 @@ if (process.argv.includes('--limpiar')) {
 }
 const password = process.env.DEMO_PASSWORD;
 if (!password) throw new Error('Define DEMO_PASSWORD (contraseña común de las cuentas demo).');
-const { residentes, vigilantes } = await crear(T, password);
+const { residentes, vigilantes, prov } = await crear(T, password);
 console.log('\n✔ Demo creada. Cuentas de ejemplo (misma contraseña para todas):');
 const muestra = [
   ...residentes.filter((r) => r.estado === 'APROBADO' && r.unidad.condominioId === 'demo-encinos').slice(0, 3),
@@ -814,3 +963,4 @@ const muestra = [
 ];
 for (const r of muestra) console.log(`  ${r.email.padEnd(42)} ${(r.invitado ? 'INVITADO' : r.estado).padEnd(11)} ${r.unidad.etiqueta}`);
 for (const v of vigilantes) console.log(`  ${v.email.padEnd(42)} VIGILANTE   ${v.condominioId}`);
+console.log(`  ${prov.email.padEnd(42)} PROVEEDOR   ambos condominios`);
