@@ -1,7 +1,15 @@
 // Cuotas de mantenimiento: un cargo por unidad y periodo (id «<unidad>#<periodo>#cuota», nunca se duplica).
 // Las genera la administración (Finanzas › Generar cuotas del mes) o, si el condominio tiene activa la cuota
 // automática, la tarea diaria de siia-recargos el día del mes configurado (diaCargo).
-import { byIndex, put, type Item } from './db';
+//
+// Reglas de la cuota completa (acordadas el 11 nov 2026):
+// 1. Si la unidad se entregó después del día 1 del mes (o aún no se entrega), ese mes NO lleva cuota completa:
+//    lleva la proporcional, que se genera al dar de alta el departamento. Desde el mes siguiente, completa.
+// 2. Si la administración ya le cargó a mano una cuota de ese mes (proporcional o un cargo con «cuota» o
+//    «proporcional» en el concepto), no se genera la completa.
+// 3. Solo la automática: una unidad dada de alta después del día de cargo del mes no recibe la completa ese mes.
+import { byIndex, hoyMX, put, type Item } from './db';
+import { esCuotaManual, periodoDeCuota } from './finanzas';
 
 const dia = (n: unknown, def: number) => String(Math.min(Math.max(Number(n) || def, 1), 28)).padStart(2, '0');
 
@@ -18,19 +26,43 @@ export const venceCuota = (c: Item, periodo: string) => `${periodo}-${dia(c.diaV
 /** Día del mes (AAAA-MM-DD) en que se genera automáticamente la cuota del periodo. */
 export const fechaCargo = (c: Item, periodo: string) => `${periodo}-${dia(c.diaCargo, 1)}`;
 
+/** Fecha (hora de México) en que se dio de alta un registro. */
+const altaMX = (x: Item) => (x.createdAt ? hoyMX(new Date(x.createdAt)) : '');
+
+/**
+ * Por qué una unidad NO lleva la cuota completa del periodo (null = sí la lleva).
+ * `automatica`: aplica también la regla 3 (alta después del día de cargo), con la fecha de cargo del periodo.
+ */
+export function sinCuotaCompleta(u: Item, cargosUnidad: Item[], periodo: string, automatica?: { fechaCargo: string }): string | null {
+  if (u.fechaEntrega && String(u.fechaEntrega) > `${periodo}-01`) return 'entrega';
+  if (cargosUnidad.some((c) => esCuotaManual(c) && periodoDeCuota(c) === periodo)) return 'manual';
+  if (automatica && altaMX(u) > automatica.fechaCargo) return 'alta';
+  return null;
+}
+
 /** Crea la cuota del periodo para cada unidad con cuota > 0. Regresa cuántas se crearon y cuáles ya existían o no tienen cuota. */
-export async function crearCuotas(c: Item, periodo: string, opts: { vence?: string; concepto?: string } = {}) {
+export async function crearCuotas(c: Item, periodo: string, opts: { vence?: string; concepto?: string; automatica?: boolean } = {}) {
   const vence = opts.vence ?? venceCuota(c, periodo);
   // Cuota única del condominio; las unidades anteriores a esa configuración conservan su cuota propia.
   const cuotaCondo = Number(c.cuotaMensual) > 0 ? Number(c.cuotaMensual) : 0;
   const concepto = opts.concepto || conceptoCuota(periodo);
-  const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', c.id);
+  const [unidades, cargos] = await Promise.all([byIndex('Unidad', 'byCondominio', 'condominioId', c.id), byIndex('Cargo', 'byCondominio', 'condominioId', c.id)]);
+  const porUnidad = new Map<string, Item[]>();
+  for (const x of cargos) porUnidad.set(x.unidadId, [...(porUnidad.get(x.unidadId) ?? []), x]);
+  const auto = opts.automatica ? { fechaCargo: fechaCargo(c, periodo) } : undefined;
   const nuevas: Item[] = [];
+  const saltadas: { unidad: string; motivo: string }[] = [];
   let omitidos = 0;
   for (const u of unidades) {
     const monto = cuotaCondo || u.cuota;
     if (!(monto > 0)) {
       omitidos++;
+      continue;
+    }
+    const motivo = sinCuotaCompleta(u, porUnidad.get(u.id) ?? [], periodo, auto);
+    if (motivo) {
+      omitidos++;
+      saltadas.push({ unidad: u.etiqueta, motivo });
       continue;
     }
     try {
@@ -46,5 +78,5 @@ export async function crearCuotas(c: Item, periodo: string, opts: { vence?: stri
       omitidos++;
     }
   }
-  return { creados: nuevas.length, omitidos, nuevas, vence };
+  return { creados: nuevas.length, omitidos, nuevas, vence, saltadas };
 }

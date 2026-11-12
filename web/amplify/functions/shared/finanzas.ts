@@ -345,3 +345,37 @@ export function cargoProporcional(cuotaMensual: number, fechaEntrega: string, di
   };
 }
 
+
+// ---------- Cargos manuales que cobran la cuota (para no generar además la completa) ----------
+type CargoCuota = { id?: string | null; tipo?: string | null; estado?: string | null; concepto?: string | null; periodo?: string | null; vence?: string | null };
+const MESES_CUOTA = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const sinAcentos = (s: unknown) =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+
+/** ¿Es un cargo manual que cobra la cuota de mantenimiento (completa o proporcional)? */
+export function esCuotaManual(c: CargoCuota): boolean {
+  const id = String(c.id ?? '');
+  if (c.estado === 'CANCELADO' || id.endsWith('#cuota')) return false;
+  if (c.tipo === 'PROPORCIONAL' || id.startsWith('proporcional#')) return true;
+  if (['RECARGO', 'RESERVA', 'MULTA', 'AHORRO', 'CARTERA'].includes(c.tipo ?? '')) return false;
+  if (id.endsWith('#recargo') || id.startsWith('reserva#')) return false;
+  return /cuota|proporci/.test(sinAcentos(c.concepto));
+}
+
+/**
+ * Mes que cobra un cargo manual de cuota: el que dice su concepto («Cuota proporcional octubre») o, si no nombra
+ * ninguno, su periodo. Así una proporcional de octubre que vence en noviembre no bloquea la cuota de noviembre.
+ */
+export function periodoDeCuota(c: CargoCuota): string {
+  const base: string = c.periodo && /^\d{4}-\d{2}$/.test(c.periodo) ? c.periodo : String(c.vence ?? '').slice(0, 7);
+  const txt = sinAcentos(c.concepto);
+  const i = MESES_CUOTA.findIndex((m) => new RegExp(`\\b${m}\\b`).test(txt));
+  if (i < 0 || !base) return base;
+  const [a, m] = base.split('-').map(Number);
+  const anio = Number(txt.match(/\b(20\d\d)\b/)?.[1]) || (i + 1 > m ? a - 1 : a);
+  return `${anio}-${String(i + 1).padStart(2, '0')}`;
+}
+

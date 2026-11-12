@@ -2420,11 +2420,11 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
     if (c!.cuotaAutomatica) fail('Este condominio genera sus cuotas automáticamente cada mes. Desactiva la cuota automática en Condominios › Cuotas y pagos para generarlas a mano.');
     const periodo = str(p.periodo, 7);
     if (!/^\d{4}-\d{2}$/.test(periodo)) fail('Periodo no válido (AAAA-MM).');
-    const { creados, omitidos } = await crearCuotas(c!, periodo, {
+    const { creados, omitidos, saltadas } = await crearCuotas(c!, periodo, {
       vence: /^\d{4}-\d{2}-\d{2}$/.test(p.vence) ? p.vence : undefined,
       concepto: str(p.concepto, 120),
     });
-    return { creados, omitidos };
+    return { creados, omitidos, saltadas };
   },
 
   // Cuota extraordinaria: un cargo por unidad (todas o las indicadas), agrupados por el id «extra#<grupo>#<unidad>».
@@ -2495,7 +2495,12 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
         if (!u) {
           // Cuota proporcional de entrega (casilla al dar de alta): se valida antes de crear la unidad.
           const cuota = Number(c!.cuotaMensual) || 0;
-          const proporcional = f.proporcional === true;
+          // Marcada o no en el alta individual; en la carga masiva, automática si la entrega es de este mes o posterior
+          // (las entregas de meses pasados son migración: su adeudo se captura aparte).
+          const automatica =
+            f.proporcional === undefined && !!fechaEntrega && fechaEntrega >= `${hoyMX().slice(0, 7)}-01` && cuota > 0 &&
+            (yo.superadmin || alcanza(yo.permisos.secciones.finanzas, 'editar'));
+          const proporcional = f.proporcional === true || automatica;
           if (proporcional) {
             exigir(yo, 'finanzas', 'editar');
             if (!fechaEntrega) fail('Indica la fecha de entrega para calcular la cuota proporcional.');

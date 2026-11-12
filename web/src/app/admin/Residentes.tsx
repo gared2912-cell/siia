@@ -436,7 +436,8 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
   const toast = useToast();
   const [f, setF] = useState({ numero: '', nombre: '', telefono: '', telefono2: '', correo: '', fechaEntrega: '' });
   // Cuota proporcional de entrega: al marcarla, se cobra la cuota solo por los días desde la entrega hasta fin de mes.
-  const [proporcional, setProporcional] = useState(false);
+  // Marcada por omisión en un departamento nuevo; sin fecha de entrega se toma hoy.
+  const [proporcional, setProporcional] = useState(true);
   const cuota = condo?.cuotaMensual ?? 0;
   const { run, busy } = useAction();
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
@@ -444,7 +445,8 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
   const existe = unidades.find((u) => claveUnidad(u.etiqueta) === claveUnidad(etiqueta));
   const ofrecerProporcional = !!f.numero.trim() && !existe && cuota > 0 && puede('finanzas', 'editar');
   const conProporcional = ofrecerProporcional && proporcional;
-  const cp = conProporcional && f.fechaEntrega ? cargoProporcional(cuota, f.fechaEntrega, condo?.diaVencimiento) : null;
+  const entrega = f.fechaEntrega || (conProporcional ? hoy() : '');
+  const cp = conProporcional && entrega ? cargoProporcional(cuota, entrega, condo?.diaVencimiento) : null;
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     const correo = f.correo.trim().toLowerCase();
@@ -453,8 +455,7 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
     const okk = await run(async () => {
       if (f.nombre.trim() && !correo) throw new Error('Escribe el correo del residente: es su usuario para entrar al portal.');
       if (correo && perfiles.some((p) => p.email === correo)) throw new Error('Ya existe un usuario con ese correo.');
-      if (conProporcional && !f.fechaEntrega) throw new Error('Indica la fecha de entrega para calcular la cuota proporcional.');
-      [r] = await importar(condo!.id, [{ ...f, correo, proporcional: conProporcional }], enviar);
+      [r] = await importar(condo!.id, [{ ...f, fechaEntrega: existe ? f.fechaEntrega : entrega, correo, proporcional: conProporcional }], enviar);
       if (r?.error) throw new Error(r.error);
     });
     if (okk) {
@@ -485,17 +486,15 @@ function AgregarResidente({ perfiles, onClose, onDone }: { perfiles: Perfil[]; o
               <input
                 type="checkbox"
                 checked={proporcional}
-                onChange={(e) => {
-                  setProporcional(e.target.checked);
-                  if (e.target.checked && !f.fechaEntrega) setF({ ...f, fechaEntrega: hoy() });
-                }}
+                onChange={(e) => setProporcional(e.target.checked)}
               />
               Cobrar cuota proporcional de entrega
             </label>
             {proporcional && (
               <>
                 <p className="small muted" style={{ margin: 0 }}>
-                  Se cobra la cuota de mantenimiento solo por los días desde la entrega hasta fin de mes. Si lo entregaste antes, cambia la fecha de entrega.
+                  Se cobra la cuota de mantenimiento solo por los días desde la entrega hasta fin de mes{f.fechaEntrega ? '' : ' (sin fecha de entrega se toma hoy)'}. La
+                  cuota completa se cobra sola desde el mes siguiente.
                 </p>
                 {cp ? (
                   <div className="proporcional-calculo">

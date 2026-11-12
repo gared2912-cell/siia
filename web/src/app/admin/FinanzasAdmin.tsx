@@ -16,6 +16,8 @@ import {
   categoriasPropias,
   cargoProporcional,
   cuotaProporcional,
+  esCuotaManual,
+  periodoDeCuota,
   desgloseDe,
   etiquetaCategoria,
   etiquetaIngreso,
@@ -618,6 +620,13 @@ function NuevoCargo({ onClose, onDone, cargos }: { onClose: () => void; onDone: 
   // ¿Ya se generó la cuota completa de ese mes para la unidad? Se avisa para no cobrar doble.
   const cuotaCompleta = pr.unidadId && periodo ? cargos.find((c) => c.estado === 'PENDIENTE' && c.id === `${pr.unidadId}#${periodo}#cuota`) : undefined;
 
+  // Cargo extraordinario que cobra la cuota: si la unidad ya tiene la cuota completa de ese mes, se avisa.
+  const periodoExtra = f.concepto && f.vence ? periodoDeCuota({ concepto: f.concepto, tipo: f.tipo, periodo: f.vence.slice(0, 7) }) : '';
+  const cuotaRepetida =
+    periodoExtra && esCuotaManual({ concepto: f.concepto, tipo: f.tipo })
+      ? cargos.filter((c) => c.estado !== 'CANCELADO' && c.id.endsWith(`#${periodoExtra}#cuota`) && (f.todas || c.unidadId === f.unidadId))
+      : [];
+
   async function crear(e: React.FormEvent) {
     e.preventDefault();
     if (modo === 'proporcional') {
@@ -747,6 +756,12 @@ function NuevoCargo({ onClose, onDone, cargos }: { onClose: () => void; onDone: 
           <input required maxLength={120} value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} placeholder="Multa, cuota extraordinaria, renta de salón…" />
         </Field>
         <TipoIngreso value={f.tipo} onChange={(tipo) => (tipo === 'PROPORCIONAL' ? setModo('proporcional') : setF({ ...f, tipo }))} />
+        {cuotaRepetida.length > 0 && (
+          <div className="alert">
+            {f.todas ? `${cuotaRepetida.length} unidades ya tienen` : 'Esta unidad ya tiene'} la cuota de mantenimiento de ese mes («{cuotaRepetida[0].concepto}»).
+            Si es la cuota del mes, no la cargues otra vez; si es una proporcional de entrega, usa «Cuota proporcional (entrega)».
+          </div>
+        )}
         <div className="form-2">
           <Field label="Monto (MXN)">
             <input required type="number" min="0.01" step="0.01" value={f.monto} onChange={(e) => setF({ ...f, monto: e.target.value })} />

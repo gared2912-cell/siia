@@ -124,7 +124,7 @@ export async function generarCuotaAutomatica(c: Item, hoy = hoyMX()) {
   const periodo = hoy.slice(0, 7);
   const cargo = fechaCargo(c, periodo);
   if (hoy < cargo || cargo < (c.cuotaAutomaticaDesde ?? hoy)) return 0;
-  const { nuevas, vence } = await crearCuotas(c, periodo);
+  const { nuevas, vence } = await crearCuotas(c, periodo, { automatica: true });
   for (const x of nuevas) {
     await put('Aviso', {
       condominioId: c.id,
