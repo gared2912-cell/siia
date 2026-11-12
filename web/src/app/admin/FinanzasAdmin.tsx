@@ -490,7 +490,7 @@ export function FinanzasAdmin({ inicio }: { inicio?: 'revision' } = {}) {
             <HistorialEdiciones item={fichaCargo} />
             <RevisionCargo
               c={fichaCargo}
-              puedeResolver={gestiona && fichaCargo.estado === 'PENDIENTE'}
+              puedeResolver={gestiona}
               onAprobar={() => run(() => adminCall('cargos.revisar', { id: fichaCargo.id }).then(() => (setFichaCargo(null), reload(true))), 'Listo: el cargo queda como está')}
               onCorregir={() => (setEditarCargo(fichaCargo), setFichaCargo(null))}
               busy={busy}
@@ -835,9 +835,12 @@ function RevisionCargo({ c, puedeResolver, onAprobar, onCorregir, busy }: { c: C
           <button className="btn-app sm" disabled={busy} onClick={onAprobar}>
             Está bien
           </button>
-          <button className="btn-app sm secondary" disabled={busy} onClick={onCorregir}>
-            Corregir
-          </button>
+          {/* Solo un cargo pendiente se edita; uno pagado se revisa y, si hace falta, se cobra la diferencia con un cargo nuevo. */}
+          {c.estado === 'PENDIENTE' && (
+            <button className="btn-app sm secondary" disabled={busy} onClick={onCorregir}>
+              Corregir
+            </button>
+          )}
         </div>
       )}
     </div>
