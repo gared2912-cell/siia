@@ -4462,3 +4462,56 @@ table.tbl {
   margin: 4px 0 8px;
   font-size: 0.88rem;
 }
+
+/* Proveedores: recordatorio «solo cosas positivas» del reporte para residentes */
+.aviso-positivo { text-align: center; }
+.aviso-positivo-icono {
+  width: 56px; height: 56px; margin: 0 auto; border-radius: 50%;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--teal) 14%, transparent); color: var(--teal-deep);
+}
+.aviso-positivo-icono svg { width: 28px; height: 28px; }
+.aviso-positivo-titulo { margin: 0; font-size: 1.15rem; font-weight: 700; line-height: 1.35; }
+.aviso-positivo-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.aviso-positivo-botones .btn-app { justify-content: center; }
+
+/* Reporte de proveedor (panel): nota de cuántos departamentos lo vieron */
+.reporte-vistas { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; padding-top: 10px; border-top: 1px solid var(--card-line); }
+.reporte-vistas svg { width: 16px; height: 16px; flex: none; }
+
+/* Finanzas del condominio (portal): años, meses y estado financiero mensual */
+.ef-anios { display: flex; gap: 8px; flex-wrap: wrap; }
+.ef-anio { padding: 8px 18px; border-radius: 999px; border: 1px solid var(--card-line); background: #fff; font: inherit; font-weight: 700; color: var(--teal-deep); cursor: pointer; }
+.ef-anio.on { background: var(--teal-dark); border-color: var(--teal-dark); color: #fff; }
+.ef-meses { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 640px) { .ef-meses { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.ef-mes { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; min-height: 64px; border-radius: var(--radius-app); border: 1px dashed var(--card-line); background: #f6f9fa; color: #9aa3ab; font: inherit; font-weight: 600; }
+.ef-mes svg { width: 18px; height: 18px; }
+.ef-mes.on { border: 1px solid var(--teal); background: #fff; color: var(--teal-deep); cursor: pointer; box-shadow: var(--card-shadow); }
+.ef-mes.on:hover { background: #eaf8f6; }
+.ef { display: grid; gap: 14px; }
+.ef-cab { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 3px solid var(--mint); }
+.ef-cab strong { color: var(--teal-deep); font-size: 1.05rem; letter-spacing: 0.02em; }
+.ef-kpis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 640px) { .ef-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.ef-kpi { display: grid; gap: 4px; padding: 10px; border-radius: 10px; background: #eaf8f6; text-align: center; }
+.ef-kpi span { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: #4b526f; }
+.ef-kpi strong { font-size: 1.1rem; }
+.ef-kpi.final { background: var(--teal-deep); }
+.ef-kpi.final span { color: #cff3ef; }
+.ef-kpi.final strong { color: #fff; }
+.ef-sec h3 { margin: 0 0 6px; padding: 6px 10px; border-radius: 6px; background: var(--teal-deep); color: #fff; font-size: 0.9rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.ef-tabla { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin-bottom: 6px; }
+.ef-tabla th { text-align: left; color: var(--teal-dark); font-size: 0.78rem; padding: 4px 4px; border-bottom: 2px solid var(--mint); }
+.ef-tabla td { padding: 5px 4px; border-bottom: 1px solid #e3eaed; }
+.ef-tabla .num { text-align: right; white-space: nowrap; }
+.ef-tabla .ef-apagado td { color: #9aa3ab; }
+.ef-tabla .ef-subtotal td { font-weight: 700; background: #f6fafa; }
+.ef-tabla .ef-resultado td { font-weight: 700; background: var(--teal-deep); color: #fff; }
+.ef .neg { color: #b42318; font-weight: 700; }
+.ef-total { display: flex; justify-content: space-between; padding: 8px 10px; border-top: 2px solid var(--teal-deep); border-bottom: 2px solid var(--teal-deep); background: #eaf8f6; color: var(--teal-deep); font-weight: 700; }
+.ef-nota { margin: 2px 0 6px; font-style: italic; }
+.ef-grafica svg { width: 100%; height: auto; display: block; }
+
+/* Balance (panel): estado del cierre de mes */
+.cierre-mes { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #f6f9fa; border: 1px solid var(--card-line); }

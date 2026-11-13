@@ -20,7 +20,7 @@ type Incidente = {
   // Etapas que registró la administración, con su foto de evidencia (URL temporal)
   seguimiento?: { estado: string; respuesta?: string | null; en: string; reabierto?: boolean; foto?: string | null; fotoPdf?: boolean }[];
 };
-type Trabajo = { id: string; fecha: string; createdAt: string; servicio: string; descripcion?: string | null; proveedor: string; fotos: { url?: string; descripcion?: string }[] };
+type Trabajo = { id: string; folio?: string | null; fecha: string; createdAt: string; servicio: string; descripcion?: string | null; proveedor: string; fotos: { url?: string; descripcion?: string }[] };
 type Mant = { id: string; titulo: string; tipo?: string; area?: string; fecha?: string; estado?: string; proveedor?: string; notas?: string };
 
 const esImagen = (path?: string) => /\.(png|jpe?g|webp|gif|heic)$/i.test(path ?? '');
@@ -208,7 +208,14 @@ function Trabajos() {
   return (
     <>
       {data!.map((t) => (
-        <TarjetaReporteFotos key={t.id} titulo={t.servicio} detalle={`${fechaHora(t.createdAt)} · ${t.proveedor}`} descripcion={t.descripcion} fotos={t.fotos} />
+        <TarjetaReporteFotos
+          key={t.id}
+          titulo={t.servicio}
+          detalle={[t.folio, fechaHora(t.createdAt), t.proveedor].filter(Boolean).join(' · ')}
+          descripcion={t.descripcion}
+          fotos={t.fotos}
+          onAbrir={() => portal('mantenimientos.visto', { reporteId: t.id }).catch(() => undefined)}
+        />
       ))}
     </>
   );

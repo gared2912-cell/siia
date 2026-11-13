@@ -9,6 +9,7 @@ import {
   ApiError,
   byIndex,
   codigoCorto,
+  ddb,
   fail,
   get,
   hoyMX,
@@ -17,6 +18,7 @@ import {
   parsePayload,
   put,
   str,
+  table,
   update,
   type Item,
 } from '../shared/db';
@@ -32,7 +34,9 @@ import { SLOTS_AMENIDADES, documentosDe } from '../shared/documentos';
 import { nombreAdjunto } from '../shared/comunicados';
 import { ACTIVAS, HORAS_APARTADO, apartadas, cancelarCargoReserva, cargoDeReserva, confirmarReserva, limitePago, relacionadas, vencerSiCorresponde } from '../shared/reservas';
 import { enPapelera, operando, suspendido } from '../shared/condominios';
-import { MAX_FOTOS_REPORTE, MAX_FOTO_REPORTE, OTRO_SERVICIO, listaJson, servicioDe, type FotoReporte } from '../shared/proveedores';
+import { MAX_AVISTAMIENTOS, avistamientosActuales, avistamientosDe, type Avistamiento } from '../shared/mascotas';
+import { MAX_FOTOS_REPORTE, MAX_FOTO_REPORTE, OTRO_SERVICIO, folioReporte, listaJson, servicioDe, type FotoReporte } from '../shared/proveedores';
+import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 type Ctx = {
   sub: string;
@@ -148,6 +152,28 @@ async function archivoPropio(path: string, sub: string, carpeta: keyof typeof TI
 }
 
 const conFoto = async (m: Item, unidad: string) => ({ ...sinPrivados(m), fotoPath: undefined, fotoUrl: await fotoUrl(m.fotoPath), unidad });
+/** Avistamientos del extravío actual con su foto firmada (sin la ruta del archivo). */
+const avistamientosConFoto = (m: Item) =>
+  Promise.all(avistamientosActuales(m).map(async (a) => ({ ...a, fotoPath: undefined, fotoUrl: await fotoUrl(a.fotoPath ?? undefined) })));
+/** Mascota extraviada para vecinos y caseta: foto, casa o departamento y quién la ha visto. */
+const conExtravio = async (m: Item, unidad: string) => ({ ...(await conFoto(m, unidad)), avistamientos: await avistamientosConFoto(m) });
+
+/** Avistamiento («La vi») de un vecino o de la caseta: se guarda en la mascota y avisa al dueño (campana y push).
+ *  La administración y la caseta reciben su push desde el notificador (cambio en la tabla Mascota). */
+async function registrarAvistamiento(condominio: Item, sub: string, p: Item, quien: string, unidad: string, propia?: string) {
+  const m = await get('Mascota', { id: str(p.mascotaId, 64) });
+  if (!m || m.condominioId !== condominio.id || m.estado !== 'APROBADA') fail('Mascota no encontrada.');
+  if (!m!.extraviada) fail(`${m!.nombre} ya no está reportada como extraviada.`);
+  if (propia && m!.unidadId === propia) fail('Es tu mascota. Cuando aparezca, márcala como «Ya apareció».');
+  const donde = str(p.donde, 200);
+  if (!donde) fail('Escribe dónde la viste.');
+  const fotoPath = p.fotoPath ? await archivoPropio(p.fotoPath, sub, 'mascotas') : null;
+  const a: Avistamiento = { id: randomUUID(), en: now(), quien: quien.slice(0, 80), unidad, donde, nota: str(p.nota, 500) || null, fotoPath };
+  const lista = [...avistamientosDe(m!), a].slice(-MAX_AVISTAMIENTOS);
+  await update('Mascota', { id: m!.id }, { avistamientos: JSON.stringify(lista) });
+  await aviso(condominio, m!.unidadId, 'MASCOTA_VISTA', `Vieron a ${m!.nombre}`, `${a.quien}${unidad === 'Caseta' ? '' : ` (${unidad})`} la vio en: ${donde}${a.nota ? `. ${a.nota}` : ''}`);
+  return { ok: true };
+}
 
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -436,6 +462,7 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     return Promise.all(
       items.sort(newest).map(async (r) => ({
         id: r.id,
+        folio: r.folio ?? null,
         fecha: r.fecha,
         createdAt: r.createdAt,
         servicio: servicioDe(r.tipo, r.tipoOtro),
@@ -445,6 +472,30 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
         fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await fotoUrl(f.path) }))),
       })),
     );
+  },
+
+  // Finanzas del condominio: meses que la administración cerró y compartió, y el estado financiero de cada uno.
+  async 'finanzas.balances'({ condominio }) {
+    const l = await byIndex('CierreMes', 'byCondominio', 'condominioId', condominio.id);
+    return l.filter((c) => c.compartido).map((c) => ({ periodo: c.periodo, compartidoEn: c.compartidoEn ?? null })).sort((a, b) => a.periodo.localeCompare(b.periodo));
+  },
+
+  async 'finanzas.balance'({ condominio, p }) {
+    const c = await get('CierreMes', { id: `${condominio.id}#${str(p.periodo, 7)}` });
+    if (!c || !c.compartido) fail('La administración aún no comparte el balance de ese mes.');
+    return { periodo: c!.periodo, datos: c!.datos };
+  },
+
+  // El residente abrió el reporte completo: cuenta como visto (una vez por residente; la administración ve cuántos lo vieron).
+  async 'mantenimientos.visto'({ condominio, unidad, sub, p }) {
+    const r = await get('ReporteProveedor', { id: str(p.reporteId, 64) });
+    if (!r || r.condominioId !== condominio.id || r.destino !== 'RESIDENTES') return { ok: false };
+    try {
+      await put('VistaReporte', { id: `${r.id}#${sub}`, reporteId: r.id, condominioId: condominio.id, unidadId: unidad!.id, userId: sub, fecha: r.fecha }, { ifNotExists: 'id' });
+    } catch (e: any) {
+      if (e?.name !== 'ConditionalCheckFailedException') throw e;
+    }
+    return { ok: true };
   },
 
   async 'mantenimientos.lista'({ condominio }) {
@@ -741,9 +792,14 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     const items = await byIndex('Mascota', 'byCondominio', 'condominioId', condominio.id);
     const et = await etiquetas(condominio.id);
     return {
-      mias: items.filter((m) => m.unidadId === unidad!.id).map(sinPrivados),
+      mias: await Promise.all(
+        items.filter((m) => m.unidadId === unidad!.id).map(async (m) => ({ ...sinPrivados(m), avistamientos: m.extraviada ? await avistamientosConFoto(m) : [] })),
+      ),
       extraviadas: await Promise.all(
-        items.filter((m) => m.extraviada && m.estado === 'APROBADA').map((m) => conFoto(m, et[m.unidadId] ?? '')),
+        items
+          .filter((m) => m.extraviada && m.estado === 'APROBADA')
+          .sort((a, b) => String(b.extraviadaEn ?? '').localeCompare(String(a.extraviadaEn ?? '')))
+          .map(async (m) => ({ ...(await conExtravio(m, et[m.unidadId] ?? '')), mia: m.unidadId === unidad!.id })),
       ),
     };
   },
@@ -769,11 +825,30 @@ const residente: Record<string, (ctx: Ctx) => Promise<unknown>> = {
     return sinPrivados(m);
   },
 
-  async 'mascotas.extraviada'({ unidad, p }) {
+  // Reportar extravío o «Ya apareció»: avisa a todos los vecinos (campana y push); la administración y la caseta
+  // reciben su push desde el notificador.
+  async 'mascotas.extraviada'({ condominio, unidad, p }) {
     const m = await get('Mascota', { id: str(p.mascotaId, 64) });
     if (!m || m.unidadId !== unidad!.id) fail('Mascota no encontrada.');
     if (m!.estado !== 'APROBADA') fail('Tu mascota aún no ha sido aprobada por la administración.');
-    return sinPrivados(await update('Mascota', { id: m!.id }, { extraviada: !!p.extraviada }));
+    const extraviada = !!p.extraviada;
+    if (!!m!.extraviada === extraviada) return sinPrivados(m!);
+    const r = await update('Mascota', { id: m!.id }, extraviada ? { extraviada, extraviadaEn: now() } : { extraviada });
+    const senas = [m!.especie, m!.raza, m!.color].filter(Boolean).join(' · ');
+    if (extraviada)
+      await avisarUnidades(
+        condominio.id,
+        'MASCOTA_PERDIDA',
+        `Se busca: ${m!.nombre}`,
+        `${senas ? `${senas}. ` : ''}Es de ${unidad!.etiqueta}. Si la ves, entra a Mascotas y toca «La vi».`,
+        unidad!.id,
+      );
+    else await avisarUnidades(condominio.id, 'MASCOTA_APARECIO', `¡${m!.nombre} ya apareció!`, `Gracias por ayudar a buscarla (${unidad!.etiqueta}).`, unidad!.id);
+    return sinPrivados(r);
+  },
+
+  async 'mascotas.vista'({ condominio, unidad, perfil, sub, p }) {
+    return registrarAvistamiento(condominio, sub, p, str(perfil.nombre, 80) || 'Un vecino', String(unidad!.etiqueta), unidad!.id);
   },
 };
 
@@ -837,7 +912,7 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
           .map(([id, etiqueta]) => ({ id, etiqueta }))
           .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es', { numeric: true })),
         extraviadas: await Promise.all(
-          mascotas.filter((m) => m.extraviada && m.estado === 'APROBADA').map((m) => conFoto(m, et[m.unidadId] ?? '')),
+          mascotas.filter((m) => m.extraviada && m.estado === 'APROBADA').map((m) => conExtravio(m, et[m.unidadId] ?? '')),
         ),
       };
     },
@@ -1069,6 +1144,15 @@ const caseta: Record<string, { modulo: string; fn: (ctx: Ctx) => Promise<unknown
     },
   },
 
+  // La caseta vio a una mascota extraviada: avisa al dueño, a la administración y a los demás vigilantes.
+  'caseta.mascotaVista': {
+    modulo: 'visitas',
+    async fn({ condominio, perfil, sub, p }) {
+      if (!(condominio.modulos ?? []).includes('mascotas')) fail('Mascota segura no está habilitada en tu condominio.');
+      return registrarAvistamiento(condominio, sub, p, `Caseta${perfil.nombre ? ` · ${str(perfil.nombre, 60)}` : ''}`, 'Caseta');
+    },
+  },
+
   'caseta.alertar': {
     modulo: 'visitas',
     async fn({ condominio, p }) {
@@ -1172,8 +1256,8 @@ async function fotoAsistencia(path: unknown, condominioId: string, sub: string) 
 }
 
 /** Aviso a todas las unidades del condominio (campana y notificación en la app). */
-async function avisarUnidades(condominioId: string, tipo: string, titulo: string, texto: string) {
-  const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', condominioId);
+async function avisarUnidades(condominioId: string, tipo: string, titulo: string, texto: string, excepto?: string) {
+  const unidades = (await byIndex('Unidad', 'byCondominio', 'condominioId', condominioId)).filter((u) => u.id !== excepto);
   for (let i = 0; i < unidades.length; i += 25) {
     await Promise.all(unidades.slice(i, i + 25).map((u) => put('Aviso', { condominioId, unidadId: u.id, tipo, titulo: titulo.slice(0, 140), texto: texto.slice(0, 1000), leido: false })));
   }
@@ -1226,7 +1310,12 @@ const proveedor: Record<string, (c: CtxProveedor) => Promise<unknown>> = {
       const h = await s3.send(new HeadObjectCommand({ Bucket: process.env.BUCKET!, Key: f.path })).catch(() => undefined);
       if (!h) fail(`No encontramos la foto ${i + 1}. Vuelve a subirla.`);
     }
+    // Folio consecutivo por condominio (RP-00001)
+    const seq = await ddb.send(
+      new UpdateCommand({ TableName: table('Condominio'), Key: { id: c.id }, UpdateExpression: 'ADD reporteSeq :uno', ExpressionAttributeValues: { ':uno': 1 }, ReturnValues: 'UPDATED_NEW' }),
+    );
     const reporte = await put('ReporteProveedor', {
+      folio: folioReporte(Number(seq.Attributes?.reporteSeq ?? 1)),
       condominioId: c.id,
       proveedorId: sub,
       proveedorNombre: perfil.nombre || perfil.email,
@@ -1350,9 +1439,8 @@ export const handler = async (event: AppSyncResolverEvent<{ action: string; payl
     // App y notificaciones push (cualquier usuario aprobado del portal).
     if (action.startsWith('notificaciones.')) {
       const esVigilante = perfil!.rol === 'VIGILANTE';
-      const categorias = esVigilante
-        ? CATEGORIAS_VIGILANTE.filter((c) => c.key !== 'chat' || modulos.includes('chat'))
-        : CATEGORIAS_RESIDENTE.filter((c) => c.key !== 'chat' || modulos.includes('chat'));
+      const conModulo = (c: { key: string }) => (c.key !== 'chat' || modulos.includes('chat')) && (c.key !== 'mascotas' || modulos.includes('mascotas'));
+      const categorias = esVigilante ? CATEGORIAS_VIGILANTE.filter(conModulo) : CATEGORIAS_RESIDENTE.filter(conModulo);
       return await accionNotificaciones(action, p, sub, categorias, esVigilante ? '/portal/#hoy' : '/portal/#inicio');
     }
 

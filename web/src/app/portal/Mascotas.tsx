@@ -3,6 +3,7 @@ import { portal, subirArchivo } from '../api';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { Acciones, Archivo, Badge, Datos, Empty, ErrorBox, Field, Icon, Loading, Modal, PageHead, Tarjeta, TarjetaIcono, Tarjetas, fecha, tonoDe, useAction, useLoad } from '../ui';
 import type { ModProps } from './PortalApp';
+import { FichaExtraviada, ListaAvistamientos, type Avistamiento, type Extraviada } from './MascotaExtraviada';
 
 export type Mascota = {
   id: string;
@@ -14,15 +15,18 @@ export type Mascota = {
   vacunaAntirrabica?: string;
   estado: string;
   extraviada?: boolean;
+  extraviadaEn?: string;
+  avistamientos?: Avistamiento[];
   notas?: string;
   unidad?: string;
   fotoUrl?: string;
 };
 
 export function Mascotas(_: ModProps) {
-  const { data, error, loading, reload } = useLoad(() => portal<{ mias: Mascota[]; extraviadas: Mascota[] }>('mascotas.lista'));
+  const { data, error, loading, reload } = useLoad(() => portal<{ mias: Mascota[]; extraviadas: Extraviada[] }>('mascotas.lista'));
   const [nueva, setNueva] = useState(false);
   const [ficha, setFicha] = useState<Mascota | null>(null);
+  const [buscada, setBuscada] = useState<Extraviada | null>(null);
   const { run } = useAction();
 
   if (loading && !data) return <Loading />;
@@ -32,7 +36,7 @@ export function Mascotas(_: ModProps) {
   const extraviada = (m: Mascota, v: boolean) =>
     run(
       () => portal('mascotas.extraviada', { mascotaId: m.id, extraviada: v }).then(() => (setFicha(null), reload(true))),
-      v ? 'Reporte publicado para vecinos y caseta' : '¡Qué bueno que apareció!',
+      v ? 'Avisamos a tus vecinos, a la caseta y a la administración' : '¡Qué bueno que apareció! Avisamos a tus vecinos.',
     );
 
   return (
@@ -47,17 +51,30 @@ export function Mascotas(_: ModProps) {
       {extraviadas.length > 0 && (
         <section className="panel" style={{ borderColor: '#f4d2cf' }}>
           <h2>Mascotas extraviadas en el condominio</h2>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Toca una para ver su foto y, si la viste, avisa con «La vi».
+          </p>
           <Tarjetas>
-            {extraviadas.map((m) => (
-              <Tarjeta
-                key={m.id}
-                tono="mal"
-                media={m.fotoUrl ? <img className="photo-thumb" src={m.fotoUrl} alt={m.nombre} /> : <TarjetaIcono name="paw" />}
-                titulo={m.nombre}
-                sub={`${[m.especie, m.raza, m.color].filter(Boolean).join(' · ')} · ${m.unidad}`}
-                lado={<Badge estado="RECHAZADO">Extraviada</Badge>}
-              />
-            ))}
+            {extraviadas.map((m) => {
+              const vistas = m.avistamientos?.length ?? 0;
+              return (
+                <Tarjeta
+                  key={m.id}
+                  tono="mal"
+                  onClick={() => setBuscada(m)}
+                  media={m.fotoUrl ? <img className="photo-thumb" src={m.fotoUrl} alt={m.nombre} /> : <TarjetaIcono name="paw" />}
+                  titulo={m.nombre}
+                  sub={`${[m.especie, m.raza, m.color].filter(Boolean).join(' · ')} · ${m.unidad}`}
+                  lado={<Badge estado="RECHAZADO">Extraviada</Badge>}
+                >
+                  {vistas > 0 && (
+                    <span className="small">
+                      La han visto {vistas} {vistas === 1 ? 'vez' : 'veces'}; la última: {m.avistamientos![0].donde}
+                    </span>
+                  )}
+                </Tarjeta>
+              );
+            })}
           </Tarjetas>
         </section>
       )}
@@ -104,6 +121,12 @@ export function Mascotas(_: ModProps) {
                 ['Notas', ficha.notas],
               ]}
             />
+            {ficha.extraviada && (
+              <>
+                <h3 style={{ margin: '4px 0 0' }}>Quién la ha visto</h3>
+                <ListaAvistamientos lista={ficha.avistamientos ?? []} />
+              </>
+            )}
             {ficha.estado === 'PENDIENTE' && <p className="small muted" style={{ margin: 0 }}>La administración está validando el registro.</p>}
             {ficha.estado === 'APROBADA' && (
               <Acciones>
@@ -121,6 +144,17 @@ export function Mascotas(_: ModProps) {
             )}
           </div>
         </Modal>
+      )}
+      {buscada && (
+        <FichaExtraviada
+          m={buscada}
+          accion="mascotas.vista"
+          onClose={() => setBuscada(null)}
+          onDone={() => {
+            setBuscada(null);
+            reload(true);
+          }}
+        />
       )}
       {nueva && (
         <NuevaMascota

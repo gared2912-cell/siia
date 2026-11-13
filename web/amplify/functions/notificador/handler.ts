@@ -3,6 +3,7 @@
 // - Mensaje → de un residente: administradores (canal ADMIN) o vigilantes (canal CASETA);
 //             de la administración o la caseta: residentes de la unidad.
 // - Pago (en revisión), Incidente, Reserva (solicitada), Mascota (pendiente) → administradores con permiso.
+// - Mascota (cambio): reporte de extravío, avistamiento («La vi») o «ya apareció» → administradores y caseta.
 // - Cotizacion (formulario del sitio público) → administradores con acceso a Cotizaciones (de cualquier condominio).
 // Cada usuario recibe solo las categorías que no apagó y, si es administrador, solo de sus condominios y secciones.
 import type { DynamoDBStreamEvent } from 'aws-lambda';
@@ -12,6 +13,7 @@ import { enviarAUsuario, type Aviso } from '../shared/push';
 import { CATEGORIAS_ADMIN, categoriaDeAviso } from '../shared/notificaciones';
 import { alcanza, normalizarPermisos } from '../shared/permisos';
 import { avisosSinLeer, chatSinLeer } from '../shared/pendientes';
+import { avistamientosDe } from '../shared/mascotas';
 
 const mxn = (n: number) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 const apagada = (perfil: Item, categoria: string) => (perfil.notifApagadas ?? []).includes(categoria);
@@ -77,6 +79,36 @@ const nombreCondo = async (id: string) => (await get('Condominio', { id }))?.nom
 /** Sección del panel con el condominio ya seleccionado (?c=), para administradores de varios condominios. */
 const panel = (condominioId: string, seccion: string) => `/admin/?c=${encodeURIComponent(condominioId)}#/${seccion}`;
 const corto = (s: string, n = 140) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/** Mascota extraviada: push a la administración (Mascotas perdidas) y a la caseta, si el condominio la tiene. */
+async function cambioMascota(antes: Item | undefined, d: Item): Promise<number> {
+  if (d.estado !== 'APROBADA') return 0;
+  let title: string;
+  let detalle: string;
+  if (!antes?.extraviada && d.extraviada) {
+    title = `Mascota extraviada: ${d.nombre}`;
+    detalle = [d.especie, d.raza, d.color].filter(Boolean).join(' · ');
+  } else if (antes?.extraviada && !d.extraviada) {
+    title = `${d.nombre} ya apareció`;
+    detalle = 'El dueño la marcó como encontrada.';
+  } else {
+    const previos = antes ? avistamientosDe(antes).length : 0;
+    const lista = avistamientosDe(d);
+    if (!d.extraviada || lista.length <= previos) return 0;
+    const v = lista[lista.length - 1];
+    title = `Vieron a ${d.nombre}`;
+    detalle = `${v.quien}${v.unidad === 'Caseta' ? '' : ` (${v.unidad})`}: ${v.donde}`;
+  }
+  const [condo, unidad, condominio] = await Promise.all([nombreCondo(d.condominioId), etiqueta(d.unidadId), get('Condominio', { id: d.condominioId })]);
+  const body = corto(`${condo} · ${unidad}${detalle ? ` · ${detalle}` : ''}`);
+  const tag = `extravio-${d.id}`;
+  const conCaseta = (condominio?.modulos ?? []).includes('visitas');
+  const [a, c] = await Promise.all([
+    enviar(await administradores(d.condominioId, 'extravios'), 'extravios', { title, body, url: panel(d.condominioId, 'mascotas'), tag }),
+    conCaseta ? enviar(await vigilantes(d.condominioId), 'mascotas', { title, body, url: `/portal/#mascota/${d.id}`, tag }) : 0,
+  ]);
+  return a + c;
+}
 
 async function procesar(modelo: string, r: Item): Promise<number> {
   switch (modelo) {
@@ -190,10 +222,20 @@ export const handler = async (event: DynamoDBStreamEvent) => {
   for (const rec of event.Records) {
     if (!rec.dynamodb?.NewImage) continue;
     const modelo = rec.eventSourceARN?.split(':table/')[1]?.split('-')[0] ?? '';
-    // Solo registros nuevos; de la asistencia de proveedores, también el check-out (pasa de DENTRO a SALIO).
+    // Solo registros nuevos; de la asistencia de proveedores, también el check-out (pasa de DENTRO a SALIO);
+    // de las mascotas, el extravío, los avistamientos y «ya apareció».
     if (rec.eventName !== 'INSERT') {
       const antes = rec.dynamodb.OldImage ? (unmarshall(rec.dynamodb.OldImage as any) as Item) : undefined;
       const despues = unmarshall(rec.dynamodb.NewImage as any) as Item;
+      if (rec.eventName === 'MODIFY' && modelo === 'Mascota') {
+        try {
+          const n = await cambioMascota(antes, despues);
+          if (n) console.log(`Mascota ${despues.id}: ${n} notificación(es) de extravío`);
+        } catch (err) {
+          console.error('Mascota', err);
+        }
+        continue;
+      }
       if (!(rec.eventName === 'MODIFY' && modelo === 'AsistenciaProveedor' && antes?.estado === 'DENTRO' && despues.estado === 'SALIO')) continue;
     }
     try {

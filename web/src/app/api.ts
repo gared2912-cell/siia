@@ -129,8 +129,8 @@ export async function all<T>(
 }
 
 /** URL firmada de un comprobante o foto para el panel /admin (admin-api valida el condominio). */
-export async function urlArchivoAdmin(model: 'Pago' | 'Incidente' | 'Mascota', id: string): Promise<string> {
-  return (await adminCall<{ url: string }>('archivo', { model, id })).url;
+export async function urlArchivoAdmin(model: 'Pago' | 'Incidente' | 'Mascota', id: string, avistamiento?: string): Promise<string> {
+  return (await adminCall<{ url: string }>('archivo', { model, id, avistamiento })).url;
 }
 
 export async function grupos(): Promise<string[]> {

@@ -14,11 +14,13 @@ export const CATEGORIAS_RESIDENTE: Categoria[] = [
   { key: 'tramites', label: 'Mis trámites', desc: 'Respuesta a incidentes, reservas y registro de mascotas.' },
   { key: 'mantenimientos', label: 'Mantenimientos', desc: 'Mantenimientos programados y trabajos realizados por proveedores en tu condominio.' },
   { key: 'chat', label: 'Mensajes', desc: 'Respuestas de la administración o de la caseta en el chat.' },
+  { key: 'mascotas', label: 'Mascotas perdidas', desc: 'Se extravía una mascota en tu condominio, o alguien vio a la tuya.' },
 ];
 
 export const CATEGORIAS_VIGILANTE: Categoria[] = [
   { key: 'chat', label: 'Mensajes de residentes', desc: 'Un residente escribe al chat de caseta.' },
   { key: 'accesos', label: 'Respuestas de acceso', desc: 'Un residente autoriza o rechaza a alguien que llegó sin pase.' },
+  { key: 'mascotas', label: 'Mascotas perdidas', desc: 'Un residente reporta una mascota extraviada, alguien la vio o ya apareció.' },
 ];
 
 export const CATEGORIAS_ADMIN: (Categoria & { seccion: string; nivel: 'ver' | 'editar'; extra?: string })[] = [
@@ -27,6 +29,7 @@ export const CATEGORIAS_ADMIN: (Categoria & { seccion: string; nivel: 'ver' | 'e
   { key: 'incidentes', label: 'Incidentes nuevos', desc: 'Un residente reporta una falla o incidente.', seccion: 'incidentes', nivel: 'ver' },
   { key: 'reservas', label: 'Reservas por aprobar', desc: 'Solicitud de reserva de una amenidad.', seccion: 'amenidades', nivel: 'editar' },
   { key: 'mascotas', label: 'Mascotas por validar', desc: 'Un residente registra una mascota.', seccion: 'mascotas', nivel: 'editar' },
+  { key: 'extravios', label: 'Mascotas perdidas', desc: 'Un residente reporta una mascota extraviada, alguien la vio o ya apareció.', seccion: 'mascotas', nivel: 'ver' },
   { key: 'cotizaciones', label: 'Cotizaciones del sitio web', desc: 'Alguien pide una cotización o escribe desde el sitio.', seccion: 'cotizaciones', nivel: 'ver' },
   { key: 'asistencia', label: 'Asistencia técnica', desc: 'Un residente pide ayuda para entrar (accesos o contraseña).', seccion: 'usuarios', nivel: 'editar' },
   { key: 'proveedores', label: 'Llegada de proveedores', desc: 'Un proveedor hace check-in o check-out en el condominio.', seccion: 'proveedores', nivel: 'ver' },
@@ -37,6 +40,12 @@ export function categoriaDeAviso(tipo?: string | null): string {
   switch (tipo) {
     case 'PAGO':
       return 'pagos';
+    case 'BALANCE':
+      return 'comunicados';
+    case 'MASCOTA_PERDIDA':
+    case 'MASCOTA_VISTA':
+    case 'MASCOTA_APARECIO':
+      return 'mascotas';
     case 'VISITA':
     case 'CASETA':
     case 'ACCESO':

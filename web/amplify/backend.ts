@@ -226,6 +226,7 @@ backend.notificador.resources.lambda.addEventSource(
   }),
 );
 // El notificador escucha los registros nuevos de estas tablas (los streams ya existen en las tablas de Amplify).
+// Mascota también con cambios: reporte de extravío, «ya apareció» y avistamientos avisan a la administración y a la caseta.
 for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Mascota', 'Cotizacion']) {
   backend.notificador.resources.lambda.addEventSource(
     new DynamoEventSource(tables[modelo], {
@@ -233,7 +234,7 @@ for (const modelo of ['Aviso', 'Mensaje', 'Pago', 'Incidente', 'Reserva', 'Masco
       batchSize: 25,
       retryAttempts: 2,
       bisectBatchOnError: true,
-      filters: [FilterCriteria.filter({ eventName: FilterRule.isEqual('INSERT') })],
+      filters: [FilterCriteria.filter({ eventName: modelo === 'Mascota' ? FilterRule.or('INSERT', 'MODIFY') : FilterRule.isEqual('INSERT') })],
     }),
   );
 }

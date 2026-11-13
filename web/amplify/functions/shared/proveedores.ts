@@ -49,7 +49,13 @@ export type ReporteProveedor = {
   fecha: string;
   createdAt: string;
   fotos: FotoReporte[];
+  folio?: string | null;
+  /** Reportes para residentes (panel): departamentos y residentes que lo abrieron, de los que tienen residentes. */
+  vistas?: { unidades: number; residentes: number; total: number } | null;
 };
+
+/** Folio del reporte de proveedor: RP-00001 (consecutivo por condominio). */
+export const folioReporte = (n: number) => `RP-${String(n).padStart(5, '0')}`;
 
 /** Servicio que se muestra: el del catálogo o el que escribió en «Otro». */
 export const servicioDe = (tipo: string, tipoOtro?: string | null) => (tipo === OTRO_SERVICIO && tipoOtro ? tipoOtro : tipo);

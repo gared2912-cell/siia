@@ -30,7 +30,8 @@ import { ModuloInactivo, useAdmin } from './AdminApp';
 import { Documentos } from './Documentos';
 import { TarjetaTurno, type Turno } from '../caseta/Vigilancia';
 import { SLOTS_AMENIDADES } from '../../../amplify/functions/shared/documentos';
-import { DIAS_RECHAZADA, fechaBorradoMascota, rechazadaDesde } from '../../../amplify/functions/shared/mascotas';
+import { DIAS_RECHAZADA, avistamientosActuales, fechaBorradoMascota, rechazadaDesde } from '../../../amplify/functions/shared/mascotas';
+import { ListaAvistamientos } from '../portal/MascotaExtraviada';
 import { ElegirArchivo } from '../ElegirArchivo';
 
 type Incidente = Schema['Incidente']['type'];
@@ -960,7 +961,10 @@ export function MascotasAdmin() {
   const [vista, setVista] = useState<'registro' | 'rechazadas'>('registro');
   const [marcadas, setMarcadas] = useState<string[]>([]);
   const puedeBorrar = puede('mascotas', 'editar');
-  const lista = (data ?? []).filter((m) => m.estado !== 'RECHAZADA').sort((a, b) => (a.estado === 'PENDIENTE' ? -1 : 0) - (b.estado === 'PENDIENTE' ? -1 : 0) || porFecha(a, b));
+  // Primero las extraviadas, luego las pendientes de validar
+  const lista = (data ?? [])
+    .filter((m) => m.estado !== 'RECHAZADA')
+    .sort((a, b) => Number(!!b.extraviada) - Number(!!a.extraviada) || (a.estado === 'PENDIENTE' ? -1 : 0) - (b.estado === 'PENDIENTE' ? -1 : 0) || porFecha(a, b));
   const rechazadas = (data ?? []).filter((m) => m.estado === 'RECHAZADA').sort((a, b) => rechazadaDesde(b).localeCompare(rechazadaDesde(a)));
   const elegidas = rechazadas.filter((m) => marcadas.includes(m.id));
   const marcar = (id: string) => setMarcadas(marcadas.includes(id) ? marcadas.filter((x) => x !== id) : [...marcadas, id]);
@@ -1083,8 +1087,15 @@ export function MascotasAdmin() {
                 ['Color', abierta.color || '—'],
                 ['Vacuna antirrábica', fecha(abierta.vacunaAntirrabica)],
                 ['Notas', abierta.notas],
+                ['Extraviada desde', abierta.extraviada && abierta.extraviadaEn ? fechaHora(abierta.extraviadaEn) : null],
               ]}
             />
+            {abierta.extraviada && (
+              <>
+                <h3 style={{ margin: '4px 0 0' }}>Quién la ha visto</h3>
+                <ListaAvistamientos lista={avistamientosActuales(abierta)} mascotaId={abierta.id} />
+              </>
+            )}
             <Firma item={abierta} alta={false} />
             {puede('mascotas', 'editar') && abierta.estado === 'PENDIENTE' && (
               <Acciones>

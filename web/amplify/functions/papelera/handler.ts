@@ -31,6 +31,7 @@ const POR_CONDOMINIO = [
   'Pago',
   'Egreso',
   'SaldoMensual',
+  'CierreMes',
   'Comunicado',
   'Encuesta',
   'Mensaje',
@@ -43,6 +44,7 @@ const POR_CONDOMINIO = [
   'Mascota',
   'CorteAccesos',
   'ReporteProveedor',
+  'VistaReporte',
   'Actividad',
 ];
 

@@ -137,7 +137,8 @@ function VerReportes({ onLevantar }: { onLevantar: () => void }) {
 
 /** Reporte en tarjeta compacta; al tocarlo se abre completo (una foto tras otra con su descripción). */
 export function TarjetaReporte({ r, mostrarProveedor }: { r: Reporte; mostrarProveedor?: boolean }) {
-  const detalle = [fechaHora(r.createdAt), r.condominio, mostrarProveedor && `${r.proveedorNombre ?? ''}${r.empresa ? ` (${r.empresa})` : ''}`].filter(Boolean).join(' · ');
+  const detalle = [r.folio, fechaHora(r.createdAt), r.condominio, mostrarProveedor && `${r.proveedorNombre ?? ''}${r.empresa ? ` (${r.empresa})` : ''}`].filter(Boolean).join(' · ');
+  const v = r.vistas;
   return (
     <TarjetaReporteFotos
       titulo={servicioDe(r.tipo, r.tipoOtro)}
@@ -145,6 +146,14 @@ export function TarjetaReporte({ r, mostrarProveedor }: { r: Reporte; mostrarPro
       etiqueta={<Badge estado={r.destino === 'ADMIN' ? 'PROGRAMADA' : 'APROBADO'}>Para {ETIQUETA_DESTINO[r.destino].toLowerCase()}</Badge>}
       descripcion={r.descripcion}
       fotos={r.fotos}
+      pie={
+        v ? (
+          <p className="small muted reporte-vistas">
+            <Icon name="users" /> Lo vieron <strong>{v.unidades} de {v.total}</strong> departamentos
+            {v.residentes ? ` (${v.residentes} ${v.residentes === 1 ? 'residente' : 'residentes'})` : ''}.
+          </p>
+        ) : undefined
+      }
     />
   );
 }
@@ -203,6 +212,10 @@ function NuevoReporte({
   const [estado, setEstado] = useState('');
   const [error, setError] = useState('');
   const [enviado, setEnviado] = useState<Borrador | null>(null);
+  // Recordatorio al abrir el reporte y otra vez al enviarlo: para residentes, solo cosas positivas;
+  // para la administración, los incidentes encontrados durante el trabajo.
+  const [recordatorio, setRecordatorio] = useState(true);
+  const [confirmar, setConfirmar] = useState(false);
   const cambiaFoto = (id: number, x: Partial<FotoCaptura>) => setFotos(fotos.map((p) => (p.id === id ? { ...p, ...x } : p)));
   const condo = yo.condominios.find((c) => c.id === f.condominioId);
 
@@ -216,12 +229,12 @@ function NuevoReporte({
     const sinTexto = fotos.findIndex((p) => p.file && !p.descripcion.trim());
     if (sinTexto >= 0) return setError(`Escribe la descripción de la foto ${sinTexto + 1}.`);
     if (fotos.some((p) => !p.file && p.descripcion.trim())) return setError('Hay una descripción sin foto: agrégale la foto o quítala.');
-    if (
-      !confirm(
-        `¿Enviar el reporte para ${ETIQUETA_DESTINO[f.destino].toLowerCase()}?\n\nAl enviarlo se guarda en tu bitácora y YA NO podrás modificarlo ni borrarlo.`,
-      )
-    )
-      return;
+    setConfirmar(true);
+  }
+
+  async function enviarConfirmado() {
+    setConfirmar(false);
+    const listas = fotos.filter((p) => p.file);
     try {
       const subidas: { path: string; descripcion: string }[] = [];
       for (const [i, p] of listas.entries()) {
@@ -273,8 +286,80 @@ function NuevoReporte({
   }
 
   const ocupado = !!estado;
+  const paraResidentes = f.destino === 'RESIDENTES';
   return (
     <div className="stack">
+      {recordatorio && (
+        <Modal title={paraResidentes ? 'Reporte para los residentes' : 'Reporte para la administración'} onClose={() => setRecordatorio(false)}>
+          <div className="stack aviso-positivo">
+            <div className="aviso-positivo-icono">
+              <Icon name={paraResidentes ? 'users' : 'building'} />
+            </div>
+            {paraResidentes ? (
+              <>
+                <p className="aviso-positivo-titulo">Recuerda: en este reporte van puras cosas positivas.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  Cuenta lo que realizaste y cómo quedó, por ejemplo: «Se podaron los árboles del andador principal» o «La alberca quedó limpia y lista para usarse».
+                </p>
+                <p className="small muted" style={{ margin: 0 }}>
+                  Fallas, problemas, materiales o pendientes van en el reporte para la administración.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="aviso-positivo-titulo">Recuerda: este reporte es para la administración.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  Reporta aquí los incidentes que encontraste durante tu trabajo.
+                </p>
+              </>
+            )}
+            <button type="button" className="btn-app block" onClick={() => setRecordatorio(false)}>
+              <Icon name="check" />
+              Aceptar
+            </button>
+          </div>
+        </Modal>
+      )}
+      {confirmar && (
+        <Modal title="¿Estás seguro?" onClose={() => setConfirmar(false)}>
+          <div className="stack aviso-positivo">
+            {paraResidentes ? (
+              <>
+                <div className="aviso-positivo-icono">
+                  <Icon name="users" />
+                </div>
+                <p className="aviso-positivo-titulo">Recuerda que aquí deben ir puras cosas positivas para los residentes.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  Si estás seguro, presiona <strong>Aceptar</strong>. Si quieres modificarlo, presiona <strong>Regresar</strong>.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="aviso-positivo-icono">
+                  <Icon name="building" />
+                </div>
+                <p className="aviso-positivo-titulo">Este reporte es para la administración: los incidentes que encontraste durante tu trabajo.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  Si está completo, presiona <strong>Aceptar</strong>. Si quieres modificarlo, presiona <strong>Regresar</strong>.
+                </p>
+              </>
+            )}
+            <p className="small muted" style={{ margin: 0 }}>
+              Al enviarlo se guarda en tu bitácora y <strong>ya no podrás modificarlo ni borrarlo</strong>.
+            </p>
+            <div className="aviso-positivo-botones">
+              <button type="button" className="btn-app secondary" onClick={() => setConfirmar(false)}>
+                <Icon name="back" />
+                Regresar
+              </button>
+              <button type="button" className="btn-app" onClick={enviarConfirmado}>
+                <Icon name="check" />
+                Aceptar
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       <div>
         <button className="linklike" onClick={onCambiar} disabled={ocupado}>
           <Icon name="back" /> Levantar reporte
@@ -357,6 +442,15 @@ function NuevoReporte({
           )}
         </section>
 
+        {paraResidentes ? (
+          <div className="alert ok">
+            <strong>Solo cosas positivas:</strong> este reporte lo leen los residentes. Fallas, problemas o pendientes van en el reporte para la administración.
+          </div>
+        ) : (
+          <div className="alert ok">
+            <strong>Para la administración:</strong> reporta los incidentes que encontraste durante tu trabajo.
+          </div>
+        )}
         <div className="alert">
           <strong>Importante:</strong> al enviar, el reporte se guarda en tu bitácora y <strong>ya no se puede modificar ni borrar</strong>. Revisa que las fotos y
           descripciones estén completas.
@@ -364,7 +458,7 @@ function NuevoReporte({
         {error && <div className="alert error">{error}</div>}
         <button className="btn-app block" disabled={ocupado}>
           <Icon name="upload" />
-          {estado || `Enviar reporte para ${ETIQUETA_DESTINO[f.destino].toLowerCase()}`}
+          {estado || (paraResidentes ? 'Enviar a residentes' : 'Enviar a la administración')}
         </button>
       </form>
     </div>

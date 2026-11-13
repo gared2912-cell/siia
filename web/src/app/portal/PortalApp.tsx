@@ -9,6 +9,7 @@ import { AvisosProvider, Campana, useAvisos } from './Notificaciones';
 import CasetaApp from '../caseta/CasetaApp';
 import { Inicio } from './Inicio';
 import { Finanzas } from './Finanzas';
+import { FinanzasCondominio } from './FinanzasCondominio';
 import { Visitas } from './Visitas';
 import { Comunicados } from './Comunicados';
 import { Chat } from './Chat';
@@ -185,7 +186,12 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
   // Cada módulo muestra en rojo sus avisos sin leer (pagos, visitas, reservas…); Inicio, el total.
   const nav: NavItem[] = [
     { key: 'inicio', label: 'Inicio', icon: 'home', count: sinLeer },
-    ...(has('finanzas') ? [{ key: 'finanzas', label: 'Finanzas', icon: 'money', count: porModulo.finanzas }] : []),
+    ...(has('finanzas')
+      ? [
+          { key: 'finanzas', label: 'Mis finanzas', icon: 'money', count: porModulo.finanzas },
+          { key: 'balances', label: 'Finanzas del condominio', icon: 'chart', count: porModulo.balances },
+        ]
+      : []),
     ...(has('visitas') ? [{ key: 'visitas', label: 'Visitas', icon: 'qr', count: porModulo.visitas }] : []),
     ...(has('amenidades') ? [{ key: 'amenidades', label: 'Reservas', icon: 'calendar', count: porModulo.amenidades }] : []),
     ...(has('incidentes') ? [{ key: 'incidentes', label: 'Incidentes', icon: 'alert', count: porModulo.incidentes }] : []),
@@ -217,6 +223,7 @@ function AppResidente({ perfil }: { perfil: PerfilResp }) {
     >
       {actual === 'inicio' && <Inicio {...props} />}
       {actual === 'finanzas' && <Finanzas {...props} />}
+      {actual === 'balances' && <FinanzasCondominio {...props} />}
       {actual === 'visitas' && <Visitas {...props} />}
       {actual === 'amenidades' && <Amenidades {...props} />}
       {actual === 'incidentes' && <Incidentes {...props} />}

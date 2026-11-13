@@ -30,6 +30,7 @@ import type { Schema } from '../../data/resource';
 import { cognito, emailDe } from '../shared/cognito';
 import { accionNotificaciones, enviarAUsuario } from '../shared/push';
 import { CATEGORIAS_ADMIN } from '../shared/notificaciones';
+import { avistamientosDe } from '../shared/mascotas';
 import { claveUnidad, etiquetaUnidad } from '../shared/unidades';
 import { SLOTS_AMENIDADES, SLOTS_DOC, documentosDe, type Documento } from '../shared/documentos';
 import { nombreAdjunto } from '../shared/comunicados';
@@ -58,7 +59,7 @@ import { SITIO_CORREO, enviarPlantilla, enviarVarios } from '../shared/correo';
 import { correoComunicado, correoContrasena, correoCorteAccesos, correoMantenimiento, correoReporte, correoReporteResuelto } from '../shared/plantillas-correo';
 import { ESTADOS_REPORTE, REPORTES_CORREO, avisoResuelto, MAX_IMAGENES_REPORTE, MIN_TEXTO_REPORTE, TIPOS_REPORTE, esDesarrollador, type EstadoReporte, type TipoReporte } from '../shared/reportes';
 import { enPapelera, fechaBorrado, jsonDe, suspendido, type OrdenPapelera } from '../shared/condominios';
-import { listaJson, type FotoReporte } from '../shared/proveedores';
+import { listaJson, servicioDe, type FotoReporte } from '../shared/proveedores';
 import { MODELOS_FIRMADOS, anotar, firmanteActual, firmarComo, registrarCambio, selloFirma, sinCorreos, tomarCambios, cambioRelevante } from '../shared/firma';
 import { MOTIVOS_EDICION, edicionesDe, type Edicion } from '../shared/ediciones';
 import { ajusteDe, conceptoPendiente, favorAUsar, r2, repartirPago, type Excedente, type Faltante } from '../shared/pagos';
@@ -585,11 +586,39 @@ async function archivo(p: Item, yo: Yo) {
   const a = ARCHIVOS[str(p.model, 40)];
   if (!a) fail('Archivo no disponible.');
   const item = await get(str(p.model, 40), { id: str(p.id, 64) });
-  if (!item?.[a!.campo]) fail('Archivo no disponible.');
+  // Foto de un avistamiento de mascota extraviada («La vi» de un vecino o de la caseta)
+  const ruta = p.avistamiento && p.model === 'Mascota' ? avistamientosDe(item ?? {}).find((x) => x.id === p.avistamiento)?.fotoPath : item?.[a!.campo];
+  if (!item || !ruta) fail('Archivo no disponible.');
   exigirCondo(yo, item!.condominioId);
   exigir(yo, a!.seccion, 'ver');
-  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: item![a!.campo] }), { expiresIn: 900 });
+  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: ruta! }), { expiresIn: 900 });
   return { url };
+}
+
+/** Aviso a todas las unidades: ya está disponible el balance del mes (Finanzas del condominio). */
+async function avisarBalance(condominioId: string, periodo: string) {
+  const [a, m] = periodo.split('-').map(Number);
+  const mes = new Date(a, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  const unidades = await byIndex('Unidad', 'byCondominio', 'condominioId', condominioId);
+  for (let i = 0; i < unidades.length; i += 25)
+    await Promise.all(
+      unidades.slice(i, i + 25).map((u) =>
+        put('Aviso', {
+          condominioId,
+          unidadId: u.id,
+          tipo: 'BALANCE',
+          titulo: `Ya está disponible el balance de ${mes}`,
+          texto: 'Consúltalo y descárgalo en Finanzas del condominio.',
+          leido: false,
+        }),
+      ),
+    );
+}
+
+/** Casas o departamentos con al menos un residente aprobado (los que pueden ver los reportes). */
+async function unidadesConResidentes(condominioId: string) {
+  const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', condominioId);
+  return new Set(perfiles.filter((x) => x.rol === 'RESIDENTE' && x.estado === 'APROBADO' && x.unidadId).map((x) => x.unidadId as string));
 }
 
 // ---------- documentos del condominio (reglamento y otros dos con título libre) ----------
@@ -1374,6 +1403,59 @@ const accionesFinanzas: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = 
   },
 
   // Residentes de cada unidad (nombre, teléfono y correo) para el reporte de cobranza; basta con ver Finanzas.
+  // ----- Cierre de mes y balance para residentes («Finanzas del condominio») -----
+  // El panel arma el estado financiero del mes (mismo cálculo que el Excel) y lo guarda; si se comparte, los residentes
+  // lo ven y descargan, y les llega un aviso la primera vez.
+  async 'finanzas.cierres'(p, yo) {
+    exigir(yo, 'finanzas', 'ver');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const l = await byIndex('CierreMes', 'byCondominio', 'condominioId', cid);
+    return l
+      .map((c) => ({ periodo: c.periodo, compartido: !!c.compartido, compartidoEn: c.compartidoEn ?? null, cerradoPor: c.cerradoPor ?? null, cerradoEn: c.updatedAt }))
+      .sort((a, b) => b.periodo.localeCompare(a.periodo));
+  },
+
+  async 'finanzas.cerrarMes'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const periodo = /^\d{4}-\d{2}$/.test(p.periodo) ? p.periodo : '';
+    if (!periodo || periodo > hoyMX().slice(0, 7)) fail('Elige un mes que ya haya empezado.');
+    const datos = p.datos && typeof p.datos === 'object' ? p.datos : null;
+    if (!datos || datos.periodo !== periodo) fail('No se pudo armar el estado financiero del mes. Vuelve a intentarlo.');
+    const texto = JSON.stringify(datos);
+    if (texto.length > 200_000) fail('El estado financiero es demasiado grande.');
+    const id = `${cid}#${periodo}`;
+    const previo = await get('CierreMes', { id });
+    const compartir = p.compartir === true;
+    const yaCompartido = !!previo?.compartido;
+    await put('CierreMes', {
+      id,
+      condominioId: cid,
+      periodo,
+      datos: texto,
+      compartido: compartir,
+      compartidoEn: compartir ? (previo?.compartidoEn ?? now()) : null,
+      cerradoPor: yo.nombre || yo.email,
+    });
+    if (compartir && !yaCompartido) await avisarBalance(cid, periodo);
+    return { ok: true, avisados: compartir && !yaCompartido };
+  },
+
+  // Compartir o dejar de compartir un mes ya cerrado
+  async 'finanzas.compartirMes'(p, yo) {
+    exigir(yo, 'finanzas', 'editar');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const c = await get('CierreMes', { id: `${cid}#${str(p.periodo, 7)}` });
+    if (!c) fail('Primero cierra el mes.');
+    const compartir = p.compartir === true;
+    await update('CierreMes', { id: c!.id }, { compartido: compartir, compartidoEn: compartir ? (c!.compartidoEn ?? now()) : c!.compartidoEn ?? null });
+    if (compartir && !c!.compartidoEn) await avisarBalance(cid, c!.periodo);
+    return { ok: true };
+  },
+
   async 'finanzas.contactos'(p, yo) {
     const c = await condominioFinanzas(p, yo, 'ver');
     const perfiles = await byIndex('Perfil', 'byCondominio', 'condominioId', c.id);
@@ -2726,14 +2808,68 @@ const acciones: Record<string, (p: Item, yo: Yo) => Promise<unknown>> = {
       (r) => String(r.fecha).startsWith(mes) && r.destino === destino && (!proveedorId || r.proveedorId === proveedorId),
     );
     const firmar = (k: string) => getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.BUCKET!, Key: k }), { expiresIn: 3600 });
+    // Reportes para residentes: cuántos departamentos (con residentes registrados) y residentes lo abrieron
+    const conResidentes = destino === 'RESIDENTES' ? await unidadesConResidentes(cid) : null;
     return Promise.all(
       items
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-        .map(async ({ __typename, ...r }) => ({
-          ...r,
-          fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await firmar(f.path) }))),
-        })),
+        .map(async ({ __typename, ...r }) => {
+          let vistas = null;
+          if (conResidentes) {
+            const v = await byIndex('VistaReporte', 'byReporte', 'reporteId', r.id);
+            vistas = { unidades: new Set(v.map((x) => x.unidadId).filter((u) => conResidentes.has(u))).size, residentes: v.length, total: conResidentes.size };
+          }
+          return {
+            ...r,
+            vistas,
+            fotos: await Promise.all(listaJson<FotoReporte>(r.fotos).map(async (f) => ({ descripcion: f.descripcion, url: await firmar(f.path) }))),
+          };
+        }),
     );
+  },
+
+  // Reporte mensual de vistas de los trabajos (PDF en el panel): por reporte (folio) qué departamentos lo vieron y
+  // cuáles no, y por departamento cuántos reportes del mes abrió.
+  async 'proveedores.vistasMes'(p, yo) {
+    exigir(yo, 'proveedores', 'ver');
+    const cid = str(p.condominioId, 64);
+    exigirCondo(yo, cid);
+    const mes = /^\d{4}-\d{2}$/.test(p.mes) ? p.mes : hoyMX().slice(0, 7);
+    const [condo, reportes, vistas, unidades, conResidentes] = await Promise.all([
+      get('Condominio', { id: cid }),
+      byIndex('ReporteProveedor', 'byCondominio', 'condominioId', cid),
+      byIndex('VistaReporte', 'byCondominio', 'condominioId', cid),
+      byIndex('Unidad', 'byCondominio', 'condominioId', cid),
+      unidadesConResidentes(cid),
+    ]);
+    const etiqueta = new Map(unidades.map((u) => [u.id as string, String(u.etiqueta)]));
+    const orden = (a: string, b: string) => a.localeCompare(b, 'es', { numeric: true });
+    const activas = [...conResidentes].map((id) => etiqueta.get(id) ?? '').filter(Boolean).sort(orden);
+    const delMes = reportes
+      .filter((r) => r.destino === 'RESIDENTES' && String(r.fecha).startsWith(mes))
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    const porReporte = new Map<string, Set<string>>();
+    for (const v of vistas) if (conResidentes.has(v.unidadId)) (porReporte.get(v.reporteId) ?? porReporte.set(v.reporteId, new Set()).get(v.reporteId)!).add(etiqueta.get(v.unidadId) ?? '');
+    const filas = delMes.map((r) => {
+      const vieron = [...(porReporte.get(r.id) ?? [])].filter(Boolean).sort(orden);
+      const set = new Set(vieron);
+      return {
+        folio: r.folio ?? '—',
+        fecha: r.fecha,
+        servicio: servicioDe(r.tipo, r.tipoOtro),
+        proveedor: r.nombrePublico || r.empresa || r.proveedorNombre || 'Proveedor',
+        vieron,
+        noVieron: activas.filter((u) => !set.has(u)),
+      };
+    });
+    return {
+      condominio: condo?.nombre ?? '',
+      mes,
+      totalUnidades: activas.length,
+      sinResidentes: unidades.length - activas.length,
+      reportes: filas,
+      unidades: activas.map((u) => ({ etiqueta: u, vistos: filas.filter((f) => f.vieron.includes(u)).length, total: filas.length })),
+    };
   },
 
   // Asistencia de proveedores (check-in y check-out con foto) de un mes (AAAA-MM) o de los últimos `dias` días.

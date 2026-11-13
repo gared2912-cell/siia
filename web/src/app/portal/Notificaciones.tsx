@@ -44,7 +44,8 @@ export const useAvisos = () => useContext(AvisosCtx);
 
 /** Sección del portal donde se atiende cada tipo de aviso. Sin sección, el aviso se muestra completo. */
 const DESTINO: Record<string, { key: string; label: string }> = {
-  PAGO: { key: 'finanzas', label: 'Ir a Finanzas' },
+  PAGO: { key: 'finanzas', label: 'Ir a Mis finanzas' },
+  BALANCE: { key: 'balances', label: 'Ver el balance' },
   VISITA: { key: 'visitas', label: 'Ir a Visitas' },
   ACCESO: { key: 'visitas', label: 'Autorizar en Visitas' },
   RESERVA: { key: 'amenidades', label: 'Ir a Reservas' },
@@ -52,6 +53,9 @@ const DESTINO: Record<string, { key: string; label: string }> = {
   MANTENIMIENTO: { key: 'mantenimientos', label: 'Ir a Mantenimientos' },
   TRABAJO: { key: 'mantenimientos/trabajos', label: 'Ver el trabajo' },
   MASCOTA: { key: 'mascotas', label: 'Ir a Mascotas' },
+  MASCOTA_PERDIDA: { key: 'mascotas', label: 'Ver la mascota' },
+  MASCOTA_VISTA: { key: 'mascotas', label: 'Ver dónde la vieron' },
+  MASCOTA_APARECIO: { key: 'mascotas', label: 'Ir a Mascotas' },
   COMUNICADO: { key: 'comunicados', label: 'Ir a Comunicados' },
   ENCUESTA: { key: 'comunicados', label: 'Ir a Comunicados' },
 };
@@ -68,6 +72,10 @@ export const ICONO_AVISO: Record<string, string> = {
   TRABAJO: 'tools',
   PROVEEDOR: 'login',
   MASCOTA: 'paw',
+  BALANCE: 'chart',
+  MASCOTA_PERDIDA: 'paw',
+  MASCOTA_VISTA: 'paw',
+  MASCOTA_APARECIO: 'paw',
   COMUNICADO: 'megaphone',
   ENCUESTA: 'vote',
 };

@@ -55,7 +55,7 @@ export function Finanzas({ perfil }: ModProps) {
 
   return (
     <div className="stack">
-      <PageHead icon="money" title="Finanzas" sub="Estado de cuenta de tu unidad, pagos y recibos.">
+      <PageHead icon="money" title="Mis finanzas" sub="Estado de cuenta de tu unidad, pagos y recibos.">
         <button className="btn-app secondary" onClick={historial}>
           <Icon name="download" />
           Historial de pagos (PDF)

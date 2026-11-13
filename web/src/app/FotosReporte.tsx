@@ -11,6 +11,8 @@ export function TarjetaReporteFotos({
   etiqueta,
   descripcion,
   fotos,
+  onAbrir,
+  pie,
 }: {
   titulo: string;
   /** Fecha, condominio, proveedor… */
@@ -19,12 +21,23 @@ export function TarjetaReporteFotos({
   etiqueta?: ReactNode;
   descripcion?: string | null;
   fotos: Foto[];
+  /** Al abrir el reporte completo (el portal lo registra como visto). */
+  onAbrir?: () => void;
+  /** Nota al final del reporte completo (p. ej. cuántos residentes lo vieron). */
+  pie?: ReactNode;
 }) {
   const [abierto, setAbierto] = useState(false);
   const portada = fotos.find((f) => f.url)?.url;
   return (
     <>
-      <button type="button" className="panel reporte-tarjeta" onClick={() => setAbierto(true)}>
+      <button
+        type="button"
+        className="panel reporte-tarjeta"
+        onClick={() => {
+          setAbierto(true);
+          onAbrir?.();
+        }}
+      >
         <span className="reporte-portada">
           {portada ? <img src={portada} alt="" loading="lazy" /> : <Icon name="camera" />}
           {fotos.length > 1 && <span className="reporte-cuenta">{fotos.length} fotos</span>}
@@ -42,7 +55,7 @@ export function TarjetaReporteFotos({
           </span>
         </span>
       </button>
-      {abierto && <ReporteCompleto titulo={titulo} detalle={detalle} etiqueta={etiqueta} descripcion={descripcion} fotos={fotos} onClose={() => setAbierto(false)} />}
+      {abierto && <ReporteCompleto titulo={titulo} detalle={detalle} etiqueta={etiqueta} descripcion={descripcion} fotos={fotos} pie={pie} onClose={() => setAbierto(false)} />}
     </>
   );
 }
@@ -53,6 +66,7 @@ function ReporteCompleto({
   etiqueta,
   descripcion,
   fotos,
+  pie,
   onClose,
 }: {
   titulo: string;
@@ -60,6 +74,7 @@ function ReporteCompleto({
   etiqueta?: ReactNode;
   descripcion?: string | null;
   fotos: Foto[];
+  pie?: ReactNode;
   onClose: () => void;
 }) {
   const [ver, setVer] = useState<string | null>(null);
@@ -86,6 +101,7 @@ function ReporteCompleto({
             {f.descripcion && <figcaption>{f.descripcion}</figcaption>}
           </figure>
         ))}
+        {pie}
       </div>
       {ver && <VerImagen src={ver} alt="Foto del reporte" onClose={() => setVer(null)} />}
     </Modal>

@@ -273,6 +273,22 @@ const schema = a
       .secondaryIndexes((i) => [i('condominioId').name('byCondominio').queryField('saldosPorCondominio')])
       .authorization(admin),
 
+    // Cierre de mes: la administración guarda el estado financiero del mes (foto de lo que se ve en el Excel «Resumen»)
+    // y decide si lo comparte con los residentes (Finanzas del condominio). id = <condominioId>#<AAAA-MM>.
+    CierreMes: a
+      .model({
+        firma: a.json(),
+        firmaCambio: a.json(),
+        condominioId: a.id().required(),
+        periodo: a.string().required(),
+        datos: a.json(), // estado financiero (src/app/estadoFinanciero.ts)
+        compartido: a.boolean(),
+        compartidoEn: a.datetime(),
+        cerradoPor: a.string(),
+      })
+      .secondaryIndexes((i) => [i('condominioId').sortKeys(['periodo']).name('byCondominio').queryField('cierresPorCondominio')])
+      .authorization(admin),
+
     Comunicado: a
       .model({
         // Firma del administrador (o «SIIA (automático)»): { id, nombre, email, rol, en }. Ver shared/firma.ts.
@@ -523,6 +539,8 @@ const schema = a
         estado: a.enum(['PENDIENTE', 'APROBADA', 'RECHAZADA']),
         rechazadaEn: a.datetime(), // al rechazar; se borra sola DIAS_RECHAZADA días después (shared/mascotas.ts)
         extraviada: a.boolean(),
+        extraviadaEn: a.datetime(), // desde cuándo está extraviada (los avistamientos de este extravío)
+        avistamientos: a.json(), // [{ id, en, quien, unidad, donde, nota, fotoPath }] (vecinos y caseta que la vieron)
         notas: a.string(),
       })
       .secondaryIndexes((i) => [
@@ -592,10 +610,27 @@ const schema = a
         fecha: a.date().required(),
         fotos: a.json(), // [{ path, descripcion }]
         nombrePublico: a.string(), // como lo ven los residentes
+        folio: a.string(), // RP-00001, consecutivo por condominio (Condominio.reporteSeq)
       })
       .secondaryIndexes((i) => [
         i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('reportesProveedorPorCondominio'),
         i('proveedorId').sortKeys(['fecha']).name('byProveedor').queryField('reportesPorProveedor'),
+      ])
+      .authorization(admin),
+
+    // Un residente abrió un reporte de proveedor para residentes (Mantenimientos › Trabajos realizados).
+    // id = <reporteId>#<userId>: una sola vista por residente. La administración ve cuántos departamentos lo vieron.
+    VistaReporte: a
+      .model({
+        reporteId: a.id().required(),
+        condominioId: a.id().required(),
+        unidadId: a.id().required(),
+        userId: a.id().required(),
+        fecha: a.date().required(), // fecha del reporte (para el reporte mensual)
+      })
+      .secondaryIndexes((i) => [
+        i('reporteId').name('byReporte').queryField('vistasPorReporte'),
+        i('condominioId').sortKeys(['fecha']).name('byCondominio').queryField('vistasReportePorCondominio'),
       ])
       .authorization(admin),
 

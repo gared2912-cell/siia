@@ -1,7 +1,7 @@
 // Finanzas › Egresos (gastos del condominio con su evidencia) y Finanzas › Balance mensual.
 import { useState, type ReactNode } from 'react';
 import { adminCall, type Schema } from '../api';
-import { Acciones, Datos, Empty, Field, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, hoy, money, periodoActual, useAction } from '../ui';
+import { Acciones, Badge, Datos, Empty, Field, Icon, Modal, Tarjeta, TarjetaIcono, Tarjetas, fecha, fechaHora, hoy, money, periodoActual, useAction, useLoad } from '../ui';
 import { Firma } from './Firma';
 import { ElegirArchivo } from '../ElegirArchivo';
 import { useAdmin } from './AdminApp';
@@ -410,6 +410,10 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
       });
     }, 'Proyección anual descargada');
   const cuotas = b.pctCorriente + b.pctRecuperacion > 0;
+  // Cierre de mes: guarda el estado financiero y, si se comparte, los residentes lo ven en «Finanzas del condominio».
+  const cierres = useLoad(() => adminCall<Cierre[]>('finanzas.cierres', { condominioId: condo!.id }), [condo!.id]);
+  const cierre = cierres.data?.find((c) => c.periodo === mes);
+  const [cerrar, setCerrar] = useState(false);
 
   return (
     <>
@@ -434,6 +438,40 @@ export function BalanceMensual({ datos, reload }: { datos: DatosFinanzas; reload
           </div>
         </div>
         <Mes value={mes} onChange={setMes} />
+        <div className="cierre-mes">
+          <div>
+            {cierre ? (
+              <>
+                <Badge estado={cierre.compartido ? 'APROBADO' : 'PROGRAMADA'}>{cierre.compartido ? 'Cerrado y compartido' : 'Cerrado, sin compartir'}</Badge>
+                <span className="small muted">
+                  {' '}
+                  {fechaHora(cierre.cerradoEn)}
+                  {cierre.cerradoPor ? ` · ${cierre.cerradoPor}` : ''}
+                </span>
+              </>
+            ) : (
+              <span className="small muted">Este mes aún no se cierra.</span>
+            )}
+          </div>
+          {gestiona && mes <= periodoActual() && (
+            <button className="btn-app sm" onClick={() => setCerrar(true)}>
+              <Icon name="check" />
+              {cierre ? 'Actualizar cierre' : 'Cierre de mes'}
+            </button>
+          )}
+        </div>
+        {cerrar && (
+          <CerrarMes
+            mes={mes}
+            cierre={cierre}
+            datos={datos}
+            onClose={() => setCerrar(false)}
+            onDone={() => {
+              setCerrar(false);
+              cierres.reload(true);
+            }}
+          />
+        )}
         <div className="grid-cards" style={{ marginTop: 14 }}>
           <div className="stat">
             <div className="stat-label">Saldo inicial</div>
@@ -694,3 +732,63 @@ function EditarSaldo({ periodo, actual, capturado, nota, onClose, onDone }: { pe
   );
 }
 
+
+type Cierre = { periodo: string; compartido: boolean; compartidoEn: string | null; cerradoPor: string | null; cerradoEn: string };
+
+/** Cierre de mes: guarda el estado financiero del mes y pregunta si se comparte con los residentes. */
+function CerrarMes({ mes, cierre, datos, onClose, onDone }: { mes: string; cierre?: Cierre; datos: DatosFinanzas; onClose: () => void; onDone: () => void }) {
+  const { condo, unidades } = useAdmin();
+  const { run, busy } = useAction();
+  const enCurso = mes === periodoActual();
+  const guardar = (compartir: boolean) =>
+    run(
+      async () => {
+        const { armarEstado } = await import('./cierreMes');
+        const estado = armarEstado({ condominio: condo!.nombre, periodo: mes, datos, unidades, hoy: hoy() });
+        await adminCall('finanzas.cerrarMes', { condominioId: condo!.id, periodo: mes, compartir, datos: estado });
+        onDone();
+      },
+      compartir
+        ? cierre?.compartido
+          ? `Balance de ${nombreMes(mes).toLowerCase()} actualizado para los residentes`
+          : `Mes cerrado. Avisamos a los residentes que ya está disponible el balance de ${nombreMes(mes).toLowerCase()}.`
+        : `Mes cerrado sin compartir con los residentes`,
+    );
+  return (
+    <Modal title={`${cierre ? 'Actualizar cierre' : 'Cierre'} de ${nombreMes(mes).toLowerCase()}`} onClose={onClose}>
+      <div className="stack">
+        <p style={{ margin: 0 }}>
+          Se guarda el <strong>estado financiero de {nombreMes(mes).toLowerCase()}</strong> tal como está ahora: ingresos, egresos, estado de resultados, cobranza y
+          gráficas (la hoja «Resumen» del Excel).
+        </p>
+        {enCurso && (
+          <div className="alert">
+            <strong>Ojo:</strong> {nombreMes(mes).toLowerCase()} aún no termina. Si después registras más movimientos, vuelve a cerrarlo para actualizarlo.
+          </div>
+        )}
+        {cierre && (
+          <p className="small muted" style={{ margin: 0 }}>
+            Ya se había cerrado el {fechaHora(cierre.cerradoEn)}. Al actualizarlo se reemplaza con los números de hoy.
+          </p>
+        )}
+        <p className="aviso-positivo-titulo" style={{ textAlign: 'center' }}>
+          ¿Quieres compartir el balance de {nombreMes(mes).toLowerCase()} con los residentes?
+        </p>
+        <p className="small muted" style={{ margin: 0, textAlign: 'center' }}>
+          {cierre?.compartido
+            ? 'Ya lo ven en «Finanzas del condominio». Si eliges no compartir, dejarán de verlo.'
+            : 'Si dices que sí, lo verán y podrán descargarlo en «Finanzas del condominio», y les llegará una notificación.'}
+        </p>
+        <div className="aviso-positivo-botones">
+          <button className="btn-app secondary" disabled={busy} onClick={() => guardar(false)}>
+            {cierre?.compartido ? 'Dejar de compartir' : 'No, solo cerrar'}
+          </button>
+          <button className="btn-app" disabled={busy} onClick={() => guardar(true)}>
+            <Icon name="check" />
+            {busy ? 'Guardando…' : 'Sí, compartir'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

@@ -402,13 +402,14 @@ export function Archivo({
   thumb?: boolean;
   /** Foto a todo lo ancho; al tocarla se ve en pantalla completa. */
   grande?: boolean;
-  origen?: { model: 'Pago' | 'Incidente' | 'Mascota'; id: string };
+  /** Archivo de un registro (el panel pide la URL firmada a admin-api); `avistamiento`: foto de un «La vi» de esa mascota. */
+  origen?: { model: 'Pago' | 'Incidente' | 'Mascota'; id: string; avistamiento?: string };
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [ampliada, setAmpliada] = useState(false);
   useEffect(() => {
     let vivo = true;
-    if (path) (origen ? urlArchivoAdmin(origen.model, origen.id) : urlArchivo(path)).then((u) => vivo && setUrl(u)).catch(() => undefined);
+    if (path) (origen ? urlArchivoAdmin(origen.model, origen.id, origen.avistamiento) : urlArchivo(path)).then((u) => vivo && setUrl(u)).catch(() => undefined);
     return () => {
       vivo = false;
     };

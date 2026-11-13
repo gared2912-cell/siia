@@ -18,6 +18,7 @@ type Resumen = {
 
 const DESTINO: Record<string, string> = {
   finanzas: 'finanzas',
+  balances: 'balances',
   visitas: 'visitas',
   amenidades: 'amenidades',
   incidentes: 'incidentes',
@@ -101,7 +102,17 @@ export function Inicio({ perfil, go, has }: ModProps) {
         <section className="panel">
           <h2>Servicios de tu condominio</h2>
           <div style={{ display: 'grid', gap: 10 }}>
-            {MODULOS.filter((m) => has(m.key)).map((m) => (
+            {MODULOS.filter((m) => has(m.key))
+              // Finanzas: las del residente («Mis finanzas») y el balance mensual del condominio
+              .flatMap((m) =>
+                m.key === 'finanzas'
+                  ? [
+                      { ...m, label: 'Mis finanzas', desc: `Estado de cuenta, pagos y recibos de ${perfil.unidad?.etiqueta ?? 'tu unidad'}` },
+                      { key: 'balances', label: 'Finanzas del condominio', icon: 'chart', desc: 'Balance mensual que comparte la administración' },
+                    ]
+                  : [m],
+              )
+              .map((m) => (
               <button key={m.key} className="tile" onClick={() => go(DESTINO[m.key])}>
                 <span className="tile-icon">
                   <Icon name={m.icon} />

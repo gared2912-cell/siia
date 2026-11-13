@@ -9,6 +9,7 @@ import { BotonesAlta, Contrasena, avisoAlta, conCorreo } from './Residentes';
 import { TarjetaReporte } from '../proveedores/ProveedoresApp';
 import { ETIQUETA_OTRO, OTRO_SERVICIO, SERVICIOS_PROVEEDOR, type DestinoReporte, type ReporteProveedor } from '../../../amplify/functions/shared/proveedores';
 import type { Schema } from '../api';
+import type { VistasMes } from '../vistasReportesPdf';
 
 type Perfil = Schema['Perfil']['type'];
 type Proveedor = Perfil & { cuenta?: string | null };
@@ -56,7 +57,17 @@ export function ProveedoresAdmin({ inicio }: { inicio?: 'asistencia' } = {}) {
 
 // ---------- Reportes por proveedor y mes ----------
 function Reportes({ proveedores }: { proveedores: Proveedor[] }) {
-  const { condo } = useAdmin();
+  const { condo, firmaReporte } = useAdmin();
+  const { run, busy } = useAction();
+  // Reporte mensual de vistas (PDF): por folio, qué departamentos lo vieron y cuáles no
+  const descargarVistas = () =>
+    run(async () => {
+      const [d, { descargarVistas: descargar }] = await Promise.all([
+        adminCall<VistasMes>('proveedores.vistasMes', { condominioId: condo!.id, mes }),
+        import('../vistasReportesPdf'),
+      ]);
+      await descargar(d, firmaReporte);
+    }, 'Reporte de vistas descargado');
   const [mes, setMes] = useState(hoy().slice(0, 7));
   const [proveedorId, setProveedorId] = useState('');
   const [destino, setDestino] = useState<DestinoReporte>('ADMIN');
@@ -93,6 +104,17 @@ function Reportes({ proveedores }: { proveedores: Proveedor[] }) {
             ]}
           />
         </div>
+        {destino === 'RESIDENTES' && (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn-app secondary" disabled={busy} onClick={descargarVistas}>
+              <Icon name="download" />
+              {busy ? 'Generando…' : 'Reporte de vistas del mes (PDF)'}
+            </button>
+            <p className="small muted" style={{ margin: '6px 0 0' }}>
+              Por folio: qué departamentos vieron cada trabajo y cuáles no, quiénes los revisan más y una gráfica por departamento.
+            </p>
+          </div>
+        )}
       </section>
       {loading && !data ? (
         <Loading />

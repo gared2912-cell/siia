@@ -12,6 +12,7 @@ import { useInsigniaApp } from '../AppMovil';
 import { comprimirImagen, mensajeErrorCamara, pedirCamara } from '../camara';
 import { RegistroVigilancia } from './Vigilancia';
 import { Campana, marcarVisto, useVistos, type ItemCampana } from '../Campana';
+import { FichaExtraviada, type Extraviada } from '../portal/MascotaExtraviada';
 
 const VISTOS_CASETA = 'siia-vistos-caseta';
 
@@ -41,7 +42,7 @@ type Panel = {
   esperadas: V[];
   bitacora: V[];
   unidades: { id: string; etiqueta: string }[];
-  extraviadas: { id: string; nombre: string; especie?: string; raza?: string; color?: string; unidad: string; fotoUrl?: string }[];
+  extraviadas: Extraviada[];
 };
 
 export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
@@ -69,6 +70,14 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
   // «chat/<unidad>» abre esa conversación (campana o notificación push)
   const [base, sub] = cur.split('/');
   const actual = nav.some((n) => n.key === base) ? base : 'escanear';
+  // «mascota/<id>» (notificación push de mascota extraviada) o el aviso rojo de arriba abren su ficha con «La vi»
+  const [buscadaId, setBuscadaId] = useState<string | null>(null);
+  const idBuscada = base === 'mascota' ? sub : buscadaId;
+  const buscada = panel.data?.extraviadas.find((m) => m.id === idBuscada) ?? null;
+  const cerrarBuscada = () => {
+    setBuscadaId(null);
+    if (base === 'mascota') go('escanear');
+  };
 
   // Campana: respuestas de residentes a llegadas sin pase y chats por responder; cada renglón lleva a donde se atiende
   // y, una vez visto, desaparece.
@@ -115,9 +124,28 @@ export default function CasetaApp({ perfil }: { perfil: PerfilResp }) {
       {panel.error && <ErrorBox error={panel.error} retry={panel.reload} />}
       {!!panel.data?.extraviadas.length && (
         <div className="alert error" style={{ marginBottom: 16 }}>
-          <strong>Mascotas extraviadas:</strong>{' '}
-          {panel.data.extraviadas.map((m) => `${m.nombre} (${[m.especie, m.color].filter(Boolean).join(', ')} · ${m.unidad})`).join(' · ')}
+          <strong>Mascotas extraviadas</strong> (toca una para ver su foto y avisar si la viste):
+          <div className="row-actions" style={{ marginTop: 8 }}>
+            {panel.data.extraviadas.map((m) => (
+              <button key={m.id} type="button" className="btn-app sm secondary" onClick={() => setBuscadaId(m.id)}>
+                <Icon name="paw" />
+                {m.nombre} · {[m.especie, m.color].filter(Boolean).join(', ')} · {m.unidad}
+                {m.avistamientos?.length ? ` · vista ${m.avistamientos.length}×` : ''}
+              </button>
+            ))}
+          </div>
         </div>
+      )}
+      {buscada && (
+        <FichaExtraviada
+          m={buscada}
+          accion="caseta.mascotaVista"
+          onClose={cerrarBuscada}
+          onDone={() => {
+            cerrarBuscada();
+            panel.reload(true);
+          }}
+        />
       )}
       <div className="caseta-barra">
         <Lugares e={panel.data?.estacionamiento} />
